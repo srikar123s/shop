@@ -301,6 +301,7 @@ class OrderRepository {
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
+      double newEstimateTotal = 0;
       for (final item in items) {
         final status =
             _statusFromGiven(item.quantityOrdered, item.quantityGiven);
@@ -309,12 +310,14 @@ class OrderRepository {
           item.quantityOrdered,
           item.quantityGiven,
         );
+        newEstimateTotal += item.unitPrice * item.quantityOrdered;
         await txn.update(
           'order_items',
           {
             'quantity_given': item.quantityGiven,
             'status': itemStatusLabel(status),
             'procurement_status': procurement.name,
+            'product_snapshot': item.productSnapshot,
           },
           where: 'id = ?',
           whereArgs: [item.id],
@@ -325,14 +328,22 @@ class OrderRepository {
           .map((e) => _statusFromGiven(e.quantityOrdered, e.quantityGiven))
           .toList();
 
+      final updateData = <String, Object?>{
+        'status': orderStatusLabel(_calculateOrderStatus(statuses)),
+      };
+      if (newEstimateTotal > 0) {
+        updateData['estimate_total'] = newEstimateTotal;
+      }
+
       await txn.update(
         'orders',
-        {'status': orderStatusLabel(_calculateOrderStatus(statuses))},
+        updateData,
         where: 'id = ?',
         whereArgs: [orderId],
       );
     });
   }
+
 
   ItemStatus _statusFromGiven(double ordered, double given) {
     if (given <= 0) {

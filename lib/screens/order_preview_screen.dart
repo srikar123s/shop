@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/l10n/app_localizations.dart';
-import 'package:shop/app_keys.dart';
+
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/services/draft_order_service.dart';
@@ -28,6 +28,7 @@ class OrderPreviewScreen extends StatefulWidget {
 class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   bool _saving = false;
   late final TextEditingController _estimateController;
+  late final List<TextEditingController> _priceControllers;
 
   @override
   void initState() {
@@ -35,6 +36,10 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     _estimateController = TextEditingController(
       text: _calculateEstimate().toStringAsFixed(2),
     );
+    _priceControllers = widget.draftOrder.items.map((item) {
+      final p = item.unitPrice ?? 0;
+      return TextEditingController(text: p > 0 ? p.toStringAsFixed(2) : '');
+    }).toList();
   }
 
   double _calculateEstimate() => widget.draftOrder.items.fold<double>(
@@ -49,8 +54,12 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   @override
   void dispose() {
     _estimateController.dispose();
+    for (final controller in _priceControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
+
 
   Future<void> _saveOrder() async {
     setState(() => _saving = true);
@@ -77,23 +86,23 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     setState(() => _saving = false);
     final orderIdFormatted = '#ORD-${newOrderId.toString().padLeft(4, '0')}';
     
-    final homeContext = rootMessengerKey.currentContext;
+    final draft = widget.draftOrder;
 
     // Immediately navigate back to Home Screen
     Navigator.popUntil(context, (route) => route.isFirst);
 
-    if (homeContext != null && homeContext.mounted) {
-      // Show top floating notification banner on home screen
+    // Trigger top notification after home screen finishes rendering
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       TopNotificationService.showTopNotification(
-        context: homeContext,
         message: 'Order $orderIdFormatted created successfully!',
         actionLabel: 'SHARE',
         onAction: () {
-          ShareService.shareDraftEstimate(widget.draftOrder, totalOverride: estimate);
+          ShareService.shareDraftEstimate(draft, totalOverride: estimate);
         },
       );
-    }
+    });
   }
+
 
 
 
@@ -147,9 +156,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                   final item = widget.draftOrder.items[index];
                   final itemUnitPrice = item.unitPrice ?? 0;
                   final itemTotal = itemUnitPrice * item.quantity;
-                  final priceCtrl = TextEditingController(
-                    text: itemUnitPrice > 0 ? itemUnitPrice.toStringAsFixed(2) : '',
-                  );
+                  final priceCtrl = _priceControllers[index];
+
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
@@ -197,13 +205,11 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                     prefixText: '₹ ',
                                   ),
                                   onChanged: (val) {
-                                    final parsed = double.tryParse(val.trim());
-                                    if (parsed != null) {
-                                      setState(() {
-                                        widget.draftOrder.items[index] = item.copyWith(unitPrice: parsed);
-                                        _recalculateEstimate();
-                                      });
-                                    }
+                                    final parsed = double.tryParse(val.trim()) ?? 0.0;
+                                    setState(() {
+                                      widget.draftOrder.items[index] = item.copyWith(unitPrice: parsed);
+                                      _recalculateEstimate();
+                                    });
                                   },
                                 ),
                               ),

@@ -53,7 +53,9 @@ class _ShopAppState extends State<ShopApp> {
     final backupService = BackupService(database);
 
     return MaterialApp(
+      navigatorKey: navigatorKey,
       scaffoldMessengerKey: rootMessengerKey,
+
       title: 'Hardware Shop',
       debugShowCheckedModeBanner: false,
       locale: _locale,

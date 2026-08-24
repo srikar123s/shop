@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:shop/models/customer.dart';
+
 
 enum ItemStatus { given, partial, notGiven }
 
@@ -213,11 +215,30 @@ class OrderItemEntity {
 
   double get quantityPending => quantityOrdered - quantityGiven;
 
+  double get unitPrice {
+    try {
+      final map = jsonDecode(productSnapshot) as Map<String, dynamic>;
+      if (map.containsKey('unitPrice') && map['unitPrice'] != null) {
+        return (map['unitPrice'] as num).toDouble();
+      }
+    } catch (_) {}
+    return 0.0;
+  }
+
   OrderItemEntity copyWith({
     double? quantityGiven,
     ItemStatus? status,
     ProcurementStatus? procurementStatus,
+    double? unitPrice,
   }) {
+    String updatedSnapshot = productSnapshot;
+    if (unitPrice != null) {
+      try {
+        final map = jsonDecode(productSnapshot) as Map<String, dynamic>;
+        map['unitPrice'] = unitPrice;
+        updatedSnapshot = jsonEncode(map);
+      } catch (_) {}
+    }
     return OrderItemEntity(
       id: id,
       orderId: orderId,
@@ -229,13 +250,14 @@ class OrderItemEntity {
       status: status ?? this.status,
       isOtherItem: isOtherItem,
       procurementStatus: procurementStatus ?? this.procurementStatus,
-      productSnapshot: productSnapshot,
+      productSnapshot: updatedSnapshot,
       description: description,
       notes: notes,
       options: options,
     );
   }
 }
+
 
 class OrderItemOptionEntity {
   const OrderItemOptionEntity({

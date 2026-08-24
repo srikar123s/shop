@@ -1,22 +1,31 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shop/app_keys.dart';
 
 class TopNotificationService {
   static OverlayEntry? _currentEntry;
   static Timer? _dismissTimer;
 
   static void showTopNotification({
-    required BuildContext context,
+    BuildContext? context,
     required String message,
     String? actionLabel,
     VoidCallback? onAction,
     Duration duration = const Duration(seconds: 3),
   }) {
     _dismissTimer?.cancel();
-    _currentEntry?.remove();
-    _currentEntry = null;
+    if (_currentEntry != null) {
+      try {
+        _currentEntry!.remove();
+      } catch (_) {}
+      _currentEntry = null;
+    }
 
-    final overlayState = Overlay.of(context, rootOverlay: true);
+    final targetContext = navigatorKey.currentContext ?? context;
+    if (targetContext == null) return;
+
+    final overlayState = Overlay.maybeOf(targetContext, rootOverlay: true);
+    if (overlayState == null) return;
 
     late final OverlayEntry entry;
     entry = OverlayEntry(
@@ -26,14 +35,22 @@ class TopNotificationService {
           actionLabel: actionLabel,
           onAction: () {
             _dismissTimer?.cancel();
-            entry.remove();
-            _currentEntry = null;
+            if (_currentEntry == entry) {
+              try {
+                entry.remove();
+              } catch (_) {}
+              _currentEntry = null;
+            }
             if (onAction != null) onAction();
           },
           onClose: () {
             _dismissTimer?.cancel();
-            entry.remove();
-            _currentEntry = null;
+            if (_currentEntry == entry) {
+              try {
+                entry.remove();
+              } catch (_) {}
+              _currentEntry = null;
+            }
           },
         );
       },
@@ -44,7 +61,9 @@ class TopNotificationService {
 
     _dismissTimer = Timer(duration, () {
       if (_currentEntry == entry) {
-        entry.remove();
+        try {
+          entry.remove();
+        } catch (_) {}
         _currentEntry = null;
       }
     });

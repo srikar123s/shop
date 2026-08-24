@@ -317,9 +317,41 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               _QtyBadge(label: 'Pending', qty: pending.toDouble(), unit: item.unit, color: pending > 0 ? Colors.deepOrange : Colors.grey),
                             ],
                           ),
+                          const SizedBox(height: 10),
+                          // Price editing row
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Item Total: ₹${(item.unitPrice * item.quantityOrdered).toStringAsFixed(2)}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal),
+                              ),
+                              SizedBox(
+                                width: 130,
+                                child: TextField(
+                                  controller: TextEditingController(
+                                    text: item.unitPrice > 0 ? item.unitPrice.toStringAsFixed(2) : '',
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    labelText: 'Price/Unit ₹',
+                                    prefixText: '₹ ',
+                                  ),
+                                  onChanged: (val) {
+                                    final parsed = double.tryParse(val.trim()) ?? 0.0;
+                                    setState(() {
+                                      _details!.items[index] = item.copyWith(unitPrice: parsed);
+                                    });
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
 
                           const SizedBox(height: 12),
                           // Fulfillment Controls
+
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [

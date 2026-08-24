@@ -177,7 +177,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       customConversions.putIfAbsent(u, () => _defaultConversion(u));
     }
     final steps = <ProductStep>[...?product?.configuration.steps];
-    String? priceError;
+
 
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -207,18 +207,13 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                       controller: price,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                        labelText: 'Base Price * (Mandatory)',
+                      decoration: const InputDecoration(
+                        labelText: 'Base Price (Optional)',
                         prefixText: '₹ ',
-                        hintText: 'Example: 250',
-                        errorText: priceError,
+                        hintText: 'Default price if per-type price not set',
                       ),
-                      onChanged: (_) {
-                        if (priceError != null) {
-                          setSheetState(() => priceError = null);
-                        }
-                      },
                     ),
+
                     const SizedBox(height: 20),
                     const Text('Unit & Conversions (pcs, packets, boxes):',
                         style: TextStyle(fontWeight: FontWeight.w700)),
@@ -379,17 +374,12 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           label: const Text('SAVE PRODUCT'),
                           onPressed: () async {
                             final parsedPrice =
-                                double.tryParse(price.text.trim());
-                            if (parsedPrice == null || parsedPrice <= 0) {
-                              setSheetState(() {
-                                priceError = 'Base price is required and must be > 0';
-                              });
-                              return;
-                            }
+                                double.tryParse(price.text.trim()) ?? 0.0;
                             if (name.text.trim().isEmpty ||
                                 steps.any((step) => step.values.isEmpty)) {
                               return;
                             }
+
                             await widget.productRepository
                                 .upsertProduct(Product(
                               id: product?.id,
