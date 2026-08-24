@@ -41,6 +41,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     setState(() => _loading = true);
     final data = await widget.orderRepository
         .searchOrderSummaries(_searchController.text);
+    if (!mounted) return;
     setState(() {
       _orders = data;
       _loading = false;
@@ -54,7 +55,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final diff = dayStart.difference(orderDay).inDays;
     if (diff == 0) return s.t('today');
     if (diff == 1) return s.t('yesterday');
-    return DateFormat('dd MMM yyyy').format(dt).toUpperCase();
+    return DateFormat('dd MMM yyyy').format(dt);
   }
 
   @override
@@ -69,6 +70,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final customers = groupedOrders.entries.toList()
       ..sort(
           (a, b) => b.value.first.createdAt.compareTo(a.value.first.createdAt));
+
     return Scaffold(
       appBar: AppBar(
         title: Text(s.t('historyTitle')),
@@ -84,7 +86,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 SnackBar(content: Text('${s.t('backupCreatedAt')} $path')),
               );
             },
-            icon: const Icon(Icons.backup),
+            icon: const Icon(Icons.backup_outlined),
           ),
           IconButton(
             tooltip: s.t('restore'),
@@ -103,62 +105,104 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 );
               }
             },
-            icon: const Icon(Icons.restore),
+            icon: const Icon(Icons.restore_outlined),
           ),
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: <Widget>[
             TextField(
               controller: _searchController,
               decoration: InputDecoration(
                 labelText: s.t('searchCustomer'),
+                prefixIcon: const Icon(Icons.search),
                 suffixIcon: IconButton(
-                    onPressed: _load, icon: const Icon(Icons.search)),
+                    onPressed: _load, icon: const Icon(Icons.clear)),
               ),
               onChanged: (_) => _load(),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : ListView.builder(
-                      itemCount: customers.length,
-                      itemBuilder: (context, index) {
-                        final orders = customers[index].value;
-                        final latest = orders.first;
-                        return Card(
-                          child: ListTile(
-                            leading: CircleAvatar(
-                                child: Text(latest.customerName
-                                    .substring(0, 1)
-                                    .toUpperCase())),
-                            title: Text(latest.customerName),
-                            subtitle: Text(
-                                '${orders.length} orders • Last: ${_dateHeading(latest.createdAt, s)}'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => CustomerOrdersScreen(
-                                    customerId: latest.customerId,
-                                    customerName: latest.customerName,
-                                    customerRepository:
-                                        widget.customerRepository,
-                                    productRepository: widget.productRepository,
-                                    orderRepository: widget.orderRepository,
+                  : customers.isEmpty
+                      ? const Center(child: Text('No order history found'))
+                      : ListView.separated(
+                          itemCount: customers.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          itemBuilder: (context, index) {
+                            final orders = customers[index].value;
+                            final latest = orders.first;
+                            final pendingOrders = orders.where((o) => o.status == OrderStatus.pending || o.status == OrderStatus.partiallyCompleted).length;
+
+                            return Card(
+                              elevation: 1,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                leading: CircleAvatar(
+                                  radius: 22,
+                                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                                  child: Text(
+                                    latest.customerName.isNotEmpty ? latest.customerName[0].toUpperCase() : 'C',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
                                   ),
                                 ),
-                              );
-                              await _load();
-                            },
-                          ),
-                        );
-                      },
-                    ),
+                                title: Text(
+                                  latest.customerName,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                                subtitle: Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    '${orders.length} ${orders.length == 1 ? 'order' : 'orders'} • Last: ${_dateHeading(latest.createdAt, s)}',
+                                    style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                                  ),
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (pendingOrders > 0)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.deepOrange.shade100,
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Text(
+                                          '$pendingOrders pending',
+                                          style: TextStyle(
+                                            color: Colors.deepOrange.shade900,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.chevron_right, color: Colors.grey),
+                                  ],
+                                ),
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => CustomerOrdersScreen(
+                                        customerId: latest.customerId,
+                                        customerName: latest.customerName,
+                                        customerRepository: widget.customerRepository,
+                                        productRepository: widget.productRepository,
+                                        orderRepository: widget.orderRepository,
+                                      ),
+                                    ),
+                                  );
+                                  await _load();
+                                },
+                              ),
+                            );
+                          },
+                        ),
             ),
           ],
         ),

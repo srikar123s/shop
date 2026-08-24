@@ -119,6 +119,113 @@ class _CustomerScreenState extends State<CustomerScreen> {
     }
   }
 
+  Future<void> _showEditCustomerDialog(Customer customer) async {
+    final s = AppLocalizations.of(context);
+    final nameCtrl = TextEditingController(text: customer.name);
+    final phoneCtrl = TextEditingController(text: customer.phone ?? '');
+    final addressCtrl = TextEditingController(text: customer.address ?? '');
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Customer'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(labelText: '${s.t('name')} *'),
+                ),
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(labelText: s.t('phone')),
+                ),
+                TextField(
+                  controller: addressCtrl,
+                  decoration: InputDecoration(labelText: s.t('address')),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(s.t('cancel')),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty || customer.id == null) {
+                  return;
+                }
+                await widget.customerRepository.updateCustomer(
+                  id: customer.id!,
+                  name: nameCtrl.text,
+                  phone: phoneCtrl.text,
+                  address: addressCtrl.text,
+                );
+                if (context.mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+              child: Text(s.t('save')),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (updated == true && mounted) {
+      await _loadCustomers();
+      if (_selected?.id == customer.id) {
+        _selected = await widget.customerRepository.getCustomerById(customer.id!);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Customer details updated.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteCustomer(Customer customer) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete ${customer.name}?'),
+        content: const Text(
+          'This will remove this customer record. Past orders will remain in history.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('DELETE'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && customer.id != null && mounted) {
+      await widget.customerRepository.deleteCustomer(customer.id!);
+      if (_selected?.id == customer.id) {
+        _selected = null;
+      }
+      await _loadCustomers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${customer.name} deleted.')),
+        );
+      }
+    }
+  }
+
   Future<void> _enableContacts() async {
     final status =
         await FlutterContacts.permissions.request(PermissionType.read);
@@ -188,6 +295,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
           (contact.displayName ?? '').toLowerCase().contains(query);
     }).toList();
     final totalRows = _customers.length + visibleContacts.length;
+
     return Scaffold(
       appBar: AppBar(title: Text(s.t('newOrderSelectCustomer'))),
       body: Padding(
@@ -245,18 +353,67 @@ class _CustomerScreenState extends State<CustomerScreen> {
                         final customer = _customers[index];
                         final selected = _selected?.id == customer.id;
                         return Card(
+                          color: selected
+                              ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
+                              : null,
                           child: ListTile(
-                            title: Text(customer.name),
+                            onTap: () => setState(() => _selected = customer),
+                            onLongPress: () => _showEditCustomerDialog(customer),
+                            leading: CircleAvatar(
+                              child: Text(
+                                customer.name.isNotEmpty
+                                    ? customer.name[0].toUpperCase()
+                                    : 'C',
+                              ),
+                            ),
+                            title: Text(
+                              customer.name,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
                             subtitle: Text(
                               customer.phone?.isNotEmpty == true
                                   ? customer.phone!
                                   : s.t('phoneNotAdded'),
                             ),
-                            trailing: selected
-                                ? const Icon(Icons.check_circle)
-                                : null,
-                            selected: selected,
-                            onTap: () => setState(() => _selected = customer),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (selected)
+                                  const Icon(Icons.check_circle, color: Colors.green),
+                                PopupMenuButton<String>(
+                                  icon: const Icon(Icons.more_vert),
+                                  onSelected: (value) {
+                                    if (value == 'edit') {
+                                      _showEditCustomerDialog(customer);
+                                    } else if (value == 'delete') {
+                                      _confirmDeleteCustomer(customer);
+                                    }
+                                  },
+                                  itemBuilder: (context) => [
+                                    const PopupMenuItem<String>(
+                                      value: 'edit',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.edit_outlined, size: 18),
+                                          SizedBox(width: 8),
+                                          Text('Edit Customer'),
+                                        ],
+                                      ),
+                                    ),
+                                    const PopupMenuItem<String>(
+                                      value: 'delete',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                          SizedBox(width: 8),
+                                          Text('Delete Customer', style: TextStyle(color: Colors.red)),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       },

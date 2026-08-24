@@ -7,12 +7,12 @@ import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/customer_screen.dart';
 import 'package:shop/screens/history_screen.dart';
+import 'package:shop/screens/order_details_screen.dart';
 import 'package:shop/screens/shop_settings_screen.dart';
-import 'package:shop/screens/customer_orders_screen.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.customerRepository,
@@ -31,6 +31,24 @@ class HomeScreen extends StatelessWidget {
   final ValueChanged<Locale> onLocaleChanged;
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  Color _statusColor(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.completed:
+        return Colors.green;
+      case OrderStatus.partiallyCompleted:
+        return Colors.orange;
+      case OrderStatus.pending:
+        return Colors.red;
+      case OrderStatus.closed:
+        return Colors.blueGrey;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     return Scaffold(
@@ -45,9 +63,9 @@ class HomeScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute<void>(
                   builder: (_) => ShopSettingsScreen(
-                    productRepository: productRepository,
-                    locale: locale,
-                    onLocaleChanged: onLocaleChanged,
+                    productRepository: widget.productRepository,
+                    locale: widget.locale,
+                    onLocaleChanged: widget.onLocaleChanged,
                   ),
                 ),
               );
@@ -72,34 +90,54 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 32),
               LargeActionButton(
                 label: s.t('createOrder'),
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => CustomerScreen(
-                        customerRepository: customerRepository,
-                        productRepository: productRepository,
-                        orderRepository: orderRepository,
+                        customerRepository: widget.customerRepository,
+                        productRepository: widget.productRepository,
+                        orderRepository: widget.orderRepository,
                       ),
                     ),
                   );
+                  setState(() {});
                 },
               ),
               const SizedBox(height: 24),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'RECENT ORDERS',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'RECENT ORDERS',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => HistoryScreen(
+                            orderRepository: widget.orderRepository,
+                            backupService: widget.backupService,
+                            customerRepository: widget.customerRepository,
+                            productRepository: widget.productRepository,
+                          ),
+                        ),
+                      );
+                      setState(() {});
+                    },
+                    child: const Text('View All'),
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
               SizedBox(
-                height: 132,
+                height: 140,
                 child: FutureBuilder<List<OrderSummary>>(
-                  future: orderRepository.searchOrderSummaries(''),
+                  future: widget.orderRepository.searchOrderSummaries(''),
                   builder: (context, snapshot) {
-                    final orders = snapshot.data?.take(3).toList() ??
+                    final orders = snapshot.data?.take(5).toList() ??
                         <OrderSummary>[];
                     if (orders.isEmpty) {
                       return const Center(child: Text('No recent orders'));
@@ -107,28 +145,67 @@ class HomeScreen extends StatelessWidget {
                     return ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: orders.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
                       itemBuilder: (context, index) {
                         final order = orders[index];
                         return SizedBox(
-                          width: 220,
+                          width: 230,
                           child: Card(
-                            child: ListTile(
-                              dense: true,
-                              title: Text(order.customerName),
-                              subtitle: Text(
-                                '${DateFormat('dd MMM, hh:mm a').format(order.createdAt)}\n${order.totalItems} items',
-                              ),
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => CustomerOrdersScreen(
-                                    customerId: order.customerId,
-                                    customerName: order.customerName,
-                                    customerRepository: customerRepository,
-                                    productRepository: productRepository,
-                                    orderRepository: orderRepository,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => OrderDetailsScreen(
+                                      orderId: order.orderId,
+                                      orderRepository: widget.orderRepository,
+                                      customerRepository: widget.customerRepository,
+                                      productRepository: widget.productRepository,
+                                    ),
                                   ),
+                                );
+                                setState(() {});
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          order.formattedOrderId,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 14),
+                                        ),
+                                        Text(
+                                          orderStatusLabel(order.status),
+                                          style: TextStyle(
+                                            color: _statusColor(order.status),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Text(
+                                      order.customerName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15),
+                                    ),
+                                    Text(
+                                      '${DateFormat('dd MMM, hh:mm a').format(order.createdAt)}\n${order.totalItems} items${order.estimateTotal > 0 ? " • ₹${order.estimateTotal.toStringAsFixed(2)}" : ""}',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.grey.shade700),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -142,18 +219,19 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 24),
               LargeActionButton(
                 label: s.t('history'),
-                onTap: () {
-                  Navigator.push(
+                onTap: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => HistoryScreen(
-                        orderRepository: orderRepository,
-                        backupService: backupService,
-                        customerRepository: customerRepository,
-                        productRepository: productRepository,
+                        orderRepository: widget.orderRepository,
+                        backupService: widget.backupService,
+                        customerRepository: widget.customerRepository,
+                        productRepository: widget.productRepository,
                       ),
                     ),
                   );
+                  setState(() {});
                 },
               ),
             ],

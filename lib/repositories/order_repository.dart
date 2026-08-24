@@ -149,6 +149,7 @@ class OrderRepository {
           totalItems: itemRows.length,
           pendingCount: pendingCount,
           status: status,
+          estimateTotal: (row['estimate_total'] as num?)?.toDouble() ?? 0,
         ),
       );
     }
@@ -182,6 +183,16 @@ class OrderRepository {
         orderStatusLabel(OrderStatus.pending),
         orderStatusLabel(OrderStatus.partiallyCompleted),
       ],
+    );
+  }
+
+  Future<void> closeOrder(int orderId) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'orders',
+      {'status': orderStatusLabel(OrderStatus.closed)},
+      where: 'id = ?',
+      whereArgs: <Object?>[orderId],
     );
   }
 

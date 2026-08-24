@@ -185,66 +185,106 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
     final s = AppLocalizations.of(context);
     final keyCtrl = TextEditingController(text: initial?.key ?? '');
     final labelCtrl = TextEditingController(text: initial?.label ?? '');
-    final valuesCtrl = TextEditingController(
-      text: initial?.values.join(', ') ?? '',
-    );
+    final valInputCtrl = TextEditingController();
+    final values = <String>[...?initial?.values];
 
     return showDialog<ProductStep>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(initial == null ? s.t('addStep') : s.t('edit')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              TextField(
-                controller: keyCtrl,
-                decoration: InputDecoration(labelText: s.t('stepKey')),
-              ),
-              TextField(
-                controller: labelCtrl,
-                decoration: InputDecoration(labelText: s.t('stepLabel')),
-              ),
-              TextField(
-                controller: valuesCtrl,
-                decoration: InputDecoration(labelText: s.t('stepValuesCsv')),
-              ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(s.t('cancel')),
-            ),
-            FilledButton(
-              onPressed: () {
-                final key = keyCtrl.text.trim();
-                final label = labelCtrl.text.trim();
-                final values = valuesCtrl.text
-                    .split(',')
-                    .map((e) => e.trim())
-                    .where((e) => e.isNotEmpty)
-                    .toList();
-                if (key.isEmpty || label.isEmpty || values.isEmpty) {
-                  return;
-                }
-                Navigator.pop(
-                  context,
-                  ProductStep(
-                    key: key,
-                    label: label,
-                    type: 'select',
-                    values: values,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            void addVal() {
+              final v = valInputCtrl.text.trim().replaceAll(',', '');
+              if (v.isEmpty) return;
+              setDialogState(() {
+                if (!values.contains(v)) values.add(v);
+                valInputCtrl.clear();
+              });
+            }
+
+            return AlertDialog(
+              title: Text(initial == null ? s.t('addStep') : s.t('edit')),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  TextField(
+                    controller: keyCtrl,
+                    decoration: InputDecoration(labelText: s.t('stepKey')),
                   ),
-                );
-              },
-              child: Text(s.t('save')),
-            ),
-          ],
+                  TextField(
+                    controller: labelCtrl,
+                    decoration: InputDecoration(labelText: s.t('stepLabel')),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: TextField(
+                          controller: valInputCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Add Choice',
+                            hintText: 'Type & press ADD',
+                          ),
+                          onSubmitted: (_) => addVal(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: addVal,
+                        child: const Text('ADD'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: values
+                        .map(
+                          (v) => Chip(
+                            label: Text(v),
+                            onDeleted: () => setDialogState(() => values.remove(v)),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(s.t('cancel')),
+                ),
+                FilledButton(
+                  onPressed: values.isEmpty
+                      ? null
+                      : () {
+                          final key = keyCtrl.text.trim();
+                          final label = labelCtrl.text.trim();
+                          if (key.isEmpty || label.isEmpty) {
+                            return;
+                          }
+                          Navigator.pop(
+                            context,
+                            ProductStep(
+                              key: key,
+                              label: label,
+                              type: 'select',
+                              values: values,
+                            ),
+                          );
+                        },
+                  child: Text(s.t('save')),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
+
 
   @override
   Widget build(BuildContext context) {

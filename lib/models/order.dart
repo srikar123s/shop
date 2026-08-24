@@ -31,13 +31,33 @@ String orderStatusLabel(OrderStatus status) {
 }
 
 class DraftOrder {
-  DraftOrder(
-      {required this.customer, List<DraftOrderItem>? items, this.estimateTotal})
-      : items = items ?? <DraftOrderItem>[];
+  DraftOrder({
+    required this.customer,
+    List<DraftOrderItem>? items,
+    this.estimateTotal,
+  }) : items = items ?? <DraftOrderItem>[];
 
   final Customer customer;
   final List<DraftOrderItem> items;
   final double? estimateTotal;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'customer': customer.toMap(),
+      'items': items.map((e) => e.toMap()).toList(),
+      'estimateTotal': estimateTotal,
+    };
+  }
+
+  factory DraftOrder.fromMap(Map<String, dynamic> map) {
+    return DraftOrder(
+      customer: Customer.fromMap(map['customer'] as Map<String, dynamic>),
+      items: (map['items'] as List<dynamic>? ?? [])
+          .map((e) => DraftOrderItem.fromMap(e as Map<String, dynamic>))
+          .toList(),
+      estimateTotal: (map['estimateTotal'] as num?)?.toDouble(),
+    );
+  }
 }
 
 class DraftOrderItem {
@@ -64,6 +84,63 @@ class DraftOrderItem {
   final String? notes;
   final double? unitPrice;
   final double unitFactor;
+
+  DraftOrderItem copyWith({
+    int? productId,
+    String? itemName,
+    Map<String, String>? options,
+    double? quantity,
+    String? unit,
+    bool? isOtherItem,
+    String? description,
+    String? notes,
+    double? unitPrice,
+    double? unitFactor,
+  }) {
+    return DraftOrderItem(
+      productId: productId ?? this.productId,
+      itemName: itemName ?? this.itemName,
+      options: options ?? this.options,
+      quantity: quantity ?? this.quantity,
+      unit: unit ?? this.unit,
+      isOtherItem: isOtherItem ?? this.isOtherItem,
+      description: description ?? this.description,
+      notes: notes ?? this.notes,
+      unitPrice: unitPrice ?? this.unitPrice,
+      unitFactor: unitFactor ?? this.unitFactor,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'productId': productId,
+      'itemName': itemName,
+      'options': options,
+      'quantity': quantity,
+      'unit': unit,
+      'isOtherItem': isOtherItem,
+      'description': description,
+      'notes': notes,
+      'unitPrice': unitPrice,
+      'unitFactor': unitFactor,
+    };
+  }
+
+  factory DraftOrderItem.fromMap(Map<String, dynamic> map) {
+    return DraftOrderItem(
+      productId: map['productId'] as int?,
+      itemName: map['itemName'] as String,
+      options: (map['options'] as Map<dynamic, dynamic>? ?? {})
+          .map((k, v) => MapEntry(k.toString(), v.toString())),
+      quantity: (map['quantity'] as num).toDouble(),
+      unit: map['unit'] as String,
+      isOtherItem: map['isOtherItem'] as bool? ?? false,
+      description: map['description'] as String?,
+      notes: map['notes'] as String?,
+      unitPrice: (map['unitPrice'] as num?)?.toDouble(),
+      unitFactor: (map['unitFactor'] as num?)?.toDouble() ?? 1.0,
+    );
+  }
 }
 
 class OrderEntity {
@@ -85,6 +162,9 @@ class OrderEntity {
   final String? notes;
   final double estimateTotal;
 
+  String get formattedOrderId =>
+      id != null ? '#ORD-${id.toString().padLeft(4, '0')}' : '#ORD-NEW';
+
   Map<String, Object?> toMap() {
     return {
       'id': id,
@@ -93,6 +173,7 @@ class OrderEntity {
       'created_at': createdAt.toIso8601String(),
       'status': orderStatusLabel(status),
       'notes': notes,
+      'estimate_total': estimateTotal,
     };
   }
 }
@@ -179,6 +260,7 @@ class OrderSummary {
     required this.totalItems,
     required this.pendingCount,
     required this.status,
+    this.estimateTotal = 0,
   });
 
   final int orderId;
@@ -188,6 +270,9 @@ class OrderSummary {
   final int totalItems;
   final int pendingCount;
   final OrderStatus status;
+  final double estimateTotal;
+
+  String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
 }
 
 class OrderDetails {

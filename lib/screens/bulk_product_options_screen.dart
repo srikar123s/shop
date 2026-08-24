@@ -90,18 +90,21 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     final items = <DraftOrderItem>[];
     if (_groupIndex != null) {
       for (final group in _selectedGroups) {
-        for (final line in _groupLines[group] ?? <_BulkLine>[]) {
-          if (line.quantity <= 0) continue;
+        final variants = _steps.isEmpty ? <String>[] : _steps[_variantIndex].values;
+        for (final variant in variants) {
+          final key = '$group::$variant';
+          final quantity = _variantQuantities[key] ?? 0;
+          if (quantity <= 0) continue;
           final options = <String, String>{
             ..._prefixSelections,
             _steps[_groupIndex!].key: group,
-            _steps[_variantIndex].key: line.variant,
+            _steps[_variantIndex].key: variant,
           };
           items.add(DraftOrderItem(
             productId: widget.product.id,
             itemName: widget.product.name,
             options: options,
-            quantity: line.quantity,
+            quantity: quantity,
             unit: _unit,
             unitPrice: widget.product.configuration.basePrice * factor,
             unitFactor: factor,
@@ -128,6 +131,7 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     }
     return items;
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -284,64 +288,61 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     List<String> variants,
     AppLocalizations s,
   ) {
-    final lines = _groupLines[group] ?? <_BulkLine>[];
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(s.catalog(group),
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            ...lines.asMap().entries.map(
-                  (entry) => Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: entry.value.variant,
-                          isDense: true,
-                          decoration: InputDecoration(
-                              labelText: s.catalog(_variantLabel)),
-                          items: variants
-                              .map((value) => DropdownMenuItem<String>(
-                                    value: value,
-                                    child: Text(s.catalog(value)),
-                                  ))
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => entry.value.variant = value);
-                            }
+            Text(
+              '${s.catalog(group)} Variants',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            ...variants.map((v) {
+              final key = '$group::$v';
+              final quantity = _variantQuantities[key] ?? 0;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            s.catalog(v),
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                          ),
+                        ),
+                        QuantitySelector(
+                          value: quantity,
+                          min: 0,
+                          onChanged: (val) {
+                            setState(() {
+                              _variantQuantities[key] = val;
+                            });
                           },
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 132,
-                        child: QuantitySelector(
-                          value: entry.value.quantity,
-                          min: 0,
-                          onChanged: (value) =>
-                              setState(() => entry.value.quantity = value),
-                        ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    QuantityPresets(
+                      onSelected: (val) {
+                        setState(() {
+                          _variantQuantities[key] = val;
+                        });
+                      },
+                    ),
+                    const Divider(height: 12),
+                  ],
                 ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () =>
-                    setState(() => lines.add(_BulkLine(variants.first))),
-                icon: const Icon(Icons.add, size: 18),
-                label: Text(s.t('anotherVariant')),
-              ),
-            ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
+
 }

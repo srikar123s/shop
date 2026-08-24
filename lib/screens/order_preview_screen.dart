@@ -4,6 +4,8 @@ import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/app_keys.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
+import 'package:shop/services/draft_order_service.dart';
+import 'package:shop/services/share_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
 class OrderPreviewScreen extends StatefulWidget {
@@ -39,6 +41,10 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         (sum, item) => sum + (item.unitPrice ?? 0) * item.quantity,
       );
 
+  void _recalculateEstimate() {
+    _estimateController.text = _calculateEstimate().toStringAsFixed(2);
+  }
+
   @override
   void dispose() {
     _estimateController.dispose();
@@ -49,12 +55,15 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     setState(() => _saving = true);
     final estimate = double.tryParse(_estimateController.text.trim()) ??
         _calculateEstimate();
+    int newOrderId = 0;
     if (widget.existingOrderId == null) {
-      await widget.orderRepository.createOrder(
+      newOrderId = await widget.orderRepository.createOrder(
         widget.draftOrder,
         estimateTotal: estimate,
       );
+      await DraftOrderService().clearDraft();
     } else {
+      newOrderId = widget.existingOrderId!;
       await widget.orderRepository.addItemsToOrder(
         orderId: widget.existingOrderId!,
         items: widget.draftOrder.items,
@@ -65,18 +74,45 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       return;
     }
     setState(() => _saving = false);
-    final s = AppLocalizations.of(context);
+    final orderIdFormatted = '#ORD-${newOrderId.toString().padLeft(4, '0')}';
+    
+    // Immediately navigate back to Home Screen
     Navigator.popUntil(context, (route) => route.isFirst);
+    
+    // Show notification toast / snackbar on home screen
     rootMessengerKey.currentState?.showSnackBar(
-      SnackBar(content: Text(s.t('orderSaved'))),
+      SnackBar(
+        content: Text('Order $orderIdFormatted created successfully!'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'SHARE',
+          onPressed: () {
+            ShareService.shareDraftEstimate(widget.draftOrder, totalOverride: estimate);
+          },
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
+    final currentEstimate = double.tryParse(_estimateController.text.trim()) ?? _calculateEstimate();
+
     return Scaffold(
-      appBar: AppBar(title: Text(s.t('orderPreview'))),
+      appBar: AppBar(
+        title: Text(s.t('orderPreview')),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Share Estimate',
+            icon: const Icon(Icons.share),
+            onPressed: () => ShareService.shareDraftEstimate(
+              widget.draftOrder,
+              totalOverride: currentEstimate,
+            ),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -96,7 +132,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
               decoration: const InputDecoration(
                 labelText: 'Estimated total (editable)',
                 prefixText: '₹ ',
+                border: OutlineInputBorder(),
               ),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -104,29 +142,79 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                 itemCount: widget.draftOrder.items.length,
                 itemBuilder: (context, index) {
                   final item = widget.draftOrder.items[index];
+                  final itemUnitPrice = item.unitPrice ?? 0;
+                  final itemTotal = itemUnitPrice * item.quantity;
+                  final priceCtrl = TextEditingController(
+                    text: itemUnitPrice > 0 ? itemUnitPrice.toStringAsFixed(2) : '',
+                  );
+
                   return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Text(
-                            '${index + 1}. ${item.itemName}',
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w700),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${index + 1}. ${item.itemName}',
+                                  style: const TextStyle(
+                                      fontSize: 16, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              Text(
+                                '₹ ${itemTotal.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w800, color: Colors.green),
+                              ),
+                            ],
                           ),
                           ...item.options.entries.map((e) => Text(
                               '${s.catalog(e.key)}: ${s.catalog(e.value)}')),
                           if ((item.description ?? '').isNotEmpty)
                             Text('${s.t('details')}: ${item.description}'),
-                          Text(
-                              '${s.t('quantity')}: ${item.quantity.toInt()} ${item.unit}'),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                    '${s.t('quantity')}: ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity} ${item.unit}'),
+                              ),
+                              SizedBox(
+                                width: 120,
+                                child: TextField(
+                                  controller: priceCtrl,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Price/Unit ₹',
+                                    isDense: true,
+                                    prefixText: '₹ ',
+                                  ),
+                                  onChanged: (val) {
+                                    final parsed = double.tryParse(val.trim());
+                                    if (parsed != null) {
+                                      setState(() {
+                                        widget.draftOrder.items[index] = item.copyWith(unitPrice: parsed);
+                                        _recalculateEstimate();
+                                      });
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
                           if (item.isOtherItem)
-                            Text(
-                              s.t('toProcure'),
-                              style: TextStyle(
-                                  color: Colors.red,
-                                  fontWeight: FontWeight.w700),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                s.t('toProcure'),
+                                style: const TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.w700),
+                              ),
                             ),
                         ],
                       ),
@@ -135,10 +223,27 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                 },
               ),
             ),
-            LargeActionButton(
-              label: s.t('edit'),
-              onTap: () => Navigator.pop(context),
-              backgroundColor: Colors.teal,
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => ShareService.shareDraftEstimate(
+                      widget.draftOrder,
+                      totalOverride: currentEstimate,
+                    ),
+                    icon: const Icon(Icons.share, size: 18),
+                    label: const Text('SHARE ESTIMATE'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: Text(s.t('edit')),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             LargeActionButton(

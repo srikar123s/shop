@@ -72,77 +72,83 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     return showDialog<ProductStep>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('${step.label} choices'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: TextField(
-                        controller: controller,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          labelText: 'New choice',
-                          hintText: 'Brand A',
-                        ),
-                        onSubmitted: (_) {
-                          final value = controller.text.trim();
-                          if (value.isEmpty) return;
-                          setDialogState(() {
-                            choices.add(value);
-                            controller.clear();
-                          });
-                        },
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Add choice',
-                      onPressed: () {
-                        final value = controller.text.trim();
-                        if (value.isEmpty) return;
-                        setDialogState(() {
-                          choices.add(value);
-                          controller.clear();
-                        });
-                      },
-                      icon: const Icon(Icons.add_circle),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ...choices.asMap().entries.map(
-                      (entry) => ListTile(
-                        dense: true,
-                        title: Text(entry.value),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: () => setDialogState(
-                            () => choices.removeAt(entry.key),
+        builder: (context, setDialogState) {
+          void addChoice() {
+            final value = controller.text.trim().replaceAll(',', '');
+            if (value.isEmpty) return;
+            setDialogState(() {
+              if (!choices.contains(value)) {
+                choices.add(value);
+              }
+              controller.clear();
+            });
+          }
+
+          return AlertDialog(
+            title: Text('Configure ${step.label}'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: TextField(
+                          controller: controller,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            labelText: 'Add ${step.label}',
+                            hintText: 'Type brand/choice & press ADD',
                           ),
+                          onSubmitted: (_) => addChoice(),
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: addChoice,
+                        child: const Text('ADD'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Added choices:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  if (choices.isEmpty)
+                    const Text('No choices added yet.', style: TextStyle(color: Colors.grey))
+                  else
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: choices.asMap().entries.map(
+                            (entry) => Chip(
+                              label: Text(entry.value),
+                              deleteIcon: const Icon(Icons.close, size: 16),
+                              onDeleted: () => setDialogState(
+                                () => choices.removeAt(entry.key),
+                              ),
+                            ),
+                          ).toList(),
                     ),
-              ],
+                ],
+              ),
             ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('CANCEL'),
-            ),
-            FilledButton(
-              onPressed: choices.isEmpty
-                  ? null
-                  : () =>
-                      Navigator.pop(context, step.copyWith(values: choices)),
-              child: const Text('SAVE'),
-            ),
-          ],
-        ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('CANCEL'),
+              ),
+              FilledButton(
+                onPressed: choices.isEmpty
+                    ? null
+                    : () =>
+                        Navigator.pop(context, step.copyWith(values: choices)),
+                child: const Text('SAVE CHOICES'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -159,7 +165,16 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       ...(product?.configuration.unitOptions ?? <String>[]),
       unit,
     };
+    final customConversions = Map<String, double>.from(
+      product?.configuration.unitConversions ?? <String, double>{},
+    );
+    // ensure standard fallback for existing
+    for (final u in selectedUnits) {
+      customConversions.putIfAbsent(u, () => _defaultConversion(u));
+    }
     final steps = <ProductStep>[...?product?.configuration.steps];
+    String? priceError;
+
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -174,28 +189,34 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(product == null ? 'Add product' : 'Edit product',
+                    Text(product == null ? 'Add Product' : 'Edit Product',
                         style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 16),
                     TextField(
                         controller: name,
                         autofocus: product == null,
                         decoration: const InputDecoration(
-                            labelText: 'Product name',
+                            labelText: 'Product Name *',
                             hintText: 'Example: Welding Rod')),
                     const SizedBox(height: 10),
                     TextField(
                       controller: price,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Base price *',
+                      decoration: InputDecoration(
+                        labelText: 'Base Price * (Mandatory)',
                         prefixText: '₹ ',
                         hintText: 'Example: 250',
+                        errorText: priceError,
                       ),
+                      onChanged: (_) {
+                        if (priceError != null) {
+                          setSheetState(() => priceError = null);
+                        }
+                      },
                     ),
                     const SizedBox(height: 20),
-                    const Text('How is it sold?',
+                    const Text('Unit & Conversions (pcs, packets, boxes):',
                         style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     Wrap(
@@ -209,6 +230,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                             setSheetState(() {
                               if (selected) {
                                 selectedUnits.add(value);
+                                customConversions.putIfAbsent(value, () => _defaultConversion(value));
                               } else if (selectedUnits.length > 1) {
                                 selectedUnits.remove(value);
                               }
@@ -220,11 +242,46 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         );
                       }).toList(),
                     ),
+                    const SizedBox(height: 12),
+                    ...selectedUnits.map((u) {
+                      final factorCtrl = TextEditingController(
+                        text: (customConversions[u] ?? _defaultConversion(u))
+                            .toString(),
+                      );
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              flex: 2,
+                              child: Text('1 $u =', style: const TextStyle(fontWeight: FontWeight.w600)),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: TextField(
+                                controller: factorCtrl,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  suffixText: 'pcs/base units',
+                                ),
+                                onChanged: (val) {
+                                  final numVal = double.tryParse(val);
+                                  if (numVal != null && numVal > 0) {
+                                    customConversions[u] = numVal;
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 20),
-                    const Text('What should we ask the customer?',
+                    const Text('Product Configurations (Brand, Type, Choice):',
                         style: TextStyle(fontWeight: FontWeight.w700)),
                     const Text(
-                        'Optional — choose only what this product needs.'),
+                        'Tap a configuration button to add choices using the ADD button.'),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -275,9 +332,13 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           onPressed: () async {
                             final parsedPrice =
                                 double.tryParse(price.text.trim());
+                            if (parsedPrice == null || parsedPrice <= 0) {
+                              setSheetState(() {
+                                priceError = 'Base price is required and must be > 0';
+                              });
+                              return;
+                            }
                             if (name.text.trim().isEmpty ||
-                                parsedPrice == null ||
-                                parsedPrice < 0 ||
                                 steps.any((step) => step.values.isEmpty)) {
                               return;
                             }
@@ -294,7 +355,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                   basePrice: parsedPrice,
                                   unitConversions: <String, double>{
                                     for (final selected in selectedUnits)
-                                      selected: _defaultConversion(selected),
+                                      selected: customConversions[selected] ??
+                                          _defaultConversion(selected),
                                   }),
                             ));
                             if (context.mounted) Navigator.pop(context, true);
@@ -308,6 +370,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     );
     if (saved == true) _load();
   }
+
 
   @override
   Widget build(BuildContext context) {

@@ -35,6 +35,41 @@ class CustomerRepository {
     return customer.copyWith(id: id);
   }
 
+  Future<void> updateCustomer({
+    required int id,
+    required String name,
+    String? phone,
+    String? address,
+  }) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'customers',
+      {
+        'name': name.trim(),
+        'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+        'address': address?.trim().isEmpty == true ? null : address?.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    // Also update order customer_name_snapshot for consistency
+    await db.update(
+      'orders',
+      {'customer_name_snapshot': name.trim()},
+      where: 'customer_id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteCustomer(int id) async {
+    final db = await _databaseHelper.database;
+    await db.delete(
+      'customers',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<Customer?> getCustomerById(int id) async {
     final db = await _databaseHelper.database;
     final result = await db.query(

@@ -10,6 +10,7 @@ import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/order_preview_screen.dart';
 import 'package:shop/screens/bulk_product_options_screen.dart';
 import 'package:shop/screens/product_options_screen.dart';
+import 'package:shop/services/draft_order_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 import 'package:shop/widgets/order_item_card.dart';
 import 'package:shop/widgets/product_card.dart';
@@ -35,16 +36,59 @@ class ProductSelectionScreen extends StatefulWidget {
 
 class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final DraftOrderService _draftService = DraftOrderService();
   List<Product> _products = <Product>[];
   List<Product> _frequentlyUsed = <Product>[];
   final List<DraftOrderItem> _items = <DraftOrderItem>[];
   bool _loading = true;
   Timer? _searchDebounce;
+  DraftOrder? _savedDraft;
 
   @override
   void initState() {
     super.initState();
     _loadProducts();
+    _checkDraft();
+  }
+
+  Future<void> _checkDraft() async {
+    final draft = await _draftService.getDraft();
+    if (draft != null && draft.items.isNotEmpty && mounted) {
+      setState(() {
+        _savedDraft = draft;
+      });
+    }
+  }
+
+  void _resumeDraft() {
+    if (_savedDraft == null) return;
+    setState(() {
+      _items.clear();
+      _items.addAll(_savedDraft!.items);
+      _savedDraft = null;
+    });
+    _saveCurrentDraft();
+  }
+
+  Future<void> _clearDraft() async {
+    await _draftService.clearDraft();
+    if (!mounted) return;
+    setState(() {
+      _items.clear();
+      _savedDraft = null;
+    });
+  }
+
+  void _saveCurrentDraft() {
+    if (widget.existingOrderId != null) return;
+    if (_items.isEmpty) {
+      _draftService.clearDraft();
+    } else {
+      _draftService.saveDraft(DraftOrder(
+        customer: widget.customer,
+        items: List<DraftOrderItem>.from(_items),
+      ));
+    }
   }
 
   Future<void> _loadProducts() async {
@@ -63,7 +107,10 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
 
   void _onSearchChanged(String _) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 250), _loadProducts);
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      _loadProducts();
+      setState(() {});
+    });
   }
 
   @override
@@ -83,6 +130,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       );
       if (bulkItems == null || bulkItems.isEmpty || !mounted) return;
       setState(() => _items.addAll(bulkItems));
+      _saveCurrentDraft();
       return;
     }
     final initial = _items[editIndex];
@@ -97,6 +145,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       return;
     }
     setState(() => _items[editIndex] = result);
+    _saveCurrentDraft();
   }
 
   Future<void> _addOtherItem() async {
@@ -142,6 +191,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                       value: qty,
                       min: 1,
                       onChanged: (v) => setModalState(() => qty = v),
+                    ),
+                    QuantityPresets(
+                      onSelected: (v) => setModalState(() => qty = v),
                     ),
                     DropdownButtonFormField<String>(
                       initialValue: unit,
@@ -198,6 +250,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
 
     if (result != null) {
       setState(() => _items.add(result));
+      _saveCurrentDraft();
     }
   }
 
@@ -222,12 +275,15 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     );
     if (ok == true) {
       setState(() => _items.removeAt(index));
+      _saveCurrentDraft();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
+    final isSearching = _searchController.text.trim().isNotEmpty;
+
     return PopScope(
       canPop: _items.isEmpty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -256,11 +312,49 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-            title: Text('${s.t('selectItems')} - ${widget.customer.name}')),
+          title: Text('${s.t('selectItems')} - ${widget.customer.name}'),
+          actions: <Widget>[
+            if (_items.isNotEmpty)
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                onPressed: _clearDraft,
+                icon: const Icon(Icons.delete_sweep, size: 18),
+                label: const Text('Clear Draft'),
+              ),
+          ],
+        ),
         body: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
             children: <Widget>[
+              if (_savedDraft != null && _items.isEmpty)
+                Card(
+                  color: Colors.amber.shade100,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: <Widget>[
+                        const Icon(Icons.history, color: Colors.brown),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Unsaved draft order found for ${_savedDraft!.customer.name} (${_savedDraft!.items.length} items)',
+                            style: const TextStyle(color: Colors.brown, fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _resumeDraft,
+                          child: const Text('RESUME', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: _clearDraft,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               TextField(
                 controller: _searchController,
                 decoration: InputDecoration(
@@ -278,78 +372,92 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : ListView(
                         children: <Widget>[
-                          if (_searchController.text.trim().isNotEmpty &&
-                              _products.isNotEmpty)
+                          if (isSearching && _products.isNotEmpty)
                             _ProductSuggestions(
-                              products: _products.take(6).toList(),
+                              products: _products,
                               onProductTap: _selectProduct,
-                            ),
-                          if (_frequentlyUsed.isNotEmpty) ...<Widget>[
+                            )
+                          else ...<Widget>[
+                            if (_frequentlyUsed.isNotEmpty) ...<Widget>[
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(s.t('frequentlyUsed'),
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800)),
+                              ),
+                              _ProductGrid(
+                                products: _frequentlyUsed,
+                                onProductTap: _selectProduct,
+                              ),
+                              const Divider(height: 28),
+                            ],
                             Padding(
                               padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(s.t('frequentlyUsed'),
+                              child: Text(s.t('allProducts'),
                                   style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800)),
+                                      fontSize: 15, fontWeight: FontWeight.w800)),
                             ),
                             _ProductGrid(
-                              products: _frequentlyUsed,
+                              products: _products,
                               onProductTap: _selectProduct,
+                              includeOther: true,
+                              otherLabel: s.t('others'),
+                              onOtherTap: _addOtherItem,
                             ),
-                            const Divider(height: 28),
                           ],
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(s.t('allProducts'),
-                                style: const TextStyle(
-                                    fontSize: 15, fontWeight: FontWeight.w800)),
-                          ),
-                          _ProductGrid(
-                            products: _products,
-                            onProductTap: _selectProduct,
-                            includeOther: true,
-                            otherLabel: s.t('others'),
-                            onOtherTap: _addOtherItem,
-                          ),
                         ],
                       ),
               ),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                color: Colors.white,
-                child: Text(
-                  s.t('currentOrder'),
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, fontSize: 16),
-                ),
-              ),
-              SizedBox(
-                height: 150,
-                child: _items.isEmpty
-                    ? Center(child: Text(s.t('noItems')))
-                    : ListView.builder(
-                        itemCount: _items.length,
-                        itemBuilder: (context, index) {
-                          final item = _items[index];
-                          return OrderItemCard(
-                            item: item,
-                            onEdit: item.isOtherItem
-                                ? null
-                                : () async {
-                                    final product = await widget
-                                        .productRepository
-                                        .getProductById(item.productId!);
-                                    if (product != null && context.mounted) {
-                                      await _selectProduct(product,
-                                          editIndex: index);
-                                    }
-                                  },
-                            onDelete: () => _deleteItem(index),
-                          );
-                        },
+              // Show Current Order ONLY when NOT searching
+              if (!isSearching) ...<Widget>[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  color: Colors.grey.shade100,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${s.t('currentOrder')} (${_items.length})',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 16),
                       ),
-              ),
+                      if (_items.isNotEmpty)
+                        GestureDetector(
+                          onTap: _clearDraft,
+                          child: const Text('Clear', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  height: 140,
+                  child: _items.isEmpty
+                      ? Center(child: Text(s.t('noItems')))
+                      : ListView.builder(
+                          itemCount: _items.length,
+                          itemBuilder: (context, index) {
+                            final item = _items[index];
+                            return OrderItemCard(
+                              item: item,
+                              onEdit: item.isOtherItem
+                                  ? null
+                                  : () async {
+                                      final product = await widget
+                                          .productRepository
+                                          .getProductById(item.productId!);
+                                      if (product != null && context.mounted) {
+                                        await _selectProduct(product,
+                                            editIndex: index);
+                                      }
+                                    },
+                              onDelete: () => _deleteItem(index),
+                            );
+                          },
+                        ),
+                ),
+              ],
               const SizedBox(height: 10),
               LargeActionButton(
                 label: widget.existingOrderId == null
@@ -439,10 +547,10 @@ class _ProductSuggestions extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Padding(
-            padding: EdgeInsets.fromLTRB(14, 10, 14, 4),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
             child: Text(
               AppLocalizations.of(context).t('suggestions'),
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
             ),
           ),
           ...products.map(

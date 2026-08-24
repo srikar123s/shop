@@ -47,28 +47,39 @@ class _QuantitySelectorState extends State<QuantitySelector> {
 
   void _change(double value) {
     final clamped = value.clamp(widget.min, widget.max ?? 9999).toDouble();
-    _controller.text = _format(clamped);
+    if (_controller.text != _format(clamped)) {
+      _controller.text = _format(clamped);
+    }
     widget.onChanged(clamped);
   }
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         IconButton.filled(
           onPressed: widget.value <= widget.min
               ? null
               : () => _change(widget.value - 1),
           icon: const Icon(Icons.remove),
-          iconSize: 22,
+          iconSize: 20,
         ),
+        const SizedBox(width: 4),
         SizedBox(
-          width: 58,
+          width: 64,
           child: TextField(
             controller: _controller,
             textAlign: TextAlign.center,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(fontWeight: FontWeight.w700),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            onChanged: (text) {
+              final parsed = double.tryParse(text);
+              if (parsed != null) {
+                final clamped = parsed.clamp(widget.min, widget.max ?? 9999).toDouble();
+                widget.onChanged(clamped);
+              }
+            },
             onSubmitted: (text) {
               final parsed = double.tryParse(text);
               if (parsed != null) _change(parsed);
@@ -79,16 +90,18 @@ class _QuantitySelectorState extends State<QuantitySelector> {
             },
             decoration: const InputDecoration(
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              border: OutlineInputBorder(),
             ),
           ),
         ),
+        const SizedBox(width: 4),
         IconButton.filled(
           onPressed: widget.max != null && widget.value >= widget.max!
               ? null
               : () => _change(widget.value + 1),
           icon: const Icon(Icons.add),
-          iconSize: 22,
+          iconSize: 20,
         ),
       ],
     );
@@ -102,15 +115,28 @@ class QuantityPresets extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 6,
-      children: <int>[5, 6, 10, 12]
-          .map((value) => ActionChip(
-                label: Text('$value'),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => onSelected(value.toDouble()),
-              ))
-          .toList(),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <int>[5, 6, 10, 12].map((preset) {
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ActionChip(
+              label: Text(
+                '$preset',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              labelStyle: TextStyle(
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => onSelected(preset.toDouble()),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }
