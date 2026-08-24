@@ -6,6 +6,7 @@ import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/services/draft_order_service.dart';
 import 'package:shop/services/share_service.dart';
+import 'package:shop/services/top_notification_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
 class OrderPreviewScreen extends StatefulWidget {
@@ -76,23 +77,25 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     setState(() => _saving = false);
     final orderIdFormatted = '#ORD-${newOrderId.toString().padLeft(4, '0')}';
     
+    final homeContext = rootMessengerKey.currentContext;
+
     // Immediately navigate back to Home Screen
     Navigator.popUntil(context, (route) => route.isFirst);
-    
-    // Show notification toast / snackbar on home screen
-    rootMessengerKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text('Order $orderIdFormatted created successfully!'),
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: 'SHARE',
-          onPressed: () {
-            ShareService.shareDraftEstimate(widget.draftOrder, totalOverride: estimate);
-          },
-        ),
-      ),
-    );
+
+    if (homeContext != null && homeContext.mounted) {
+      // Show top floating notification banner on home screen
+      TopNotificationService.showTopNotification(
+        context: homeContext,
+        message: 'Order $orderIdFormatted created successfully!',
+        actionLabel: 'SHARE',
+        onAction: () {
+          ShareService.shareDraftEstimate(widget.draftOrder, totalOverride: estimate);
+        },
+      );
+    }
   }
+
+
 
   @override
   Widget build(BuildContext context) {

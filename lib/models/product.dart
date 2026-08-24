@@ -61,6 +61,7 @@ class ProductConfiguration {
     this.unitOptions = const <String>[],
     this.basePrice = 0,
     this.unitConversions = const <String, double>{},
+    this.variantPrices = const <String, double>{},
   });
 
   final List<ProductStep> steps;
@@ -68,6 +69,7 @@ class ProductConfiguration {
   final List<String> unitOptions;
   final double basePrice;
   final Map<String, double> unitConversions;
+  final Map<String, double> variantPrices;
 
   ProductConfiguration copyWith({
     List<ProductStep>? steps,
@@ -75,6 +77,7 @@ class ProductConfiguration {
     List<String>? unitOptions,
     double? basePrice,
     Map<String, double>? unitConversions,
+    Map<String, double>? variantPrices,
   }) {
     return ProductConfiguration(
       steps: steps ?? this.steps,
@@ -82,6 +85,7 @@ class ProductConfiguration {
       unitOptions: unitOptions ?? this.unitOptions,
       basePrice: basePrice ?? this.basePrice,
       unitConversions: unitConversions ?? this.unitConversions,
+      variantPrices: variantPrices ?? this.variantPrices,
     );
   }
 
@@ -92,6 +96,7 @@ class ProductConfiguration {
       'unitOptions': unitOptions,
       'basePrice': basePrice,
       'unitConversions': unitConversions,
+      'variantPrices': variantPrices,
     };
   }
 
@@ -107,6 +112,10 @@ class ProductConfiguration {
           .toList(),
       basePrice: (map['basePrice'] as num?)?.toDouble() ?? 0,
       unitConversions: ((map['unitConversions'] as Map<dynamic, dynamic>?) ??
+              <dynamic, dynamic>{})
+          .map((key, value) =>
+              MapEntry(key.toString(), (value as num).toDouble())),
+      variantPrices: ((map['variantPrices'] as Map<dynamic, dynamic>?) ??
               <dynamic, dynamic>{})
           .map((key, value) =>
               MapEntry(key.toString(), (value as num).toDouble())),

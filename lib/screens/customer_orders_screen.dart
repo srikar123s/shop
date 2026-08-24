@@ -92,7 +92,10 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${order.formattedOrderId} marked as closed.')),
+          SnackBar(
+            content: Text('${order.formattedOrderId} marked as closed & completed.'),
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     }
@@ -150,7 +153,7 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                   builder: (context) => AlertDialog(
                     title: const Text('Close all pending orders?'),
                     content: const Text(
-                      'They will remain in history, but will no longer appear as pending.',
+                      'They will be marked as fully completed.',
                     ),
                     actions: <Widget>[
                       TextButton(
@@ -171,10 +174,14 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                 await _load();
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('All pending orders closed')),
+                  const SnackBar(
+                    content: Text('All pending orders marked as completed'),
+                    duration: Duration(seconds: 3),
+                  ),
                 );
               },
             ),
+
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

@@ -174,27 +174,53 @@ class OrderRepository {
 
   Future<void> closePendingOrdersForCustomer(int customerId) async {
     final db = await _databaseHelper.database;
-    await db.update(
-      'orders',
-      {'status': orderStatusLabel(OrderStatus.closed)},
-      where: 'customer_id = ? AND status IN (?, ?)',
-      whereArgs: <Object?>[
-        customerId,
-        orderStatusLabel(OrderStatus.pending),
-        orderStatusLabel(OrderStatus.partiallyCompleted),
-      ],
-    );
+    await db.transaction((txn) async {
+      final pendingOrders = await txn.query(
+        'orders',
+        columns: ['id'],
+        where: 'customer_id = ? AND status IN (?, ?)',
+        whereArgs: [
+          customerId,
+          orderStatusLabel(OrderStatus.pending),
+          orderStatusLabel(OrderStatus.partiallyCompleted),
+        ],
+      );
+      for (final row in pendingOrders) {
+        final orderId = row['id'] as int;
+        await txn.rawUpdate(
+          'UPDATE order_items SET quantity_given = quantity_ordered, status = ?, procurement_status = ? WHERE order_id = ?',
+          [itemStatusLabel(ItemStatus.given), ProcurementStatus.notRequired.name, orderId],
+        );
+      }
+      await txn.update(
+        'orders',
+        {'status': orderStatusLabel(OrderStatus.completed)},
+        where: 'customer_id = ? AND status IN (?, ?)',
+        whereArgs: <Object?>[
+          customerId,
+          orderStatusLabel(OrderStatus.pending),
+          orderStatusLabel(OrderStatus.partiallyCompleted),
+        ],
+      );
+    });
   }
 
   Future<void> closeOrder(int orderId) async {
     final db = await _databaseHelper.database;
-    await db.update(
-      'orders',
-      {'status': orderStatusLabel(OrderStatus.closed)},
-      where: 'id = ?',
-      whereArgs: <Object?>[orderId],
-    );
+    await db.transaction((txn) async {
+      await txn.rawUpdate(
+        'UPDATE order_items SET quantity_given = quantity_ordered, status = ?, procurement_status = ? WHERE order_id = ?',
+        [itemStatusLabel(ItemStatus.given), ProcurementStatus.notRequired.name, orderId],
+      );
+      await txn.update(
+        'orders',
+        {'status': orderStatusLabel(OrderStatus.completed)},
+        where: 'id = ?',
+        whereArgs: <Object?>[orderId],
+      );
+    });
   }
+
 
   Future<OrderDetails?> getOrderDetails(int orderId) async {
     final db = await _databaseHelper.database;

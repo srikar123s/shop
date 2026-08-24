@@ -105,8 +105,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     }
     setState(() => _saving = false);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppLocalizations.of(context).t('changesSaved'))),
+      SnackBar(
+        content: Text(AppLocalizations.of(context).t('changesSaved')),
+        duration: const Duration(seconds: 3),
+      ),
     );
+
     await _load();
   }
 

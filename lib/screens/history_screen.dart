@@ -83,7 +83,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 return;
               }
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${s.t('backupCreatedAt')} $path')),
+                SnackBar(
+                  content: Text('${s.t('backupCreatedAt')} $path'),
+                  duration: const Duration(seconds: 3),
+                ),
               );
             },
             icon: const Icon(Icons.backup_outlined),
@@ -101,10 +104,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   return;
                 }
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(s.t('restoreComplete'))),
+                  SnackBar(
+                    content: Text(s.t('restoreComplete')),
+                    duration: const Duration(seconds: 3),
+                  ),
                 );
               }
             },
+
             icon: const Icon(Icons.restore_outlined),
           ),
         ],

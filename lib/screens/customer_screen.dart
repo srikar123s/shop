@@ -184,7 +184,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Customer details updated.')),
+          const SnackBar(
+            content: Text('Customer details updated.'),
+            duration: Duration(seconds: 3),
+          ),
         );
       }
     }
@@ -220,7 +223,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
       await _loadCustomers();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${customer.name} deleted.')),
+          SnackBar(
+            content: Text('${customer.name} deleted.'),
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
     }
@@ -234,8 +240,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
         status != PermissionStatus.limited) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content:
-                Text('Contacts permission is needed to choose a customer.')),
+          content: Text('Contacts permission is needed to choose a customer.'),
+          duration: Duration(seconds: 3),
+        ),
       );
       return;
     }
@@ -252,7 +259,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
       _contactsLoading = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${contacts.length} contacts loaded')),
+      SnackBar(
+        content: Text('${contacts.length} contacts loaded'),
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -283,7 +293,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('${s.t('customer')} ${customer.name} selected'),
+      duration: const Duration(seconds: 3),
     ));
+
   }
 
   @override

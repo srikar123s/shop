@@ -279,6 +279,113 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     }
   }
 
+  Widget _buildGroupedCurrentOrderList() {
+    final Map<String, List<int>> grouped = {};
+    for (int i = 0; i < _items.length; i++) {
+      grouped.putIfAbsent(_items[i].itemName, () => []).add(i);
+    }
+    final entries = grouped.entries.toList();
+
+    return ListView.builder(
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        final productName = entry.key;
+        final indices = entry.value;
+
+        if (indices.length == 1) {
+          final itemIndex = indices.first;
+          final item = _items[itemIndex];
+          return OrderItemCard(
+            item: item,
+            onEdit: item.isOtherItem
+                ? null
+                : () async {
+                    final product = await widget.productRepository
+                        .getProductById(item.productId!);
+                    if (product != null && context.mounted) {
+                      await _selectProduct(product, editIndex: itemIndex);
+                    }
+                  },
+            onDelete: () => _deleteItem(itemIndex),
+          );
+        }
+
+        // Grouped card for multiple variants under same product name
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '$productName (${indices.length} variants)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ...indices.map((i) {
+                  final item = _items[i];
+                  final opts = item.options.entries
+                      .map((e) => e.value)
+                      .join(', ');
+
+                  final qtyStr = item.quantity % 1 == 0
+                      ? item.quantity.toInt().toString()
+                      : item.quantity.toString();
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            opts.isNotEmpty ? '$opts • $qtyStr ${item.unit}' : '$qtyStr ${item.unit}',
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        if (!item.isOtherItem)
+                          InkWell(
+                            onTap: () async {
+                              final product = await widget.productRepository
+                                  .getProductById(item.productId!);
+                              if (product != null && context.mounted) {
+                                await _selectProduct(product, editIndex: i);
+                              }
+                            },
+                            child: const Icon(Icons.edit_outlined, size: 16, color: Colors.blue),
+                          ),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () => _deleteItem(i),
+                          child: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
@@ -432,31 +539,12 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                   ),
                 ),
                 SizedBox(
-                  height: 140,
+                  height: 150,
                   child: _items.isEmpty
                       ? Center(child: Text(s.t('noItems')))
-                      : ListView.builder(
-                          itemCount: _items.length,
-                          itemBuilder: (context, index) {
-                            final item = _items[index];
-                            return OrderItemCard(
-                              item: item,
-                              onEdit: item.isOtherItem
-                                  ? null
-                                  : () async {
-                                      final product = await widget
-                                          .productRepository
-                                          .getProductById(item.productId!);
-                                      if (product != null && context.mounted) {
-                                        await _selectProduct(product,
-                                            editIndex: index);
-                                      }
-                                    },
-                              onDelete: () => _deleteItem(index),
-                            );
-                          },
-                        ),
+                      : _buildGroupedCurrentOrderList(),
                 ),
+
               ],
               const SizedBox(height: 10),
               LargeActionButton(
@@ -510,11 +598,12 @@ class _ProductGrid extends StatelessWidget {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 2,
+        crossAxisCount: 3,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 1.35,
       ),
+
       itemCount: products.length + (includeOther ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == products.length) {

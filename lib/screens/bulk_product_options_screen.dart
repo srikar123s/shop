@@ -19,21 +19,15 @@ class BulkProductOptionsScreen extends StatefulWidget {
       _BulkProductOptionsScreenState();
 }
 
-class _BulkLine {
-  _BulkLine(this.variant);
-
-  String variant;
-  double quantity = 0;
-}
-
 class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   late final List<ProductStep> _steps;
   late final int _variantIndex;
   int? _groupIndex;
   final Map<String, String> _prefixSelections = <String, String>{};
   final Set<String> _selectedGroups = <String>{};
-  final Map<String, List<_BulkLine>> _groupLines = <String, List<_BulkLine>>{};
   final Map<String, double> _variantQuantities = <String, double>{};
+  final Map<String, double> _customPrices = <String, double>{};
+  final Map<String, String> _activeGroupVariant = <String, String>{};
   late String _unit;
 
   @override
@@ -69,12 +63,8 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     setState(() {
       if (_selectedGroups.contains(value)) {
         _selectedGroups.remove(value);
-        _groupLines.remove(value);
       } else {
         _selectedGroups.add(value);
-        _groupLines[value] = <_BulkLine>[
-          _BulkLine(_steps[_variantIndex].values.first),
-        ];
       }
     });
   }
@@ -84,6 +74,39 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     return _prefixSteps
         .every((step) => _prefixSelections.containsKey(step.key));
   }
+
+  double _getVariantPrice(String variantKey, String variantName) {
+    if (_customPrices.containsKey(variantKey)) {
+      return _customPrices[variantKey]!;
+    }
+    final configuredVariantPrice =
+        widget.product.configuration.variantPrices[variantName] ??
+        widget.product.configuration.variantPrices[variantKey];
+    final factor = widget.product.configuration.unitConversions[_unit] ?? 1.0;
+    if (configuredVariantPrice != null && configuredVariantPrice > 0) {
+      return configuredVariantPrice * factor;
+    }
+
+    final basePrice = widget.product.configuration.basePrice;
+    
+    // Auto multiplier for known weight/size variations if basePrice > 0
+    double multiplier = 1.0;
+    final lower = variantName.toLowerCase().trim();
+    if (lower == '4l' || lower == '4 l') {
+      multiplier = 4.0;
+    } else if (lower == '10l' || lower == '10 l') {
+      multiplier = 10.0;
+    } else if (lower == '20l' || lower == '20 l') {
+      multiplier = 20.0;
+    } else if (lower == '500g' || lower == '500 g') {
+      multiplier = 5.0;
+    } else if (lower == '1kg' || lower == '1 kg') {
+      multiplier = 10.0;
+    }
+
+    return (basePrice > 0 ? basePrice * multiplier : 0) * factor;
+  }
+
 
   List<DraftOrderItem> _buildItems() {
     final factor = widget.product.configuration.unitConversions[_unit] ?? 1;
@@ -100,13 +123,14 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
             _steps[_groupIndex!].key: group,
             _steps[_variantIndex].key: variant,
           };
+          final unitPrice = _getVariantPrice(key, variant);
           items.add(DraftOrderItem(
             productId: widget.product.id,
             itemName: widget.product.name,
             options: options,
             quantity: quantity,
             unit: _unit,
-            unitPrice: widget.product.configuration.basePrice * factor,
+            unitPrice: unitPrice > 0 ? unitPrice : null,
             unitFactor: factor,
           ));
         }
@@ -118,13 +142,14 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
         if (quantity <= 0) continue;
         final options = <String, String>{..._prefixSelections};
         if (_steps.isNotEmpty) options[_steps[_variantIndex].key] = variant;
+        final unitPrice = _getVariantPrice(variant, variant);
         items.add(DraftOrderItem(
           productId: widget.product.id,
           itemName: widget.product.name,
           options: options,
           quantity: quantity,
           unit: _unit,
-          unitPrice: widget.product.configuration.basePrice * factor,
+          unitPrice: unitPrice > 0 ? unitPrice : null,
           unitFactor: factor,
         ));
       }
@@ -132,12 +157,45 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     return items;
   }
 
+  Widget _compactPresets(Function(double) onSelected) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [5.0, 6.0, 10.0, 12.0].map((v) {
+          final label = v % 1 == 0 ? v.toInt().toString() : v.toString();
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: InkWell(
+              onTap: () => onSelected(v),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '+$label',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     final variantValues =
         _steps.isEmpty ? <String>[] : _steps[_variantIndex].values;
+
     return Scaffold(
       appBar: AppBar(title: Text(s.catalog(widget.product.name))),
       body: Column(
@@ -250,33 +308,43 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
 
   Widget _quantityRow(String key, String label, AppLocalizations s) {
     final quantity = _variantQuantities[key] ?? 0;
+    final price = _getVariantPrice(key, label);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           children: <Widget>[
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text(label,
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                ),
-                SizedBox(
-                  width: 132,
-                  child: QuantitySelector(
-                    value: quantity,
-                    min: 0,
-                    onChanged: (value) =>
-                        setState(() => _variantQuantities[key] = value),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      if (price > 0)
+                        Text('₹${price.toStringAsFixed(2)} / $_unit',
+                            style: TextStyle(color: Colors.teal.shade800, fontSize: 12, fontWeight: FontWeight.w600)),
+                    ],
                   ),
+                ),
+                QuantitySelector(
+                  value: quantity,
+                  min: 0,
+                  onChanged: (value) =>
+                      setState(() => _variantQuantities[key] = value),
                 ),
               ],
             ),
-            QuantityPresets(
-              onSelected: (value) =>
-                  setState(() => _variantQuantities[key] = value),
-            ),
+            const SizedBox(height: 6),
+            _compactPresets((val) {
+              setState(() {
+                _variantQuantities[key] = (_variantQuantities[key] ?? 0) + val;
+              });
+            }),
           ],
         ),
       ),
@@ -288,8 +356,15 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     List<String> variants,
     AppLocalizations s,
   ) {
+    final currentVariant = _activeGroupVariant[group] ?? (variants.isNotEmpty ? variants.first : '');
+    final currentKey = '$group::$currentVariant';
+    final currentQty = _variantQuantities[currentKey] ?? 0;
+    final currentPrice = _getVariantPrice(currentKey, currentVariant);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -300,49 +375,109 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
               style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
             ),
             const SizedBox(height: 8),
-            ...variants.map((v) {
-              final key = '$group::$v';
-              final quantity = _variantQuantities[key] ?? 0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+            // Horizontal row of weight/size chips for this colour
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: variants.map((v) {
+                  final key = '$group::$v';
+                  final qty = _variantQuantities[key] ?? 0;
+                  final isSelected = v == currentVariant;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(s.catalog(v)),
+                          if (qty > 0) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isSelected ? Colors.white : Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                qty % 1 == 0 ? qty.toInt().toString() : qty.toString(),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() {
+                            _activeGroupVariant[group] = v;
+                          });
+                        }
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Active Weight Stepper & Details
+            if (currentVariant.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Row(
                       children: <Widget>[
                         Expanded(
-                          child: Text(
-                            s.catalog(v),
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${s.catalog(group)} - ${s.catalog(currentVariant)}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                              if (currentPrice > 0)
+                                Text(
+                                  '₹${currentPrice.toStringAsFixed(2)} / $_unit',
+                                  style: TextStyle(color: Colors.teal.shade800, fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                            ],
                           ),
                         ),
                         QuantitySelector(
-                          value: quantity,
+                          value: currentQty,
                           min: 0,
                           onChanged: (val) {
                             setState(() {
-                              _variantQuantities[key] = val;
+                              _variantQuantities[currentKey] = val;
                             });
                           },
                         ),
                       ],
                     ),
-                    QuantityPresets(
-                      onSelected: (val) {
-                        setState(() {
-                          _variantQuantities[key] = val;
-                        });
-                      },
-                    ),
-                    const Divider(height: 12),
+                    const SizedBox(height: 8),
+                    _compactPresets((val) {
+                      setState(() {
+                        _variantQuantities[currentKey] = (_variantQuantities[currentKey] ?? 0) + val;
+                      });
+                    }),
                   ],
                 ),
-              );
-            }),
+              ),
           ],
         ),
       ),
     );
   }
-
 }

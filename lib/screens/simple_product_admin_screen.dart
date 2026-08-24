@@ -168,6 +168,10 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     final customConversions = Map<String, double>.from(
       product?.configuration.unitConversions ?? <String, double>{},
     );
+    final variantPrices = Map<String, double>.from(
+      product?.configuration.variantPrices ?? <String, double>{},
+    );
+
     // ensure standard fallback for existing
     for (final u in selectedUnits) {
       customConversions.putIfAbsent(u, () => _defaultConversion(u));
@@ -322,6 +326,50 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                               }
                             },
                           ))),
+                      const SizedBox(height: 16),
+                      const Text('Set Separate Prices per Variant / Weight (Optional Override):',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      ...steps
+                          .expand((s) => s.values)
+                          .toSet()
+                          .map((val) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: Text('Price for $val:', style: const TextStyle(fontWeight: FontWeight.w600)),
+                              ),
+                              Expanded(
+                                flex: 3,
+                                child: TextField(
+                                  controller: TextEditingController(
+                                    text: variantPrices[val] != null && variantPrices[val]! > 0
+                                        ? variantPrices[val]!.toString()
+                                        : '',
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    prefixText: '₹ ',
+                                    hintText: 'Default base price',
+                                  ),
+                                  onChanged: (v) {
+                                    final p = double.tryParse(v);
+                                    if (p != null && p > 0) {
+                                      variantPrices[val] = p;
+                                    } else {
+                                      variantPrices.remove(val);
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                     ],
                     const SizedBox(height: 20),
                     SizedBox(
@@ -357,12 +405,14 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                     for (final selected in selectedUnits)
                                       selected: customConversions[selected] ??
                                           _defaultConversion(selected),
-                                  }),
+                                  },
+                                  variantPrices: variantPrices),
                             ));
                             if (context.mounted) Navigator.pop(context, true);
                           },
                         )),
                   ]),
+
             ),
           ),
         ),
