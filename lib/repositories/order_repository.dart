@@ -8,7 +8,8 @@ class OrderRepository {
 
   final DatabaseHelper _databaseHelper;
 
-  Future<int> createOrder(DraftOrder draftOrder) async {
+  Future<int> createOrder(DraftOrder draftOrder,
+      {double? estimateTotal}) async {
     final db = await _databaseHelper.database;
     return db.transaction((txn) async {
       final now = DateTime.now();
@@ -18,6 +19,7 @@ class OrderRepository {
         'created_at': now.toIso8601String(),
         'status': orderStatusLabel(OrderStatus.pending),
         'notes': null,
+        'estimate_total': estimateTotal ?? draftOrder.estimateTotal ?? 0,
       });
 
       for (final item in draftOrder.items) {
@@ -43,6 +45,8 @@ class OrderRepository {
             'options': item.options,
             'description': item.description,
             'notes': item.notes,
+            'unitPrice': item.unitPrice,
+            'unitFactor': item.unitFactor,
           }),
         });
 
@@ -61,6 +65,7 @@ class OrderRepository {
   Future<void> addItemsToOrder({
     required int orderId,
     required List<DraftOrderItem> items,
+    double estimateTotalAddition = 0,
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
@@ -85,6 +90,8 @@ class OrderRepository {
             'options': item.options,
             'description': item.description,
             'notes': item.notes,
+            'unitPrice': item.unitPrice,
+            'unitFactor': item.unitFactor,
           }),
         });
         for (final option in item.options.entries) {
@@ -101,6 +108,12 @@ class OrderRepository {
         where: 'id = ?',
         whereArgs: <Object?>[orderId],
       );
+      if (estimateTotalAddition != 0) {
+        await txn.rawUpdate(
+          'UPDATE orders SET estimate_total = estimate_total + ? WHERE id = ?',
+          <Object?>[estimateTotalAddition, orderId],
+        );
+      }
     });
   }
 
@@ -155,6 +168,20 @@ class OrderRepository {
     return searchOrderSummaries(customer.first['name'] as String).then(
       (orders) =>
           orders.where((order) => order.customerId == customerId).toList(),
+    );
+  }
+
+  Future<void> closePendingOrdersForCustomer(int customerId) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'orders',
+      {'status': orderStatusLabel(OrderStatus.closed)},
+      where: 'customer_id = ? AND status IN (?, ?)',
+      whereArgs: <Object?>[
+        customerId,
+        orderStatusLabel(OrderStatus.pending),
+        orderStatusLabel(OrderStatus.partiallyCompleted),
+      ],
     );
   }
 
@@ -225,6 +252,7 @@ class OrderRepository {
       createdAt: DateTime.parse(orderRow['created_at'] as String),
       status: _orderStatusFromLabel(orderRow['status'] as String),
       notes: orderRow['notes'] as String?,
+      estimateTotal: (orderRow['estimate_total'] as num?)?.toDouble() ?? 0,
     );
 
     return OrderDetails(order: order, items: items);
@@ -314,6 +342,8 @@ class OrderRepository {
         return OrderStatus.completed;
       case 'PARTIALLY COMPLETED':
         return OrderStatus.partiallyCompleted;
+      case 'CLOSED':
+        return OrderStatus.closed;
       default:
         return OrderStatus.pending;
     }

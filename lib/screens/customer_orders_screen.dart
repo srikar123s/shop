@@ -74,13 +74,53 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
         return Colors.orange;
       case OrderStatus.pending:
         return Colors.red;
+      case OrderStatus.closed:
+        return Colors.blueGrey;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.customerName)),
+      appBar: AppBar(
+        title: Text(widget.customerName),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Close pending orders',
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Close pending orders?'),
+                  content: const Text(
+                    'They will remain in history, but will no longer appear as pending.',
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('CANCEL'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('CLOSE'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true || !context.mounted) return;
+              await widget.orderRepository
+                  .closePendingOrdersForCustomer(widget.customerId);
+              if (!context.mounted) return;
+              await _load();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Pending orders closed')),
+              );
+            },
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createOrder,
         icon: const Icon(Icons.add_shopping_cart),

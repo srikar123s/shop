@@ -34,6 +34,7 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   final Set<String> _selectedGroups = <String>{};
   final Map<String, List<_BulkLine>> _groupLines = <String, List<_BulkLine>>{};
   final Map<String, double> _variantQuantities = <String, double>{};
+  late String _unit;
 
   @override
   void initState() {
@@ -48,6 +49,10 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
           step.label.toLowerCase().contains('color'),
     );
     if (group >= 0 && group != _variantIndex) _groupIndex = group;
+    _unit = widget.product.configuration.defaultUnit ??
+        (widget.product.configuration.unitOptions.isEmpty
+            ? 'Unit'
+            : widget.product.configuration.unitOptions.first);
   }
 
   List<ProductStep> get _prefixSteps => _steps
@@ -81,10 +86,7 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   }
 
   List<DraftOrderItem> _buildItems() {
-    final unit = widget.product.configuration.defaultUnit ??
-        (widget.product.configuration.unitOptions.isEmpty
-            ? 'Unit'
-            : widget.product.configuration.unitOptions.first);
+    final factor = widget.product.configuration.unitConversions[_unit] ?? 1;
     final items = <DraftOrderItem>[];
     if (_groupIndex != null) {
       for (final group in _selectedGroups) {
@@ -100,7 +102,9 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
             itemName: widget.product.name,
             options: options,
             quantity: line.quantity,
-            unit: unit,
+            unit: _unit,
+            unitPrice: widget.product.configuration.basePrice * factor,
+            unitFactor: factor,
           ));
         }
       }
@@ -116,7 +120,9 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
           itemName: widget.product.name,
           options: options,
           quantity: quantity,
-          unit: unit,
+          unit: _unit,
+          unitPrice: widget.product.configuration.basePrice * factor,
+          unitFactor: factor,
         ));
       }
     }
@@ -140,6 +146,21 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                   s.catalog(widget.product.name),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                const SizedBox(height: 12),
+                if (widget.product.configuration.unitOptions.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    initialValue: _unit,
+                    decoration: const InputDecoration(labelText: 'Unit'),
+                    items: widget.product.configuration.unitOptions
+                        .map((value) => DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            ))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) setState(() => _unit = value);
+                    },
+                  ),
                 const SizedBox(height: 12),
                 ..._prefixSteps.map(
                   (step) => Padding(
@@ -229,19 +250,28 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
+        child: Column(
           children: <Widget>[
-            Expanded(
-                child: Text(label,
-                    style: const TextStyle(fontWeight: FontWeight.w600))),
-            SizedBox(
-              width: 132,
-              child: QuantitySelector(
-                value: quantity,
-                min: 0,
-                onChanged: (value) =>
-                    setState(() => _variantQuantities[key] = value),
-              ),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(label,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                SizedBox(
+                  width: 132,
+                  child: QuantitySelector(
+                    value: quantity,
+                    min: 0,
+                    onChanged: (value) =>
+                        setState(() => _variantQuantities[key] = value),
+                  ),
+                ),
+              ],
+            ),
+            QuantityPresets(
+              onSelected: (value) =>
+                  setState(() => _variantQuantities[key] = value),
             ),
           ],
         ),

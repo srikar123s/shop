@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/l10n/app_localizations.dart';
+import 'package:shop/app_keys.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/widgets/large_action_button.dart';
@@ -23,38 +24,51 @@ class OrderPreviewScreen extends StatefulWidget {
 
 class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   bool _saving = false;
+  late final TextEditingController _estimateController;
+
+  @override
+  void initState() {
+    super.initState();
+    _estimateController = TextEditingController(
+      text: _calculateEstimate().toStringAsFixed(2),
+    );
+  }
+
+  double _calculateEstimate() => widget.draftOrder.items.fold<double>(
+        0,
+        (sum, item) => sum + (item.unitPrice ?? 0) * item.quantity,
+      );
+
+  @override
+  void dispose() {
+    _estimateController.dispose();
+    super.dispose();
+  }
 
   Future<void> _saveOrder() async {
     setState(() => _saving = true);
+    final estimate = double.tryParse(_estimateController.text.trim()) ??
+        _calculateEstimate();
     if (widget.existingOrderId == null) {
-      await widget.orderRepository.createOrder(widget.draftOrder);
+      await widget.orderRepository.createOrder(
+        widget.draftOrder,
+        estimateTotal: estimate,
+      );
     } else {
       await widget.orderRepository.addItemsToOrder(
         orderId: widget.existingOrderId!,
         items: widget.draftOrder.items,
+        estimateTotalAddition: estimate,
       );
     }
     if (!mounted) {
       return;
     }
     setState(() => _saving = false);
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        final s = AppLocalizations.of(context);
-        return AlertDialog(
-          title: Text(s.t('orderSaved')),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.popUntil(context, (route) => route.isFirst);
-              },
-              child: Text(s.t('goHome')),
-            ),
-          ],
-        );
-      },
+    final s = AppLocalizations.of(context);
+    Navigator.popUntil(context, (route) => route.isFirst);
+    rootMessengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(s.t('orderSaved'))),
     );
   }
 
@@ -74,6 +88,16 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
             ),
             Text(
                 '${s.t('date')}: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _estimateController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Estimated total (editable)',
+                prefixText: '₹ ',
+              ),
+            ),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.builder(

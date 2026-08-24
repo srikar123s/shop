@@ -9,7 +9,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 1;
+  static const int dbVersion = 2;
 
   Database? _database;
 
@@ -41,10 +41,19 @@ class DatabaseHelper {
       path,
       version: dbVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onOpen: (db) async {
         await _seedInitialProducts(db);
       },
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute(
+        'ALTER TABLE orders ADD COLUMN estimate_total REAL NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -88,6 +97,7 @@ class DatabaseHelper {
         created_at TEXT NOT NULL,
         status TEXT NOT NULL,
         notes TEXT,
+        estimate_total REAL NOT NULL DEFAULT 0,
         FOREIGN KEY(customer_id) REFERENCES customers(id)
       )
     ''');

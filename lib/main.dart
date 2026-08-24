@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/app_keys.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
@@ -52,6 +53,7 @@ class _ShopAppState extends State<ShopApp> {
     final backupService = BackupService(database);
 
     return MaterialApp(
+      scaffoldMessengerKey: rootMessengerKey,
       title: 'Hardware Shop',
       debugShowCheckedModeBanner: false,
       locale: _locale,

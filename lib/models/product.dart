@@ -59,21 +59,29 @@ class ProductConfiguration {
     required this.steps,
     this.defaultUnit,
     this.unitOptions = const <String>[],
+    this.basePrice = 0,
+    this.unitConversions = const <String, double>{},
   });
 
   final List<ProductStep> steps;
   final String? defaultUnit;
   final List<String> unitOptions;
+  final double basePrice;
+  final Map<String, double> unitConversions;
 
   ProductConfiguration copyWith({
     List<ProductStep>? steps,
     String? defaultUnit,
     List<String>? unitOptions,
+    double? basePrice,
+    Map<String, double>? unitConversions,
   }) {
     return ProductConfiguration(
       steps: steps ?? this.steps,
       defaultUnit: defaultUnit ?? this.defaultUnit,
       unitOptions: unitOptions ?? this.unitOptions,
+      basePrice: basePrice ?? this.basePrice,
+      unitConversions: unitConversions ?? this.unitConversions,
     );
   }
 
@@ -82,6 +90,8 @@ class ProductConfiguration {
       'steps': steps.map((e) => e.toMap()).toList(),
       'defaultUnit': defaultUnit,
       'unitOptions': unitOptions,
+      'basePrice': basePrice,
+      'unitConversions': unitConversions,
     };
   }
 
@@ -95,6 +105,11 @@ class ProductConfiguration {
       unitOptions: (map['unitOptions'] as List<dynamic>? ?? <dynamic>[])
           .map((e) => e as String)
           .toList(),
+      basePrice: (map['basePrice'] as num?)?.toDouble() ?? 0,
+      unitConversions: ((map['unitConversions'] as Map<dynamic, dynamic>?) ??
+              <dynamic, dynamic>{})
+          .map((key, value) =>
+              MapEntry(key.toString(), (value as num).toDouble())),
     );
   }
 }

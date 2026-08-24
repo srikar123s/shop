@@ -55,44 +55,110 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     });
   }
 
+  double _defaultConversion(String unit) {
+    switch (unit.toLowerCase()) {
+      case 'packet':
+        return 10;
+      case 'box':
+        return 100;
+      default:
+        return 1;
+    }
+  }
+
   Future<ProductStep?> _editChoices(ProductStep step) async {
-    final controller = TextEditingController(text: step.values.join(', '));
+    final controller = TextEditingController();
+    final choices = <String>[...step.values];
     return showDialog<ProductStep>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${step.label} choices'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 2,
-          maxLines: 4,
-          decoration: const InputDecoration(
-              labelText: 'Choices', hintText: 'Example: Brand A, Brand B'),
-        ),
-        actions: <Widget>[
-          TextButton(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('${step.label} choices'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          labelText: 'New choice',
+                          hintText: 'Brand A',
+                        ),
+                        onSubmitted: (_) {
+                          final value = controller.text.trim();
+                          if (value.isEmpty) return;
+                          setDialogState(() {
+                            choices.add(value);
+                            controller.clear();
+                          });
+                        },
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Add choice',
+                      onPressed: () {
+                        final value = controller.text.trim();
+                        if (value.isEmpty) return;
+                        setDialogState(() {
+                          choices.add(value);
+                          controller.clear();
+                        });
+                      },
+                      icon: const Icon(Icons.add_circle),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...choices.asMap().entries.map(
+                      (entry) => ListTile(
+                        dense: true,
+                        title: Text(entry.value),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => setDialogState(
+                            () => choices.removeAt(entry.key),
+                          ),
+                        ),
+                      ),
+                    ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('CANCEL')),
-          FilledButton(
-              onPressed: () {
-                final values = controller.text
-                    .split(',')
-                    .map((e) => e.trim())
-                    .where((e) => e.isNotEmpty)
-                    .toList();
-                if (values.isNotEmpty) {
-                  Navigator.pop(context, step.copyWith(values: values));
-                }
-              },
-              child: const Text('SAVE')),
-        ],
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: choices.isEmpty
+                  ? null
+                  : () =>
+                      Navigator.pop(context, step.copyWith(values: choices)),
+              child: const Text('SAVE'),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Future<void> _editProduct({Product? product}) async {
     final name = TextEditingController(text: product?.name ?? '');
+    final price = TextEditingController(
+      text: product == null || product.configuration.basePrice == 0
+          ? ''
+          : product.configuration.basePrice.toString(),
+    );
     var unit = product?.configuration.defaultUnit ?? 'Piece';
+    final selectedUnits = <String>{
+      ...(product?.configuration.unitOptions ?? <String>[]),
+      unit,
+    };
     final steps = <ProductStep>[...?product?.configuration.steps];
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -117,20 +183,43 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         decoration: const InputDecoration(
                             labelText: 'Product name',
                             hintText: 'Example: Welding Rod')),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: price,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Base price *',
+                        prefixText: '₹ ',
+                        hintText: 'Example: 250',
+                      ),
+                    ),
                     const SizedBox(height: 20),
                     const Text('How is it sold?',
                         style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _units
-                            .map((value) => ChoiceChip(
-                                label: Text(value),
-                                selected: unit == value,
-                                onSelected: (_) =>
-                                    setSheetState(() => unit = value)))
-                            .toList()),
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _units.map((value) {
+                        return FilterChip(
+                          label: Text(value),
+                          selected: selectedUnits.contains(value),
+                          onSelected: (selected) {
+                            setSheetState(() {
+                              if (selected) {
+                                selectedUnits.add(value);
+                              } else if (selectedUnits.length > 1) {
+                                selectedUnits.remove(value);
+                              }
+                              if (!selectedUnits.contains(unit)) {
+                                unit = selectedUnits.first;
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
                     const SizedBox(height: 20),
                     const Text('What should we ask the customer?',
                         style: TextStyle(fontWeight: FontWeight.w700)),
@@ -138,29 +227,30 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         'Optional — choose only what this product needs.'),
                     const SizedBox(height: 8),
                     Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _questions.entries.map((entry) {
-                          final selected =
-                              steps.any((step) => step.key == entry.key);
-                          return FilterChip(
-                              label: Text(entry.value),
-                              selected: selected,
-                              onSelected: (isSelected) async {
-                                if (!isSelected) {
-                                  setSheetState(() => steps.removeWhere(
-                                      (step) => step.key == entry.key));
-                                  return;
-                                }
-                                final step = await _editChoices(ProductStep(
-                                    key: entry.key,
-                                    label: entry.value,
-                                    type: 'select'));
-                                if (step != null) {
-                                  setSheetState(() => steps.add(step));
-                                }
-                              });
-                        }).toList()),
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _questions.entries.map((entry) {
+                        final selected =
+                            steps.any((step) => step.key == entry.key);
+                        return FilterChip(
+                            label: Text(entry.value),
+                            selected: selected,
+                            onSelected: (isSelected) async {
+                              if (!isSelected) {
+                                setSheetState(() => steps.removeWhere(
+                                    (step) => step.key == entry.key));
+                                return;
+                              }
+                              final step = await _editChoices(ProductStep(
+                                  key: entry.key,
+                                  label: entry.value,
+                                  type: 'select'));
+                              if (step != null) {
+                                setSheetState(() => steps.add(step));
+                              }
+                            });
+                      }).toList(),
+                    ),
                     if (steps.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 14),
                       ...steps.asMap().entries.map((entry) => Card(
@@ -183,7 +273,11 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           icon: const Icon(Icons.check),
                           label: const Text('SAVE PRODUCT'),
                           onPressed: () async {
+                            final parsedPrice =
+                                double.tryParse(price.text.trim());
                             if (name.text.trim().isEmpty ||
+                                parsedPrice == null ||
+                                parsedPrice < 0 ||
                                 steps.any((step) => step.values.isEmpty)) {
                               return;
                             }
@@ -196,7 +290,12 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                               configuration: ProductConfiguration(
                                   steps: steps,
                                   defaultUnit: unit,
-                                  unitOptions: <String>[unit]),
+                                  unitOptions: selectedUnits.toList(),
+                                  basePrice: parsedPrice,
+                                  unitConversions: <String, double>{
+                                    for (final selected in selectedUnits)
+                                      selected: _defaultConversion(selected),
+                                  }),
                             ));
                             if (context.mounted) Navigator.pop(context, true);
                           },

@@ -2,7 +2,7 @@ import 'package:shop/models/customer.dart';
 
 enum ItemStatus { given, partial, notGiven }
 
-enum OrderStatus { pending, partiallyCompleted, completed }
+enum OrderStatus { pending, partiallyCompleted, completed, closed }
 
 enum ProcurementStatus { notRequired, toProcure }
 
@@ -25,15 +25,19 @@ String orderStatusLabel(OrderStatus status) {
       return 'PARTIALLY COMPLETED';
     case OrderStatus.completed:
       return 'COMPLETED';
+    case OrderStatus.closed:
+      return 'CLOSED';
   }
 }
 
 class DraftOrder {
-  DraftOrder({required this.customer, List<DraftOrderItem>? items})
+  DraftOrder(
+      {required this.customer, List<DraftOrderItem>? items, this.estimateTotal})
       : items = items ?? <DraftOrderItem>[];
 
   final Customer customer;
   final List<DraftOrderItem> items;
+  final double? estimateTotal;
 }
 
 class DraftOrderItem {
@@ -46,6 +50,8 @@ class DraftOrderItem {
     this.isOtherItem = false,
     this.description,
     this.notes,
+    this.unitPrice,
+    this.unitFactor = 1,
   });
 
   final int? productId;
@@ -56,6 +62,8 @@ class DraftOrderItem {
   final bool isOtherItem;
   final String? description;
   final String? notes;
+  final double? unitPrice;
+  final double unitFactor;
 }
 
 class OrderEntity {
@@ -66,6 +74,7 @@ class OrderEntity {
     required this.createdAt,
     required this.status,
     this.notes,
+    this.estimateTotal = 0,
   });
 
   final int? id;
@@ -74,6 +83,7 @@ class OrderEntity {
   final DateTime createdAt;
   final OrderStatus status;
   final String? notes;
+  final double estimateTotal;
 
   Map<String, Object?> toMap() {
     return {

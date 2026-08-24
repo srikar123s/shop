@@ -110,6 +110,9 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
                   value: _quantity,
                   onChanged: (v) => setState(() => _quantity = v),
                   min: 1),
+              QuantityPresets(
+                onSelected: (value) => setState(() => _quantity = value),
+              ),
               const SizedBox(height: 16),
               if (unitOptions.isNotEmpty)
                 DropdownButtonFormField<String>(
@@ -139,6 +142,12 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
                     options: _selected,
                     quantity: _quantity,
                     unit: _unit,
+                    unitPrice: widget.product.configuration.basePrice *
+                        (widget.product.configuration.unitConversions[_unit] ??
+                            1),
+                    unitFactor:
+                        widget.product.configuration.unitConversions[_unit] ??
+                            1,
                   );
                   Navigator.pop(context, item);
                 },

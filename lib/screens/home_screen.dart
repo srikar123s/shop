@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shop/l10n/app_localizations.dart';
+import 'package:intl/intl.dart';
+import 'package:shop/models/order.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/customer_screen.dart';
 import 'package:shop/screens/history_screen.dart';
 import 'package:shop/screens/shop_settings_screen.dart';
+import 'package:shop/screens/customer_orders_screen.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
@@ -81,6 +84,60 @@ class HomeScreen extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 24),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'RECENT ORDERS',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 132,
+                child: FutureBuilder<List<OrderSummary>>(
+                  future: orderRepository.searchOrderSummaries(''),
+                  builder: (context, snapshot) {
+                    final orders = snapshot.data?.take(3).toList() ??
+                        <OrderSummary>[];
+                    if (orders.isEmpty) {
+                      return const Center(child: Text('No recent orders'));
+                    }
+                    return ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: orders.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final order = orders[index];
+                        return SizedBox(
+                          width: 220,
+                          child: Card(
+                            child: ListTile(
+                              dense: true,
+                              title: Text(order.customerName),
+                              subtitle: Text(
+                                '${DateFormat('dd MMM, hh:mm a').format(order.createdAt)}\n${order.totalItems} items',
+                              ),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => CustomerOrdersScreen(
+                                    customerId: order.customerId,
+                                    customerName: order.customerName,
+                                    customerRepository: customerRepository,
+                                    productRepository: productRepository,
+                                    orderRepository: orderRepository,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
               const SizedBox(height: 24),
               LargeActionButton(
