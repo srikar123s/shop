@@ -75,16 +75,70 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
         .every((step) => _prefixSelections.containsKey(step.key));
   }
 
-  double _getVariantPrice(String variantKey, String variantName) {
+  String _buildCombinationKey(String group, String variant) {
+    final parts = <String>[];
+    for (final step in _steps) {
+      if (_groupIndex != null && step.key == _steps[_groupIndex!].key) {
+        if (group.isNotEmpty) parts.add(group);
+      } else if (step.key == _steps[_variantIndex].key) {
+        if (variant.isNotEmpty) parts.add(variant);
+      } else {
+        final sel = _prefixSelections[step.key];
+        if (sel != null && sel.isNotEmpty) parts.add(sel);
+      }
+    }
+    return parts.join(' • ');
+  }
+
+  double _getVariantPrice(String variantKey, String variantName, {String group = ''}) {
     if (_customPrices.containsKey(variantKey)) {
       return _customPrices[variantKey]!;
     }
-    final configuredVariantPrice =
-        widget.product.configuration.variantPrices[variantName] ??
-        widget.product.configuration.variantPrices[variantKey];
+    final comboKey = _buildCombinationKey(group, variantName);
     final factor = widget.product.configuration.unitConversions[_unit] ?? 1.0;
-    if (configuredVariantPrice != null && configuredVariantPrice > 0) {
-      return configuredVariantPrice * factor;
+
+    final variantPrices = widget.product.configuration.variantPrices;
+    
+    // 1. Direct key match
+    double? configuredPrice = variantPrices[comboKey] ??
+        variantPrices[comboKey.toLowerCase()] ??
+        variantPrices[variantName] ??
+        variantPrices[variantKey];
+
+    // 2. Case-insensitive & set-based match across option values
+    if (configuredPrice == null || configuredPrice <= 0) {
+      final lowerCombo = comboKey.toLowerCase().trim();
+      final comboPartsSet = lowerCombo
+          .split(RegExp(r'[\+\•\-\:]'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+
+      for (final entry in variantPrices.entries) {
+        final keyLower = entry.key.toLowerCase().trim();
+        if (keyLower == lowerCombo && entry.value > 0) {
+          configuredPrice = entry.value;
+          break;
+        }
+
+        final entrySet = keyLower
+            .split(RegExp(r'[\+\•\-\:]'))
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+
+        if (comboPartsSet.isNotEmpty &&
+            entrySet.length == comboPartsSet.length &&
+            entrySet.containsAll(comboPartsSet) &&
+            entry.value > 0) {
+          configuredPrice = entry.value;
+          break;
+        }
+      }
+    }
+
+    if (configuredPrice != null && configuredPrice > 0) {
+      return configuredPrice * factor;
     }
 
     final basePrice = widget.product.configuration.basePrice;
@@ -107,7 +161,6 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     return (basePrice > 0 ? basePrice * multiplier : 0) * factor;
   }
 
-
   List<DraftOrderItem> _buildItems() {
     final factor = widget.product.configuration.unitConversions[_unit] ?? 1;
     final items = <DraftOrderItem>[];
@@ -123,7 +176,7 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
             _steps[_groupIndex!].key: group,
             _steps[_variantIndex].key: variant,
           };
-          final unitPrice = _getVariantPrice(key, variant);
+          final unitPrice = _getVariantPrice(key, variant, group: group);
           items.add(DraftOrderItem(
             productId: widget.product.id,
             itemName: widget.product.name,
@@ -359,7 +412,7 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     final currentVariant = _activeGroupVariant[group] ?? (variants.isNotEmpty ? variants.first : '');
     final currentKey = '$group::$currentVariant';
     final currentQty = _variantQuantities[currentKey] ?? 0;
-    final currentPrice = _getVariantPrice(currentKey, currentVariant);
+    final currentPrice = _getVariantPrice(currentKey, currentVariant, group: group);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

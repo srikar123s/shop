@@ -52,6 +52,29 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
     });
   }
 
+  double _calculateUnitPrice() {
+    final factor = widget.product.configuration.unitConversions[_unit] ?? 1.0;
+    final comboKey = _selected.values.where((v) => v.isNotEmpty).join(' • ');
+    final variantPrices = widget.product.configuration.variantPrices;
+
+    if (comboKey.isNotEmpty &&
+        variantPrices.containsKey(comboKey) &&
+        variantPrices[comboKey]! > 0) {
+      return variantPrices[comboKey]! * factor;
+    }
+
+    // Fallback to checking any option value key in variantPrices
+    for (final val in _selected.values) {
+      if (variantPrices.containsKey(val) && variantPrices[val]! > 0) {
+        return variantPrices[val]! * factor;
+      }
+    }
+
+    // Fallback to basePrice
+    final basePrice = widget.product.configuration.basePrice;
+    return basePrice > 0 ? basePrice * factor : 0.0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
@@ -61,6 +84,7 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
       s.catalog(widget.product.name),
       ..._selected.values.map(s.catalog)
     ];
+    final calculatedUnitPrice = _calculateUnitPrice();
 
     return Scaffold(
       appBar: AppBar(title: Text(s.catalog(widget.product.name))),
@@ -101,9 +125,22 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
                 ),
               ),
             ] else ...<Widget>[
-              Text(
-                s.t('quantity'),
-                style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    s.t('quantity'),
+                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                  ),
+                  if (calculatedUnitPrice > 0)
+                    Text(
+                      '₹${calculatedUnitPrice.toStringAsFixed(2)} / $_unit',
+                      style: TextStyle(
+                          color: Colors.teal.shade800,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold),
+                    ),
+                ],
               ),
               const SizedBox(height: 12),
               QuantitySelector(
@@ -136,15 +173,14 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
               LargeActionButton(
                 label: s.t('addItem'),
                 onTap: () {
+                  final unitPrice = _calculateUnitPrice();
                   final item = DraftOrderItem(
                     productId: widget.product.id,
                     itemName: widget.product.name,
                     options: _selected,
                     quantity: _quantity,
                     unit: _unit,
-                    unitPrice: widget.product.configuration.basePrice *
-                        (widget.product.configuration.unitConversions[_unit] ??
-                            1),
+                    unitPrice: unitPrice > 0 ? unitPrice : null,
                     unitFactor:
                         widget.product.configuration.unitConversions[_unit] ??
                             1,

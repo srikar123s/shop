@@ -64,19 +64,61 @@ class ProductRepository {
 
   Future<int> upsertProduct(Product product) async {
     final db = await _databaseHelper.database;
-    if (product.id == null) {
-      return db.insert('products', {
-        ...product.toMap(),
-        'created_at': DateTime.now().toIso8601String(),
-      });
+    final trimmedName = product.name.trim();
+    final lowerName = trimmedName.toLowerCase();
+
+    // 1. If product ID is explicitly specified, update by ID
+    if (product.id != null) {
+      await db.update(
+        'products',
+        product.toMap(),
+        where: 'id = ?',
+        whereArgs: [product.id],
+      );
+      return product.id!;
     }
-    await db.update(
-      'products',
-      product.toMap(),
-      where: 'id = ?',
-      whereArgs: [product.id],
-    );
-    return product.id!;
+
+    // 2. Check if product with same or singular/plural name already exists
+    final existingRows = await db.query('products');
+    int? matchedId;
+    for (final row in existingRows) {
+      final dbName = (row['name'] as String).trim().toLowerCase();
+      if (dbName == lowerName) {
+        matchedId = row['id'] as int;
+        break;
+      }
+      // Check singular/plural match (e.g., Paint vs Paints, Welding Rod vs Welding Rods)
+      if ('${dbName}s' == lowerName ||
+          '${lowerName}s' == dbName ||
+          (dbName.length > 3 &&
+              lowerName.length > 3 &&
+              dbName.replaceAll('s', '') == lowerName.replaceAll('s', ''))) {
+        matchedId = row['id'] as int;
+        break;
+      }
+    }
+
+    if (matchedId != null) {
+      final mapData = product.toMap();
+      await db.update(
+        'products',
+        {
+          'name': trimmedName,
+          'category': product.category,
+          'configuration': mapData['configuration'],
+        },
+        where: 'id = ?',
+        whereArgs: [matchedId],
+      );
+      return matchedId;
+    }
+
+    // 3. Otherwise insert as a new product
+    return db.insert('products', {
+      ...product.toMap(),
+      'name': trimmedName,
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   Future<void> setProductActive(int id, bool isActive) async {
@@ -87,5 +129,19 @@ class ProductRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<void> deleteProduct(int id) async {
+    final db = await _databaseHelper.database;
+    await db.delete(
+      'products',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteAllProducts() async {
+    final db = await _databaseHelper.database;
+    await db.delete('products');
   }
 }
