@@ -112,6 +112,15 @@ const Map<String, String> stringsEn = <String, String>{
   'grandTotal': 'Grand Total',
   'optional': 'Optional',
   'defaultGstHint': 'Default 18% • Tap to change',
+  'closeOrder': 'CLOSE ORDER',
+  'completeOrder': 'COMPLETE ORDER',
+  'adjustBillAndClose': 'Adjust Bill for Given Items & Close',
+  'deliverAllAndClose': 'Deliver All Remaining Items & Close',
+  'partiallyFulfilledOrder': 'Partially Fulfilled Order',
+  'itemsNotGiven': 'Items not given / partially given',
+  'priceByAttribute': 'Price by Attribute (e.g. Size/Weight)',
+  'priceByAttributeDesc': 'All colours and other choices will share the same price for each size.',
+  'specialShadeOverrides': 'Special shade overrides (Optional)',
 };
 
 const Map<String, String> catalogTe = <String, String>{

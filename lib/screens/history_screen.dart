@@ -159,7 +159,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                 ),
                                 title: Text(
                                   latest.customerName,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16),
                                 ),
                                 subtitle: Padding(
                                   padding: const EdgeInsets.only(top: 4),

@@ -186,6 +186,87 @@ void main() {
       expect(order.billBreakdown!.otherCharges.first.name, 'Loading');
       expect(order.billBreakdown!.grandTotal, 1280.0);
     });
+
+    test('BillBreakdown retains partial fulfillment audit notes across serialization', () {
+      const noteText = 'Closed with partial items delivered: Paint 1L (3/5 given). Bill adjusted for given items.';
+      final breakdown = BillBreakdown.calculate(
+        subtotal: 1050.0,
+        applyGst: true,
+        gstRate: 18.0,
+        note: noteText,
+      );
+
+      expect(breakdown.note, noteText);
+      final jsonStr = jsonEncode(breakdown.toMap());
+      final restored = BillBreakdown.fromJsonString(jsonStr);
+
+      expect(restored, isNotNull);
+      expect(restored!.note, noteText);
+      expect(restored.subtotal, 1050.0);
+      expect(restored.grandTotal, 1239.0);
+    });
+
+    test('Paint scenario: all colours share same price for each weight/size', () {
+      // Simulating Paint setup: Sizes: [500ml, 1 Litre, 4 Litre], Colours: [Red, Blue, White]
+      final sizes = ['500ml', '1 Litre', '4 Litre'];
+      final colours = ['Red', 'Blue', 'White'];
+      final sizeRates = {'500ml': 200.0, '1 Litre': 350.0, '4 Litre': 1200.0};
+
+      final variantPrices = <String, double>{};
+      for (final s in sizes) {
+        final rate = sizeRates[s]!;
+        variantPrices[s] = rate; // attribute key
+        variantPrices[s.toLowerCase()] = rate;
+        for (final c in colours) {
+          variantPrices['$c • $s'] = rate; // combination key
+          variantPrices['$s • $c'] = rate;
+          variantPrices['$c • $s'.toLowerCase()] = rate;
+        }
+      }
+
+      // 1 Litre Red and 1 Litre Blue must have exact same price (350.0)
+      expect(variantPrices['Red • 1 Litre'], 350.0);
+      expect(variantPrices['Blue • 1 Litre'], 350.0);
+      expect(variantPrices['White • 1 Litre'], 350.0);
+      expect(variantPrices['1 Litre'], 350.0);
+
+      // 500ml of any colour must be 200.0
+      expect(variantPrices['Red • 500ml'], 200.0);
+      expect(variantPrices['Blue • 500ml'], 200.0);
+      expect(variantPrices['500ml'], 200.0);
+
+      // 4 Litre of any colour must be 1200.0
+      expect(variantPrices['Red • 4 Litre'], 1200.0);
+      expect(variantPrices['White • 4 Litre'], 1200.0);
+    });
+
+    test('Partial delivery bill adjustment calculation', () {
+      // Customer ordered:
+      // 1. Paint 1L Red: ordered 5, given 3 @ 350 each
+      // 2. Roller Brush: ordered 2, given 0 @ 150 each
+      final orderedSubtotal = (5 * 350.0) + (2 * 150.0); // 1750 + 300 = 2050
+      final deliveredSubtotal = (3 * 350.0) + (0 * 150.0); // 1050
+
+      final originalBill = BillBreakdown.calculate(
+        subtotal: orderedSubtotal,
+        applyGst: true,
+        gstRate: 18.0,
+      );
+      expect(originalBill.subtotal, 2050.0);
+      expect(originalBill.gstAmount, 369.0);
+      expect(originalBill.grandTotal, 2419.0);
+
+      final adjustedBill = BillBreakdown.calculate(
+        subtotal: deliveredSubtotal,
+        applyGst: true,
+        gstRate: 18.0,
+        note: 'Order closed with delivered items: Paint 1L Red (3/5 given), Roller Brush (0/2 given).',
+      );
+      expect(adjustedBill.subtotal, 1050.0);
+      expect(adjustedBill.gstAmount, 189.0);
+      expect(adjustedBill.grandTotal, 1239.0);
+      expect(adjustedBill.note, contains('Paint 1L Red (3/5 given)'));
+    });
   });
 }
 

@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/product.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class ProductRepository {
   const ProductRepository(this._databaseHelper);
@@ -98,6 +101,7 @@ class ProductRepository {
       }
     }
 
+    int savedId;
     if (matchedId != null) {
       final mapData = product.toMap();
       await db.update(
@@ -110,15 +114,21 @@ class ProductRepository {
         where: 'id = ?',
         whereArgs: [matchedId],
       );
-      return matchedId;
+      savedId = matchedId;
+    } else {
+      // 3. Otherwise insert as a new product
+      savedId = await db.insert('products', {
+        ...product.toMap(),
+        'name': trimmedName,
+        'created_at': DateTime.now().toIso8601String(),
+      });
     }
 
-    // 3. Otherwise insert as a new product
-    return db.insert('products', {
-      ...product.toMap(),
-      'name': trimmedName,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    unawaited(getProductById(savedId).then((p) {
+      if (p != null) ShopSyncService.instance.syncProduct(p);
+    }));
+
+    return savedId;
   }
 
   Future<void> setProductActive(int id, bool isActive) async {
@@ -129,6 +139,9 @@ class ProductRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
+    unawaited(getProductById(id).then((p) {
+      if (p != null) ShopSyncService.instance.syncProduct(p);
+    }));
   }
 
   Future<void> deleteProduct(int id) async {

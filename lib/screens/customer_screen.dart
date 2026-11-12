@@ -309,7 +309,31 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final totalRows = _customers.length + visibleContacts.length;
 
     return Scaffold(
-      appBar: AppBar(title: Text(s.t('newOrderSelectCustomer'))),
+      appBar: AppBar(
+        title: Text(s.t('newOrderSelectCustomer')),
+        actions: [
+          IconButton(
+            tooltip: s.t('addCustomer'),
+            icon: const Icon(Icons.person_add_alt_1),
+            onPressed: _showAddCustomerDialog,
+          ),
+          IconButton(
+            tooltip: 'Phone contacts',
+            icon: _contactsLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _contactsEnabled
+                        ? Icons.contacts
+                        : Icons.contacts_outlined,
+                  ),
+            onPressed: _contactsLoading ? null : _enableContacts,
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -317,142 +341,274 @@ class _CustomerScreenState extends State<CustomerScreen> {
             TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                labelText: s.t('searchCustomer'),
-                prefixIcon: IconButton(
-                  tooltip: 'Load phone contacts',
-                  onPressed: _contactsLoading ? null : _enableContacts,
-                  icon: _contactsLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          _contactsEnabled
-                              ? Icons.contacts
-                              : Icons.contacts_outlined,
-                        ),
-                ),
-                suffixIcon: IconButton(
-                  onPressed: _loadCustomers,
-                  icon: const Icon(Icons.search),
-                ),
+                hintText: s.t('searchCustomer'),
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          _loadCustomers();
+                        },
+                      )
+                    : null,
               ),
               onChanged: (_) => _loadCustomers(),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 10),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _showAddCustomerDialog,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text(
+                      s.t('addNewCustomer'),
+                      style: const TextStyle(fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 10),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _contactsLoading ? null : _enableContacts,
+                    icon: const Icon(Icons.contacts_outlined, size: 16),
+                    label: const Text(
+                      'Phone Contacts',
+                      style: TextStyle(fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : ListView.builder(
-                      itemCount: totalRows,
-                      itemBuilder: (context, index) {
-                        if (index >= _customers.length) {
-                          final contact =
-                              visibleContacts[index - _customers.length];
-                          return Card(
-                            child: ListTile(
-                              leading: const CircleAvatar(
-                                child: Icon(Icons.person_outline),
+                  : totalRows == 0
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.person_search_outlined,
+                                  size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No customers found',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey.shade600),
                               ),
-                              title: Text(contact.displayName ?? ''),
-                              subtitle: const Text('Phone contact'),
-                              trailing: const Icon(Icons.add_circle_outline),
-                              onTap: () => _selectContact(contact),
-                            ),
-                          );
-                        }
-                        final customer = _customers[index];
-                        final selected = _selected?.id == customer.id;
-                        return Card(
-                          color: selected
-                              ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
-                              : null,
-                          child: ListTile(
-                            onTap: () => setState(() => _selected = customer),
-                            onLongPress: () => _showEditCustomerDialog(customer),
-                            leading: CircleAvatar(
-                              child: Text(
-                                customer.name.isNotEmpty
-                                    ? customer.name[0].toUpperCase()
-                                    : 'C',
+                              const SizedBox(height: 8),
+                              FilledButton.tonalIcon(
+                                onPressed: _showAddCustomerDialog,
+                                icon: const Icon(Icons.add, size: 16),
+                                label: Text(s.t('addNewCustomer')),
                               ),
-                            ),
-                            title: Text(
-                              customer.name,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text(
-                              customer.phone?.isNotEmpty == true
-                                  ? customer.phone!
-                                  : s.t('phoneNotAdded'),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (selected)
-                                  const Icon(Icons.check_circle, color: Colors.green),
-                                PopupMenuButton<String>(
-                                  icon: const Icon(Icons.more_vert),
-                                  onSelected: (value) {
-                                    if (value == 'edit') {
-                                      _showEditCustomerDialog(customer);
-                                    } else if (value == 'delete') {
-                                      _confirmDeleteCustomer(customer);
-                                    }
-                                  },
-                                  itemBuilder: (context) => [
-                                    const PopupMenuItem<String>(
-                                      value: 'edit',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.edit_outlined, size: 18),
-                                          SizedBox(width: 8),
-                                          Text('Edit Customer'),
-                                        ],
-                                      ),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'delete',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                                          SizedBox(width: 8),
-                                          Text('Delete Customer', style: TextStyle(color: Colors.red)),
-                                        ],
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: totalRows,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            if (index >= _customers.length) {
+                              final contact =
+                                  visibleContacts[index - _customers.length];
+                              return Card(
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 4),
+                                  leading: CircleAvatar(
+                                    backgroundColor: Colors.blue.shade50,
+                                    foregroundColor: Colors.blue.shade800,
+                                    child: const Icon(Icons.person_outline),
+                                  ),
+                                  title: Text(
+                                    contact.displayName ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text('Phone contact',
+                                      style: TextStyle(fontSize: 12)),
+                                  trailing: const Icon(
+                                      Icons.add_circle_outline,
+                                      color: Color(0xFF0F766E)),
+                                  onTap: () => _selectContact(contact),
+                                ),
+                              );
+                            }
+                            final customer = _customers[index];
+                            final selected = _selected?.id == customer.id;
+                            return Card(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                side: BorderSide(
+                                  color: selected
+                                      ? const Color(0xFF0F766E)
+                                      : const Color(0xFFE2E8F0),
+                                  width: selected ? 1.8 : 1,
+                                ),
+                              ),
+                              color: selected
+                                  ? const Color(0xFFF0FDFA)
+                                  : Colors.white,
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 4),
+                                onTap: () =>
+                                    setState(() => _selected = customer),
+                                onLongPress: () =>
+                                    _showEditCustomerDialog(customer),
+                                leading: CircleAvatar(
+                                  backgroundColor: selected
+                                      ? const Color(0xFF0F766E)
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .primaryContainer,
+                                  foregroundColor: selected
+                                      ? Colors.white
+                                      : Theme.of(context).colorScheme.primary,
+                                  child: Text(
+                                    customer.name.isNotEmpty
+                                        ? customer.name[0].toUpperCase()
+                                        : 'C',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                title: Text(
+                                  customer.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Row(
+                                  children: [
+                                    Icon(Icons.phone_outlined,
+                                        size: 13,
+                                        color: Colors.grey.shade500),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        customer.phone?.isNotEmpty == true
+                                            ? customer.phone!
+                                            : s.t('phoneNotAdded'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 12),
                                       ),
                                     ),
                                   ],
                                 ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (selected) ...[
+                                      const Icon(Icons.check_circle,
+                                          color: Color(0xFF0F766E), size: 22),
+                                      const SizedBox(width: 4),
+                                    ],
+                                    PopupMenuButton<String>(
+                                      icon:
+                                          const Icon(Icons.more_vert, size: 20),
+                                      onSelected: (value) {
+                                        if (value == 'edit') {
+                                          _showEditCustomerDialog(customer);
+                                        } else if (value == 'delete') {
+                                          _confirmDeleteCustomer(customer);
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem<String>(
+                                          value: 'edit',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.edit_outlined,
+                                                  size: 18),
+                                              SizedBox(width: 8),
+                                              Text('Edit Customer'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem<String>(
+                                          value: 'delete',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.delete_outline,
+                                                  size: 18, color: Colors.red),
+                                              SizedBox(width: 8),
+                                              Text('Delete Customer',
+                                                  style: TextStyle(
+                                                      color: Colors.red)),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+            const SizedBox(height: 12),
+            if (_selected != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDFA),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color:
+                          const Color(0xFF0F766E).withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle,
+                        color: Color(0xFF0F766E), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Selected: ${_selected!.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F766E),
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
-            ),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _enableContacts,
-                    icon: const Icon(Icons.contacts_outlined),
-                    label: const Text('CHOOSE FROM CONTACTS'),
-                  ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _showAddCustomerDialog,
-                    icon: const Icon(Icons.person_add_alt_1_outlined),
-                    label: Text(s.t('addCustomer')),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
+              ),
             LargeActionButton(
-              label: s.t('next'),
+              label:
+                  _selected == null ? 'SELECT A CUSTOMER' : '${s.t('next')} →',
               onTap: _selected == null
                   ? null
                   : () {

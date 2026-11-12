@@ -112,4 +112,13 @@ const Map<String, String> stringsTe = <String, String>{
   'grandTotal': 'మొత్తం బిల్లు',
   'optional': 'ఐచ్ఛికం',
   'defaultGstHint': 'డిఫాల్ట్ 18% • మార్చడానికి నొక్కండి',
+  'closeOrder': 'ఆర్డర్ మూసివేయి',
+  'completeOrder': 'ఆర్డర్ పూర్తి చేయి',
+  'adjustBillAndClose': 'ఇచ్చిన వస్తువులకే బిల్ చేసి పూర్తి చేయి',
+  'deliverAllAndClose': 'మిగిలినవన్నీ ఇచ్చామని పూర్తి చేయి',
+  'partiallyFulfilledOrder': 'పాక్షికంగా ఇచ్చిన ఆర్డర్',
+  'itemsNotGiven': 'ఇవ్వని / తక్కువగా ఇచ్చిన వస్తువులు',
+  'priceByAttribute': 'లక్షణం ప్రకారం ధర (ఉదా. సైజు/బరువు)',
+  'priceByAttributeDesc': 'ప్రతి సైజుకు అన్ని రంగులకు ఒకే ధర వర్తిస్తుంది.',
+  'specialShadeOverrides': 'ప్రత్యేక రంగు ధర మార్పు (ఐచ్ఛికం)',
 };

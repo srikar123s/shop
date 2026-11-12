@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/customer.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class CustomerRepository {
   const CustomerRepository(this._databaseHelper);
@@ -32,7 +35,9 @@ class CustomerRepository {
     );
 
     final id = await db.insert('customers', customer.toMap());
-    return customer.copyWith(id: id);
+    final savedCustomer = customer.copyWith(id: id);
+    unawaited(ShopSyncService.instance.syncCustomer(savedCustomer));
+    return savedCustomer;
   }
 
   Future<void> updateCustomer({
@@ -59,6 +64,10 @@ class CustomerRepository {
       where: 'customer_id = ?',
       whereArgs: [id],
     );
+
+    unawaited(getCustomerById(id).then((c) {
+      if (c != null) ShopSyncService.instance.syncCustomer(c);
+    }));
   }
 
   Future<void> deleteCustomer(int id) async {

@@ -55,55 +55,103 @@ class _QuantitySelectorState extends State<QuantitySelector> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        IconButton.filled(
-          onPressed: widget.value <= widget.min
-              ? null
-              : () => _change(widget.value - 1),
-          icon: const Icon(Icons.remove),
-          iconSize: 20,
-        ),
-        const SizedBox(width: 4),
-        SizedBox(
-          width: 64,
-          child: TextField(
-            controller: _controller,
-            textAlign: TextAlign.center,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-            onChanged: (text) {
-              final parsed = double.tryParse(text);
-              if (parsed != null) {
-                final clamped = parsed.clamp(widget.min, widget.max ?? 9999).toDouble();
-                widget.onChanged(clamped);
-              }
-            },
-            onSubmitted: (text) {
-              final parsed = double.tryParse(text);
-              if (parsed != null) _change(parsed);
-            },
-            onTapOutside: (_) {
-              final parsed = double.tryParse(_controller.text);
-              if (parsed != null) _change(parsed);
-            },
-            decoration: const InputDecoration(
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              border: OutlineInputBorder(),
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: IconButton.filledTonal(
+              style: IconButton.styleFrom(
+                backgroundColor: widget.value <= widget.min
+                    ? Colors.grey.shade100
+                    : theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
+                foregroundColor: widget.value <= widget.min
+                    ? Colors.grey.shade400
+                    : theme.colorScheme.primary,
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: widget.value <= widget.min
+                  ? null
+                  : () => _change(widget.value - 1),
+              icon: const Icon(Icons.remove, size: 16),
             ),
           ),
-        ),
-        const SizedBox(width: 4),
-        IconButton.filled(
-          onPressed: widget.max != null && widget.value >= widget.max!
-              ? null
-              : () => _change(widget.value + 1),
-          icon: const Icon(Icons.add),
-          iconSize: 20,
-        ),
-      ],
+          const SizedBox(width: 2),
+          SizedBox(
+            width: 48,
+            child: TextField(
+              controller: _controller,
+              textAlign: TextAlign.center,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: Color(0xFF0F172A),
+              ),
+              onChanged: (text) {
+                final parsed = double.tryParse(text);
+                if (parsed != null) {
+                  final clamped =
+                      parsed.clamp(widget.min, widget.max ?? 9999).toDouble();
+                  widget.onChanged(clamped);
+                }
+              },
+              onSubmitted: (text) {
+                final parsed = double.tryParse(text);
+                if (parsed != null) _change(parsed);
+              },
+              onTapOutside: (_) {
+                final parsed = double.tryParse(_controller.text);
+                if (parsed != null) _change(parsed);
+              },
+              decoration: const InputDecoration(
+                isDense: true,
+                filled: false,
+                contentPadding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: IconButton.filled(
+              style: IconButton.styleFrom(
+                backgroundColor: widget.max != null && widget.value >= widget.max!
+                    ? Colors.grey.shade100
+                    : theme.colorScheme.primary,
+                foregroundColor: widget.max != null && widget.value >= widget.max!
+                    ? Colors.grey.shade400
+                    : Colors.white,
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              onPressed: widget.max != null && widget.value >= widget.max!
+                  ? null
+                  : () => _change(widget.value + 1),
+              icon: const Icon(Icons.add, size: 16),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

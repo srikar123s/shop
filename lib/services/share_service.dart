@@ -452,6 +452,9 @@ class ShareService {
       buffer.writeln(
           '💰 *Total Amount: ₹${order.estimateTotal.toStringAsFixed(2)}*');
     }
+    if (breakdown?.note != null && breakdown!.note!.isNotEmpty) {
+      buffer.writeln('📝 *Note:* ${breakdown.note}');
+    }
 
     final text = buffer.toString();
     try {

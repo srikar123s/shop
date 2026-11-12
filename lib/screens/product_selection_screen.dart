@@ -122,14 +122,25 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
 
   Future<void> _selectProduct(Product product, {int? editIndex}) async {
     if (editIndex == null) {
+      final existingForThisProduct = _items
+          .where((i) => i.productId == product.id || i.itemName == product.name)
+          .toList();
+
       final bulkItems = await Navigator.push<List<DraftOrderItem>>(
         context,
         MaterialPageRoute<List<DraftOrderItem>>(
-          builder: (_) => BulkProductOptionsScreen(product: product),
+          builder: (_) => BulkProductOptionsScreen(
+            product: product,
+            existingItems: existingForThisProduct,
+          ),
         ),
       );
-      if (bulkItems == null || bulkItems.isEmpty || !mounted) return;
-      setState(() => _items.addAll(bulkItems));
+      if (bulkItems == null || !mounted) return;
+      setState(() {
+        _items.removeWhere(
+            (i) => i.productId == product.id || i.itemName == product.name);
+        _items.addAll(bulkItems);
+      });
       _saveCurrentDraft();
       return;
     }
@@ -141,7 +152,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
             ProductOptionsScreen(product: product, initial: initial),
       ),
     );
-    if (result == null) {
+    if (result == null || !mounted) {
       return;
     }
     setState(() => _items[editIndex] = result);
@@ -419,14 +430,40 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text('${s.t('selectItems')} - ${widget.customer.name}'),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                s.t('selectItems'),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                widget.customer.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
           actions: <Widget>[
             if (_items.isNotEmpty)
               TextButton.icon(
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red.shade700,
+                  visualDensity: VisualDensity.compact,
+                ),
                 onPressed: _clearDraft,
                 icon: const Icon(Icons.delete_sweep, size: 18),
-                label: const Text('Clear Draft'),
+                label: const Text(
+                  'Clear Draft',
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
               ),
           ],
         ),
@@ -483,6 +520,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             _ProductSuggestions(
                               products: _products,
                               onProductTap: _selectProduct,
+                              cartItems: _items,
                             )
                           else ...<Widget>[
                             if (_frequentlyUsed.isNotEmpty) ...<Widget>[
@@ -496,6 +534,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                               _ProductGrid(
                                 products: _frequentlyUsed,
                                 onProductTap: _selectProduct,
+                                cartItems: _items,
                               ),
                               const Divider(height: 28),
                             ],
@@ -511,6 +550,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                               includeOther: true,
                               otherLabel: s.t('others'),
                               onOtherTap: _addOtherItem,
+                              cartItems: _items,
                             ),
                           ],
                         ],
@@ -584,6 +624,7 @@ class _ProductGrid extends StatelessWidget {
     this.includeOther = false,
     this.otherLabel,
     this.onOtherTap,
+    this.cartItems = const <DraftOrderItem>[],
   });
 
   final List<Product> products;
@@ -591,28 +632,45 @@ class _ProductGrid extends StatelessWidget {
   final bool includeOther;
   final String? otherLabel;
   final VoidCallback? onOtherTap;
+  final List<DraftOrderItem> cartItems;
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final int crossAxisCount = width > 700 ? 4 : (width > 420 ? 3 : 2);
+    final double childAspectRatio =
+        width > 700 ? 2.0 : (width > 420 ? 1.6 : 1.9);
+
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 1.35,
+        childAspectRatio: childAspectRatio,
       ),
-
       itemCount: products.length + (includeOther ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == products.length) {
-          return ProductCard(title: otherLabel!, onTap: onOtherTap!);
+          return ProductCard(
+            title: otherLabel!,
+            icon: Icons.add_circle_outline,
+            onTap: onOtherTap!,
+          );
         }
         final product = products[index];
+        final cartQty = cartItems
+            .where(
+                (i) => i.productId == product.id || i.itemName == product.name)
+            .fold<double>(0, (sum, i) => sum + i.quantity);
+
         return ProductCard(
-            title: AppLocalizations.of(context).catalog(product.name),
-            onTap: () => onProductTap(product));
+          title: AppLocalizations.of(context).catalog(product.name),
+          icon: Icons.inventory_2_outlined,
+          cartQuantity: cartQty > 0 ? cartQty : null,
+          onTap: () => onProductTap(product),
+        );
       },
     );
   }
@@ -622,10 +680,12 @@ class _ProductSuggestions extends StatelessWidget {
   const _ProductSuggestions({
     required this.products,
     required this.onProductTap,
+    this.cartItems = const <DraftOrderItem>[],
   });
 
   final List<Product> products;
   final ValueChanged<Product> onProductTap;
+  final List<DraftOrderItem> cartItems;
 
   @override
   Widget build(BuildContext context) {
@@ -643,14 +703,59 @@ class _ProductSuggestions extends StatelessWidget {
             ),
           ),
           ...products.map(
-            (product) => ListTile(
-              dense: true,
-              leading: const Icon(Icons.inventory_2_outlined, size: 20),
-              title: Text(s.catalog(product.name)),
-              subtitle: Text(product.category),
-              trailing: const Icon(Icons.chevron_right, size: 20),
-              onTap: () => onProductTap(product),
-            ),
+            (product) {
+              final cartQty = cartItems
+                  .where((i) =>
+                      i.productId == product.id || i.itemName == product.name)
+                  .fold<double>(0, (sum, i) => sum + i.quantity);
+              final inCart = cartQty > 0;
+              final qtyStr = cartQty % 1 == 0
+                  ? cartQty.toInt().toString()
+                  : cartQty.toString();
+
+              return ListTile(
+                dense: true,
+                leading: Icon(
+                  Icons.inventory_2_outlined,
+                  size: 20,
+                  color: inCart ? const Color(0xFF0F766E) : null,
+                ),
+                title: Text(
+                  s.catalog(product.name),
+                  style: TextStyle(
+                    fontWeight: inCart ? FontWeight.bold : FontWeight.normal,
+                    color: inCart ? const Color(0xFF0F766E) : null,
+                  ),
+                ),
+                subtitle: Text(
+                  inCart
+                      ? '${product.category} • $qtyStr in cart'
+                      : product.category,
+                  style: TextStyle(
+                    color: inCart ? const Color(0xFF0F766E) : null,
+                    fontWeight: inCart ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                trailing: inCart
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F766E),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '$qtyStr in cart',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      )
+                    : const Icon(Icons.chevron_right, size: 20),
+                onTap: () => onProductTap(product),
+              );
+            },
           ),
         ],
       ),

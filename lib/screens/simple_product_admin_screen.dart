@@ -309,16 +309,76 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
   Future<ProductStep?> _editChoices(ProductStep step) async {
     final controller = TextEditingController();
     final choices = <String>[...step.values];
+
+    List<String> getPresetsForStep(String key) {
+      final k = key.toLowerCase();
+      if (k.contains('weight') || k.contains('size')) {
+        return const [
+          '500ml',
+          '1 Litre',
+          '4 Litre',
+          '10 Litre',
+          '20 Litre',
+          '100g',
+          '250g',
+          '500g',
+          '1 kg',
+          '5 kg'
+        ];
+      }
+      if (k.contains('colour') || k.contains('color')) {
+        return const [
+          'White',
+          'Black',
+          'Red',
+          'Blue',
+          'Yellow',
+          'Green',
+          'Grey',
+          'Brown',
+          'Golden'
+        ];
+      }
+      if (k.contains('brand')) {
+        return const [
+          'Asian Paints',
+          'Berger',
+          'Nerolac',
+          'Dulux',
+          'Pidilite',
+          'Tata'
+        ];
+      }
+      if (k.contains('type')) {
+        return const [
+          'Standard',
+          'Premium',
+          'Economy',
+          'Matte',
+          'Gloss',
+          'Heavy Duty'
+        ];
+      }
+      return const [];
+    }
+
+    final presets = getPresetsForStep(step.key);
+
     return showDialog<ProductStep>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          void addChoice() {
-            final value = controller.text.trim().replaceAll(',', '');
-            if (value.isEmpty) return;
+          void addChoicesFromText(String raw) {
+            final tokens = raw
+                .split(RegExp(r'[,;\n]'))
+                .map((s) => s.trim())
+                .where((s) => s.isNotEmpty);
+            if (tokens.isEmpty) return;
             setDialogState(() {
-              if (!choices.contains(value)) {
-                choices.add(value);
+              for (final t in tokens) {
+                if (!choices.contains(t)) {
+                  choices.add(t);
+                }
               }
               controller.clear();
             });
@@ -327,51 +387,96 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
           return AlertDialog(
             title: Text('Configure ${step.label}'),
             content: SizedBox(
-              width: 360,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: TextField(
-                          controller: controller,
-                          autofocus: true,
-                          decoration: InputDecoration(
-                            labelText: 'Add ${step.label}',
-                            hintText: 'Type brand/choice & press ADD',
+              width: 380,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            autofocus: true,
+                            decoration: InputDecoration(
+                              labelText: 'Add ${step.label}',
+                              hintText: 'Type values (or comma separated, e.g. 1L, 4L, 10L)',
+                            ),
+                            onSubmitted: (val) => addChoicesFromText(val),
                           ),
-                          onSubmitted: (_) => addChoice(),
                         ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: () =>
+                              addChoicesFromText(controller.text),
+                          child: const Text('ADD'),
+                        ),
+                      ],
+                    ),
+                    if (presets.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Quick presets (tap to add):',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                            color: Colors.teal),
                       ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: addChoice,
-                        child: const Text('ADD'),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: presets.map((preset) {
+                          final added = choices.contains(preset);
+                          return ActionChip(
+                            label: Text(preset),
+                            avatar: Icon(
+                              added ? Icons.check : Icons.add,
+                              size: 14,
+                              color: added ? Colors.teal : Colors.grey.shade700,
+                            ),
+                            backgroundColor: added
+                                ? Colors.teal.shade50
+                                : Colors.grey.shade100,
+                            onPressed: () {
+                              setDialogState(() {
+                                if (!choices.contains(preset)) {
+                                  choices.add(preset);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Added choices:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  const SizedBox(height: 6),
-                  if (choices.isEmpty)
-                    const Text('No choices added yet.', style: TextStyle(color: Colors.grey))
-                  else
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: choices.asMap().entries.map(
-                            (entry) => Chip(
-                              label: Text(entry.value),
-                              deleteIcon: const Icon(Icons.close, size: 16),
-                              onDeleted: () => setDialogState(
-                                () => choices.removeAt(entry.key),
-                              ),
-                            ),
-                          ).toList(),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Added choices (${choices.length}):',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 12),
                     ),
-                ],
+                    const SizedBox(height: 6),
+                    if (choices.isEmpty)
+                      const Text('No choices added yet.',
+                          style: TextStyle(color: Colors.grey))
+                    else
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: choices.asMap().entries.map(
+                              (entry) => Chip(
+                                label: Text(entry.value),
+                                deleteIcon:
+                                    const Icon(Icons.close, size: 16),
+                                onDeleted: () => setDialogState(
+                                  () => choices.removeAt(entry.key),
+                                ),
+                              ),
+                            ).toList(),
+                      ),
+                  ],
+                ),
               ),
             ),
             actions: <Widget>[
@@ -395,6 +500,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
 
   Future<void> _editProduct({Product? product}) async {
     final name = TextEditingController(text: product?.name ?? '');
+    final categoryCtrl =
+        TextEditingController(text: product?.category ?? 'General');
     final price = TextEditingController(
       text: product == null || product.configuration.basePrice == 0
           ? ''
@@ -427,6 +534,36 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     }
     final steps = <ProductStep>[...?product?.configuration.steps];
 
+    // Determine default primary pricing key (e.g. Weight or Size if present, or first step)
+    String? primaryPricingKey;
+    for (final s in steps) {
+      final k = s.key.toLowerCase();
+      if (k.contains('weight') || k.contains('size')) {
+        primaryPricingKey = s.key;
+        break;
+      }
+    }
+    primaryPricingKey ??= steps.isNotEmpty ? steps.first.key : null;
+
+    String pricingMode = steps.isNotEmpty ? 'by_attribute' : 'base_only';
+
+    // Map of attribute-level prices (e.g. '1 Litre': 350, '4 Litre': 1200)
+    final attributePrices = <String, double>{};
+    for (final s in steps) {
+      for (final val in s.values) {
+        if (variantPrices.containsKey(val) && variantPrices[val]! > 0) {
+          attributePrices[val] = variantPrices[val]!;
+        } else {
+          for (final entry in variantPrices.entries) {
+            if (entry.key.contains(val) && entry.value > 0) {
+              attributePrices[val] = entry.value;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -434,6 +571,17 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) {
           final combinations = _generateCombinations(steps);
+          if (primaryPricingKey == null && steps.isNotEmpty) {
+            primaryPricingKey = steps.first.key;
+          }
+
+          ProductStep? currentPrimaryStep;
+          if (steps.isNotEmpty) {
+            currentPrimaryStep = steps.firstWhere(
+              (s) => s.key == primaryPricingKey,
+              orElse: () => steps.first,
+            );
+          }
 
           return SafeArea(
             child: Padding(
@@ -451,7 +599,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                             style: Theme.of(context).textTheme.headlineSmall),
                         if (product != null)
                           IconButton(
-                            icon: const Icon(Icons.delete_forever, color: Colors.red),
+                            icon: const Icon(Icons.delete_forever,
+                                color: Colors.red),
                             tooltip: 'Delete Product',
                             onPressed: () {
                               Navigator.pop(context);
@@ -461,224 +610,752 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    TextField(
-                        controller: name,
-                        autofocus: product == null,
-                        decoration: const InputDecoration(
-                            labelText: 'Product Name *',
-                            hintText: 'Example: Welding Rod')),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: price,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                        labelText: 'Base Price (Optional)',
-                        prefixText: '₹ ',
-                        hintText: 'Default base rate if combination price not set',
-                      ),
-                    ),
 
-                    const SizedBox(height: 20),
-                    const Text('Unit & Conversions (pcs, packets, boxes):',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _units.map((value) {
-                        return FilterChip(
-                          label: Text(value),
-                          selected: selectedUnits.contains(value),
-                          onSelected: (selected) {
-                            setSheetState(() {
-                              if (selected) {
-                                selectedUnits.add(value);
-                                customConversions.putIfAbsent(
-                                    value, () => _defaultConversion(value));
-                                unit ??= value;
-                              } else {
-                                selectedUnits.remove(value);
-                                if (unit == value) {
-                                  unit = selectedUnits.isNotEmpty
-                                      ? selectedUnits.first
-                                      : null;
-                                }
-                              }
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (selectedUnits.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 12),
-                      ...selectedUnits.map((u) {
-                        final factorCtrl = TextEditingController(
-                          text: (customConversions[u] ?? _defaultConversion(u))
-                              .toString(),
-                        );
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            children: <Widget>[
-                              Expanded(
-                                flex: 2,
-                                child: Text('1 $u =',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
-                              ),
+                    // CARD 1: Basic Info & Units
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.inventory_2_outlined,
+                                  size: 20, color: Color(0xFF0F766E)),
+                              SizedBox(width: 8),
+                              Text('1. Basic Details & Units',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15)),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          TextField(
+                            controller: name,
+                            autofocus: product == null,
+                            decoration: const InputDecoration(
+                              labelText: 'Product Name *',
+                              hintText: 'e.g. Asian Paints Royale / Welding Rod',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
                               Expanded(
                                 flex: 3,
                                 child: TextField(
-                                  controller: factorCtrl,
+                                  controller: categoryCtrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Category',
+                                    hintText: 'e.g. Paints, Hardware',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: price,
                                   keyboardType:
                                       const TextInputType.numberWithOptions(
                                           decimal: true),
                                   decoration: const InputDecoration(
-                                    isDense: true,
-                                    suffixText: 'pcs/base units',
+                                    labelText: 'Base Price',
+                                    prefixText: '₹ ',
+                                    hintText: 'Optional',
                                   ),
-                                  onChanged: (val) {
-                                    final numVal = double.tryParse(val);
-                                    if (numVal != null && numVal > 0) {
-                                      customConversions[u] = numVal;
-                                    }
-                                  },
                                 ),
                               ),
                             ],
                           ),
-                        );
-                      }),
-                    ],
-                    const SizedBox(height: 20),
-                    const Text('Product Configurations (Brand, Type, Choice):',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
-                    const Text(
-                        'Tap a configuration button to add choices using the ADD button.'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _questions.entries.map((entry) {
-                        final selected =
-                            steps.any((step) => step.key == entry.key);
-                        return FilterChip(
-                            label: Text(entry.value),
-                            selected: selected,
-                            onSelected: (isSelected) async {
-                              if (!isSelected) {
-                                setSheetState(() => steps.removeWhere(
-                                    (step) => step.key == entry.key));
-                                return;
-                              }
-                              final step = await _editChoices(ProductStep(
-                                  key: entry.key,
-                                  label: entry.value,
-                                  type: 'select'));
-                              if (step != null) {
-                                setSheetState(() => steps.add(step));
-                              }
-                            });
-                      }).toList(),
-                    ),
-                    if (steps.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 14),
-                      ...steps.asMap().entries.map((entry) => Card(
-                              child: ListTile(
-                            title: Text(entry.value.label),
-                            subtitle: Text(entry.value.values.join(' • ')),
-                            trailing: const Icon(Icons.edit_outlined),
-                            onTap: () async {
-                              final step = await _editChoices(entry.value);
-                              if (step != null) {
-                                setSheetState(() => steps[entry.key] = step);
-                              }
-                            },
-                          ))),
-                      if (combinations.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Set Rate per Final Selected Combination (Optional Override):',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Set price for the final item added to cart (e.g. UF • 4 inch • Steel):',
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                        const SizedBox(height: 8),
-                        ...combinations.map((combo) {
-                          double? initialVal = variantPrices[combo] ??
-                              variantPrices[combo.toLowerCase()];
-                          if (initialVal == null || initialVal <= 0) {
-                            final comboSet = combo
-                                .toLowerCase()
-                                .split(RegExp(r'[\+\•\-\:]'))
-                                .map((s) => s.trim())
-                                .where((s) => s.isNotEmpty)
-                                .toSet();
-                            for (final entry in variantPrices.entries) {
-                              final entrySet = entry.key
-                                  .toLowerCase()
-                                  .split(RegExp(r'[\+\•\-\:]'))
-                                  .map((s) => s.trim())
-                                  .where((s) => s.isNotEmpty)
-                                  .toSet();
-                              if (comboSet.isNotEmpty &&
-                                  entrySet.length == comboSet.length &&
-                                  entrySet.containsAll(comboSet) &&
-                                  entry.value > 0) {
-                                initialVal = entry.value;
-                                break;
-                              }
-                            }
-                          }
-
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: Text(
-                                    'Price for $combo:',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600, fontSize: 13),
-                                  ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              'Paints',
+                              'Hardware',
+                              'Tools',
+                              'Electrical',
+                              'Sanitary',
+                              'General'
+                            ].map((cat) {
+                              final sel = categoryCtrl.text.trim() == cat;
+                              return ChoiceChip(
+                                label: Text(cat),
+                                selected: sel,
+                                onSelected: (val) {
+                                  if (val) {
+                                    setSheetState(
+                                        () => categoryCtrl.text = cat);
+                                  }
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 14),
+                          const Text('Available Units:',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 13)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: _units.map((value) {
+                              return FilterChip(
+                                label: Text(value),
+                                selected: selectedUnits.contains(value),
+                                onSelected: (selected) {
+                                  setSheetState(() {
+                                    if (selected) {
+                                      selectedUnits.add(value);
+                                      customConversions.putIfAbsent(value,
+                                          () => _defaultConversion(value));
+                                      unit ??= value;
+                                    } else {
+                                      selectedUnits.remove(value);
+                                      if (unit == value) {
+                                        unit = selectedUnits.isNotEmpty
+                                            ? selectedUnits.first
+                                            : null;
+                                      }
+                                    }
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          if (selectedUnits.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 10),
+                            ...selectedUnits.map((u) {
+                              final factorCtrl = TextEditingController(
+                                text: (customConversions[u] ??
+                                        _defaultConversion(u))
+                                    .toString(),
+                              );
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Row(
+                                  children: <Widget>[
+                                    Expanded(
+                                      flex: 2,
+                                      child: Text('1 $u =',
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13)),
+                                    ),
+                                    Expanded(
+                                      flex: 3,
+                                      child: TextField(
+                                        controller: factorCtrl,
+                                        keyboardType: const TextInputType
+                                            .numberWithOptions(decimal: true),
+                                        decoration: const InputDecoration(
+                                          isDense: true,
+                                          suffixText: 'pcs/units',
+                                        ),
+                                        onChanged: (val) {
+                                          final numVal = double.tryParse(val);
+                                          if (numVal != null && numVal > 0) {
+                                            customConversions[u] = numVal;
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    controller: TextEditingController(
-                                      text: initialVal != null && initialVal > 0
-                                          ? initialVal.toString()
-                                          : '',
+                              );
+                            }),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // CARD 2: Options & Steps (Size/Weight, Colour, Brand...)
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.tune,
+                                  size: 20, color: Color(0xFF0F766E)),
+                              SizedBox(width: 8),
+                              Text('2. Options & Variants (Size, Colour...)',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Select attributes for this product (e.g. Weight/Size, Colour):',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _questions.entries.map((entry) {
+                              final selected =
+                                  steps.any((step) => step.key == entry.key);
+                              return FilterChip(
+                                  label: Text(entry.value),
+                                  selected: selected,
+                                  onSelected: (isSelected) async {
+                                    if (!isSelected) {
+                                      setSheetState(() {
+                                        steps.removeWhere(
+                                            (step) => step.key == entry.key);
+                                        if (primaryPricingKey == entry.key) {
+                                          primaryPricingKey = steps.isNotEmpty
+                                              ? steps.first.key
+                                              : null;
+                                        }
+                                      });
+                                      return;
+                                    }
+                                    final step = await _editChoices(ProductStep(
+                                        key: entry.key,
+                                        label: entry.value,
+                                        type: 'select'));
+                                    if (step != null) {
+                                      setSheetState(() => steps.add(step));
+                                    }
+                                  });
+                            }).toList(),
+                          ),
+                          if (steps.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            ...steps.asMap().entries.map((entry) => Card(
+                                  elevation: 0,
+                                  color: Colors.grey.shade50,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      side: BorderSide(
+                                          color: Colors.grey.shade300)),
+                                  child: ListTile(
+                                    dense: true,
+                                    title: Text(entry.value.label,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold)),
+                                    subtitle: Text(
+                                      entry.value.values.join(' • '),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                            decimal: true),
-                                    decoration: const InputDecoration(
-                                      isDense: true,
-                                      prefixText: '₹ ',
-                                      hintText: 'Default base price',
-                                    ),
-                                    onChanged: (v) {
-                                      final p = double.tryParse(v);
-                                      if (p != null && p > 0) {
-                                        variantPrices[combo] = p;
-                                      } else {
-                                        variantPrices.remove(combo);
+                                    trailing: const Icon(Icons.edit_outlined,
+                                        size: 18),
+                                    onTap: () async {
+                                      final step =
+                                          await _editChoices(entry.value);
+                                      if (step != null) {
+                                        setSheetState(
+                                            () => steps[entry.key] = step);
                                       }
                                     },
                                   ),
+                                )),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // CARD 3: Smart Pricing Setup (Addresses Paint/Color pricing!)
+                    if (steps.isNotEmpty && combinations.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.currency_rupee,
+                                      size: 18, color: Color(0xFF0F766E)),
+                                ),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  '3. Set Rates & Pricing',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15),
                                 ),
                               ],
                             ),
-                          );
-                        }),
-                      ],
+                            const SizedBox(height: 12),
+
+                            // Pricing Strategy Mode Selector
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text(
+                                      '🌟 Price by Attribute (e.g. Size/Weight)'),
+                                  selected: pricingMode == 'by_attribute',
+                                  onSelected: (sel) {
+                                    if (sel) {
+                                      setSheetState(
+                                          () => pricingMode = 'by_attribute');
+                                    }
+                                  },
+                                ),
+                                ChoiceChip(
+                                  label: const Text('🎨 Grouped Combinations'),
+                                  selected: pricingMode == 'matrix',
+                                  onSelected: (sel) {
+                                    if (sel) {
+                                      setSheetState(
+                                          () => pricingMode = 'matrix');
+                                    }
+                                  },
+                                ),
+                                ChoiceChip(
+                                  label: const Text('🏷️ Base Price Only'),
+                                  selected: pricingMode == 'base_only',
+                                  onSelected: (sel) {
+                                    if (sel) {
+                                      setSheetState(
+                                          () => pricingMode = 'base_only');
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+
+                            // MODE 1: Price by Attribute (e.g. Weight/Size)
+                            if (pricingMode == 'by_attribute' &&
+                                currentPrimaryStep != null) ...[
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  const Text(
+                                    'Price determined by:',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  DropdownButton<String>(
+                                    value: steps.any((s) =>
+                                            s.key == primaryPricingKey)
+                                        ? primaryPricingKey
+                                        : steps.first.key,
+                                    items: steps
+                                        .map((s) => DropdownMenuItem(
+                                            value: s.key, child: Text(s.label)))
+                                        .toList(),
+                                    onChanged: (val) {
+                                      if (val != null) {
+                                        setSheetState(
+                                            () => primaryPricingKey = val);
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.shade50,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border:
+                                      Border.all(color: Colors.teal.shade200),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(Icons.auto_awesome,
+                                        color: Colors.teal, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Set rate once for each ${currentPrimaryStep.label}. All colours/other choices will share this same rate automatically!',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.teal.shade900,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              ...currentPrimaryStep.values.map((val) {
+                                final curVal = attributePrices[val] ?? 0;
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 3,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              val,
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14),
+                                            ),
+                                            Text(
+                                              'Applies to all colours for $val',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey.shade600),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: TextField(
+                                          controller: TextEditingController(
+                                            text: curVal > 0
+                                                ? (curVal % 1 == 0
+                                                    ? curVal.toInt().toString()
+                                                    : curVal.toString())
+                                                : '',
+                                          ),
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(
+                                              decimal: true),
+                                          decoration: InputDecoration(
+                                            isDense: true,
+                                            prefixText: '₹ ',
+                                            hintText: 'Enter rate',
+                                            border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8)),
+                                          ),
+                                          onChanged: (v) {
+                                            final p = double.tryParse(v);
+                                            if (p != null && p > 0) {
+                                              attributePrices[val] = p;
+                                              variantPrices[val] = p;
+                                              for (final combo
+                                                  in combinations) {
+                                                if (combo.contains(val)) {
+                                                  variantPrices[combo] = p;
+                                                }
+                                              }
+                                            } else {
+                                              attributePrices.remove(val);
+                                              variantPrices.remove(val);
+                                              for (final combo
+                                                  in combinations) {
+                                                if (combo.contains(val)) {
+                                                  variantPrices.remove(combo);
+                                                }
+                                              }
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                              const SizedBox(height: 8),
+                              Theme(
+                                data: Theme.of(context).copyWith(
+                                    dividerColor: Colors.transparent),
+                                child: ExpansionTile(
+                                  tilePadding: EdgeInsets.zero,
+                                  leading: const Icon(Icons.tune,
+                                      size: 18, color: Colors.teal),
+                                  title: const Text(
+                                    'Special shade overrides (Optional)',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.teal),
+                                  ),
+                                  children: [
+                                    const Text(
+                                      'If a specific shade has a different rate, you can override it below:',
+                                      style: TextStyle(
+                                          fontSize: 11, color: Colors.grey),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    ...combinations.map((combo) {
+                                      final p = variantPrices[combo];
+                                      return Padding(
+                                        padding:
+                                            const EdgeInsets.only(bottom: 6),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              flex: 3,
+                                              child: Text(combo,
+                                                  style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600)),
+                                            ),
+                                            Expanded(
+                                              flex: 2,
+                                              child: TextField(
+                                                controller:
+                                                    TextEditingController(
+                                                  text: p != null && p > 0
+                                                      ? (p % 1 == 0
+                                                          ? p.toInt().toString()
+                                                          : p.toString())
+                                                      : '',
+                                                ),
+                                                keyboardType:
+                                                    const TextInputType
+                                                        .numberWithOptions(
+                                                        decimal: true),
+                                                decoration: InputDecoration(
+                                                  isDense: true,
+                                                  prefixText: '₹ ',
+                                                  hintText: 'Rate',
+                                                  border: OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius
+                                                              .circular(8)),
+                                                ),
+                                                onChanged: (v) {
+                                                  final parsed =
+                                                      double.tryParse(v);
+                                                  if (parsed != null &&
+                                                      parsed > 0) {
+                                                    variantPrices[combo] =
+                                                        parsed;
+                                                  } else {
+                                                    variantPrices
+                                                        .remove(combo);
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              ),
+                            ]
+                            // MODE 2: Grouped Combinations with Quick Fill
+                            else if (pricingMode == 'matrix' &&
+                                currentPrimaryStep != null) ...[
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Grouped by option. Use "APPLY ALL" to quickly set rates for all colours in that size:',
+                                style:
+                                    TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                              const SizedBox(height: 10),
+                              ...currentPrimaryStep.values.map((groupVal) {
+                                final groupCombos = combinations
+                                    .where((c) => c.contains(groupVal))
+                                    .toList();
+                                final quickFillCtrl =
+                                    TextEditingController();
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side:
+                                        BorderSide(color: Colors.grey.shade300),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                groupVal,
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.bold,
+                                                    fontSize: 14),
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 80,
+                                              child: TextField(
+                                                controller: quickFillCtrl,
+                                                keyboardType:
+                                                    const TextInputType
+                                                        .numberWithOptions(
+                                                        decimal: true),
+                                                decoration:
+                                                    const InputDecoration(
+                                                  isDense: true,
+                                                  hintText: '₹ Rate',
+                                                  contentPadding:
+                                                      EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 6),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            FilledButton.tonal(
+                                              style: FilledButton.styleFrom(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 6),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                              ),
+                                              onPressed: () {
+                                                final p = double.tryParse(
+                                                    quickFillCtrl.text.trim());
+                                                if (p != null && p > 0) {
+                                                  setSheetState(() {
+                                                    attributePrices[
+                                                        groupVal] = p;
+                                                    variantPrices[groupVal] =
+                                                        p;
+                                                    for (final c
+                                                        in groupCombos) {
+                                                      variantPrices[c] = p;
+                                                    }
+                                                  });
+                                                }
+                                              },
+                                              child: const Text('APPLY ALL',
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                            ),
+                                          ],
+                                        ),
+                                        const Divider(),
+                                        ...groupCombos.map((combo) {
+                                          final cur = variantPrices[combo] ??
+                                              attributePrices[groupVal];
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                                bottom: 4),
+                                            child: Row(
+                                              children: [
+                                                Expanded(
+                                                  flex: 3,
+                                                  child: Text(combo,
+                                                      style: const TextStyle(
+                                                          fontSize: 12)),
+                                                ),
+                                                Expanded(
+                                                  flex: 2,
+                                                  child: TextField(
+                                                    controller:
+                                                        TextEditingController(
+                                                      text: cur != null &&
+                                                              cur > 0
+                                                          ? (cur % 1 == 0
+                                                              ? cur
+                                                                  .toInt()
+                                                                  .toString()
+                                                              : cur.toString())
+                                                          : '',
+                                                    ),
+                                                    keyboardType:
+                                                        const TextInputType
+                                                            .numberWithOptions(
+                                                            decimal: true),
+                                                    decoration:
+                                                        const InputDecoration(
+                                                      isDense: true,
+                                                      prefixText: '₹ ',
+                                                      hintText: 'Rate',
+                                                    ),
+                                                    onChanged: (v) {
+                                                      final p =
+                                                          double.tryParse(v);
+                                                      if (p != null && p > 0) {
+                                                        variantPrices[combo] =
+                                                            p;
+                                                      } else {
+                                                        variantPrices
+                                                            .remove(combo);
+                                                      }
+                                                    },
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ]
+                            // MODE 3: Base Price Only
+                            else ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border:
+                                      Border.all(color: Colors.blue.shade200),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.info_outline,
+                                        color: Colors.blue.shade800, size: 20),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'All options will share the Base Price (₹ ${price.text.isNotEmpty ? price.text : "0"}) entered in Section 1.',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.blue.shade900),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
+
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
@@ -693,11 +1370,31 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                             return;
                           }
 
-                          await widget.productRepository
-                              .upsertProduct(Product(
+                          // Ensure all attribute-level prices are mirrored into combinations and attribute keys
+                          if (pricingMode == 'by_attribute') {
+                            for (final entry in attributePrices.entries) {
+                              if (entry.value > 0) {
+                                variantPrices[entry.key] = entry.value;
+                                variantPrices[entry.key.toLowerCase()] =
+                                    entry.value;
+                                for (final combo in combinations) {
+                                  if (combo.contains(entry.key) &&
+                                      !variantPrices.containsKey(combo)) {
+                                    variantPrices[combo] = entry.value;
+                                    variantPrices[combo.toLowerCase()] =
+                                        entry.value;
+                                  }
+                                }
+                              }
+                            }
+                          }
+
+                          await widget.productRepository.upsertProduct(Product(
                             id: product?.id,
                             name: name.text.trim(),
-                            category: product?.category ?? 'General',
+                            category: categoryCtrl.text.trim().isNotEmpty
+                                ? categoryCtrl.text.trim()
+                                : 'General',
                             isActive: product?.isActive ?? true,
                             configuration: ProductConfiguration(
                                 steps: steps,
@@ -787,10 +1484,21 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                       final product = products[index];
                       return Card(
                           child: ListTile(
-                        title: Text(product.name),
-                        subtitle: Text(product.configuration.steps.isEmpty
-                            ? 'Quantity only • ${product.configuration.defaultUnit}'
-                            : '${product.configuration.steps.map((step) => step.label).join(' → ')} • ${product.configuration.defaultUnit}'),
+                        title: Text(
+                          product.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          product.configuration.steps.isEmpty
+                              ? 'Quantity only • ${product.configuration.defaultUnit}'
+                              : '${product.configuration.steps.map((step) => step.label).join(' → ')} • ${product.configuration.defaultUnit}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600),
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

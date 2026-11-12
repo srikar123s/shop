@@ -73,6 +73,7 @@ class BillBreakdown {
     this.otherCharges = const <OtherCharge>[],
     this.otherChargesTotal = 0.0,
     required this.grandTotal,
+    this.note,
   });
 
   final double subtotal;
@@ -82,6 +83,7 @@ class BillBreakdown {
   final List<OtherCharge> otherCharges;
   final double otherChargesTotal;
   final double grandTotal;
+  final String? note;
 
   factory BillBreakdown.calculate({
     required double subtotal,
@@ -89,6 +91,7 @@ class BillBreakdown {
     double gstRate = 18.0,
     List<OtherCharge> otherCharges = const <OtherCharge>[],
     double? grandTotalOverride,
+    String? note,
   }) {
     final gst = applyGst ? (subtotal * gstRate / 100.0) : 0.0;
     final otherTotal =
@@ -102,6 +105,7 @@ class BillBreakdown {
       otherCharges: otherCharges,
       otherChargesTotal: otherTotal,
       grandTotal: grandTotalOverride ?? calculatedGrandTotal,
+      note: note,
     );
   }
 
@@ -113,6 +117,7 @@ class BillBreakdown {
     'otherCharges': otherCharges.map((e) => e.toMap()).toList(),
     'otherChargesTotal': otherChargesTotal,
     'grandTotal': grandTotal,
+    if (note != null && note!.isNotEmpty) 'note': note,
   };
 
   factory BillBreakdown.fromMap(Map<String, dynamic> map) {
@@ -128,6 +133,7 @@ class BillBreakdown {
       otherChargesTotal: (map['otherChargesTotal'] as num?)?.toDouble() ??
           otherChargesList.fold<double>(0.0, (sum, c) => sum + c.amount),
       grandTotal: (map['grandTotal'] as num?)?.toDouble() ?? 0.0,
+      note: map['note'] as String?,
     );
   }
 
@@ -138,7 +144,8 @@ class BillBreakdown {
       if (decoded is Map<String, dynamic>) {
         if (decoded.containsKey('subtotal') ||
             decoded.containsKey('applyGst') ||
-            decoded.containsKey('otherCharges')) {
+            decoded.containsKey('otherCharges') ||
+            decoded.containsKey('note')) {
           return BillBreakdown.fromMap(decoded);
         }
       }

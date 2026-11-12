@@ -114,6 +114,319 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     await _load();
   }
 
+  Future<void> _closeOrder() async {
+    if (_details == null || !mounted) return;
+    final order = _details!.order;
+    final unfulfilled = _details!.items
+        .where((i) => i.quantityGiven < i.quantityOrdered)
+        .toList();
+
+    if (unfulfilled.isEmpty) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Complete ${order.formattedOrderId}?'),
+          content: Text(
+            'All ${_details!.items.length} item(s) have been delivered. Mark this order as completed?',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('COMPLETE ORDER'),
+            ),
+          ],
+        ),
+      );
+      if (confirm == true && mounted) {
+        await widget.orderRepository.closeOrderWithAllGiven(order.id!);
+        await _load();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${order.formattedOrderId} marked as completed.'),
+              backgroundColor: Colors.teal,
+            ),
+          );
+        }
+      }
+      return;
+    }
+
+    final orderedSubtotal = _details!.items.fold<double>(
+      0,
+      (s, i) => s + (i.unitPrice * i.quantityOrdered),
+    );
+    final deliveredSubtotal = _details!.items.fold<double>(
+      0,
+      (s, i) => s + (i.unitPrice * i.quantityGiven),
+    );
+
+    final existingBreakdown = order.billBreakdown;
+    final deliveredBreakdown = existingBreakdown != null
+        ? BillBreakdown.calculate(
+            subtotal: deliveredSubtotal,
+            applyGst: existingBreakdown.applyGst,
+            gstRate: existingBreakdown.gstRate,
+            otherCharges: existingBreakdown.otherCharges,
+          )
+        : BillBreakdown.calculate(subtotal: deliveredSubtotal);
+
+    final fullBreakdown = existingBreakdown != null
+        ? BillBreakdown.calculate(
+            subtotal: orderedSubtotal,
+            applyGst: existingBreakdown.applyGst,
+            gstRate: existingBreakdown.gstRate,
+            otherCharges: existingBreakdown.otherCharges,
+          )
+        : BillBreakdown.calculate(subtotal: orderedSubtotal);
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.warning_amber_rounded,
+                  color: Colors.orange.shade900, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Order ${order.formattedOrderId}',
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${unfulfilled.length} item(s) not fully given',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.deepOrange.shade800,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Items not given / partially given:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      const SizedBox(height: 8),
+                      ...unfulfilled.map((item) {
+                        final pending =
+                            item.quantityOrdered - item.quantityGiven;
+                        final ordStr = item.quantityOrdered % 1 == 0
+                            ? item.quantityOrdered.toInt().toString()
+                            : item.quantityOrdered.toString();
+                        final gvnStr = item.quantityGiven % 1 == 0
+                            ? item.quantityGiven.toInt().toString()
+                            : item.quantityGiven.toString();
+                        final pndStr = pending % 1 == 0
+                            ? pending.toInt().toString()
+                            : pending.toString();
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('• ',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red)),
+                              Expanded(
+                                child: Text(
+                                  item.itemName,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: Colors.red.shade200),
+                                ),
+                                child: Text(
+                                  'Given $gvnStr of $ordStr ($pndStr not given)',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.red.shade900,
+                                      fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primaryContainer
+                        .withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Delivered Items Value:'),
+                          Text(
+                            '₹ ${deliveredBreakdown.grandTotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.teal,
+                                fontSize: 14),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Original Ordered Value:'),
+                          Text(
+                            '₹ ${fullBreakdown.grandTotal.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                color: Colors.grey.shade700,
+                                decoration: TextDecoration.lineThrough,
+                                fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'How would you like to close this order?',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('CANCEL'),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.done_all, size: 18),
+              label: Text(
+                'Deliver All Remaining Items (₹${fullBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: () => Navigator.pop(context, 'all_given'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E)),
+              icon: const Icon(Icons.receipt_long, size: 18),
+              label: Text(
+                'Adjust Bill for Given Items (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: () => Navigator.pop(context, 'delivered_only'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || choice == null || choice == 'cancel') return;
+
+    if (choice == 'delivered_only') {
+      await widget.orderRepository.closeOrderWithDeliveredItemsOnly(
+        orderId: order.id!,
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${order.formattedOrderId} closed. Bill adjusted to ₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)} with partial items note.',
+            ),
+            backgroundColor: Colors.teal,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } else if (choice == 'all_given') {
+      await widget.orderRepository.closeOrderWithAllGiven(order.id!);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '${order.formattedOrderId} marked fully delivered & completed.'),
+            backgroundColor: Colors.teal,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
@@ -134,8 +447,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${order.formattedOrderId} - ${order.customerNameSnapshot}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.normal)),
+            Text(
+              '${order.formattedOrderId} - ${order.customerNameSnapshot}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt),
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.normal,
+                  color: Colors.grey.shade600),
+            ),
           ],
         ),
         actions: <Widget>[
@@ -284,6 +608,36 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       ],
                     ),
                   ],
+                  if (order.billBreakdown?.note != null &&
+                      order.billBreakdown!.note!.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 16, color: Colors.amber.shade900),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              order.billBreakdown!.note!,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.amber.shade900,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -378,28 +732,41 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           const SizedBox(height: 10),
                           // Price editing row
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'Item Total: ₹${(item.unitPrice * item.quantityOrdered).toStringAsFixed(2)}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal),
+                              Expanded(
+                                child: Text(
+                                  'Item Total: ₹${(item.unitPrice * item.quantityOrdered).toStringAsFixed(2)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: Colors.teal),
+                                ),
                               ),
+                              const SizedBox(width: 8),
                               SizedBox(
-                                width: 130,
+                                width: 120,
                                 child: TextField(
                                   controller: TextEditingController(
-                                    text: item.unitPrice > 0 ? item.unitPrice.toStringAsFixed(2) : '',
+                                    text: item.unitPrice > 0
+                                        ? item.unitPrice.toStringAsFixed(2)
+                                        : '',
                                   ),
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
                                   decoration: const InputDecoration(
                                     isDense: true,
                                     labelText: 'Price/Unit ₹',
                                     prefixText: '₹ ',
                                   ),
                                   onChanged: (val) {
-                                    final parsed = double.tryParse(val.trim()) ?? 0.0;
+                                    final parsed =
+                                        double.tryParse(val.trim()) ?? 0.0;
                                     setState(() {
-                                      _details!.items[index] = item.copyWith(unitPrice: parsed);
+                                      _details!.items[index] =
+                                          item.copyWith(unitPrice: parsed);
                                     });
                                   },
                                 ),
@@ -409,9 +776,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
                           const SizedBox(height: 12),
                           // Fulfillment Controls
-
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          Wrap(
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 8,
                             children: [
                               QuantitySelector(
                                 value: item.quantityGiven,
@@ -425,11 +794,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 },
                               ),
                               Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   OutlinedButton(
                                     style: OutlinedButton.styleFrom(
                                       visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
                                     ),
                                     onPressed: () {
                                       setState(() {
@@ -437,21 +808,25 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                             item.copyWith(quantityGiven: 0);
                                       });
                                     },
-                                    child: const Text('None'),
+                                    child: const Text('None',
+                                        style: TextStyle(fontSize: 12)),
                                   ),
                                   const SizedBox(width: 6),
                                   FilledButton.tonal(
                                     style: FilledButton.styleFrom(
                                       visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 6),
                                     ),
                                     onPressed: () {
                                       setState(() {
-                                        _details!.items[index] =
-                                            item.copyWith(quantityGiven: item.quantityOrdered);
+                                        _details!.items[index] = item.copyWith(
+                                            quantityGiven:
+                                                item.quantityOrdered);
                                       });
                                     },
-                                    child: const Text('Give All'),
+                                    child: const Text('Give All',
+                                        style: TextStyle(fontSize: 12)),
                                   ),
                                 ],
                               ),
@@ -484,9 +859,40 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 },
               ),
             ),
-            LargeActionButton(
-              label: _saving ? s.t('saving') : 'SAVE CHANGES',
-              onTap: _saving ? null : _save,
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: LargeActionButton(
+                    label: _saving ? s.t('saving') : 'SAVE CHANGES',
+                    onTap: _saving ? null : _save,
+                  ),
+                ),
+                if (order.status != OrderStatus.completed) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: SizedBox(
+                      height: 52,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.deepOrange.shade800,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.check_circle_outline, size: 20),
+                        label: const Text(
+                          'CLOSE ORDER',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        onPressed: _saving ? null : _closeOrder,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ),
@@ -516,9 +922,17 @@ class _QtyBadge extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w700)),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 10, color: color, fontWeight: FontWeight.w700)),
             const SizedBox(height: 2),
-            Text('$formattedQty $unit', style: TextStyle(fontSize: 13, color: color, fontWeight: FontWeight.bold)),
+            Text('$formattedQty $unit',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12, color: color, fontWeight: FontWeight.bold)),
           ],
         ),
       ),

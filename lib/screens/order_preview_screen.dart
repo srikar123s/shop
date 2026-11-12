@@ -368,12 +368,51 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text(
-              '${s.t('customerLabel')}: ${widget.draftOrder.customer.name}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            Text(
-              '${s.t('date')}: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}',
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    radius: 18,
+                    child: Text(
+                      widget.draftOrder.customer.name.isNotEmpty
+                          ? widget.draftOrder.customer.name[0].toUpperCase()
+                          : 'C',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.draftOrder.customer.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          DateFormat('dd MMM yyyy, hh:mm a')
+                              .format(DateTime.now()),
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -400,16 +439,19 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 Expanded(
                                   child: Text(
                                     '${index + 1}. ${item.itemName}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                        fontSize: 16,
+                                        fontSize: 15,
                                         fontWeight: FontWeight.w700),
                                   ),
                                 ),
+                                const SizedBox(width: 8),
                                 Text(
                                   '₹ ${itemTotal.toStringAsFixed(2)}',
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w800,
-                                      color: Colors.green),
+                                      color: Colors.teal),
                                 ),
                               ],
                             ),

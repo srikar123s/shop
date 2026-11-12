@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/order.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class OrderRepository {
   const OrderRepository(this._databaseHelper);
@@ -14,7 +16,7 @@ class OrderRepository {
     BillBreakdown? billBreakdown,
   }) async {
     final db = await _databaseHelper.database;
-    return db.transaction((txn) async {
+    final createdOrderId = await db.transaction((txn) async {
       final now = DateTime.now();
       final notes = billBreakdown != null
           ? jsonEncode(billBreakdown.toMap())
@@ -75,6 +77,9 @@ class OrderRepository {
       }
       return orderId;
     });
+
+    unawaited(ShopSyncService.instance.syncOrder(createdOrderId));
+    return createdOrderId;
   }
 
   Future<void> addItemsToOrder({
@@ -137,6 +142,7 @@ class OrderRepository {
         );
       }
     });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
   Future<List<OrderSummary>> searchOrderSummaries(String query) async {
@@ -194,53 +200,186 @@ class OrderRepository {
     );
   }
 
-  Future<void> closePendingOrdersForCustomer(int customerId) async {
+  Future<void> closePendingOrdersForCustomer(int customerId, {bool adjustToGivenOnly = false}) async {
+    final db = await _databaseHelper.database;
+    final pendingOrders = await db.query(
+      'orders',
+      columns: ['id'],
+      where: 'customer_id = ? AND status IN (?, ?)',
+      whereArgs: [
+        customerId,
+        orderStatusLabel(OrderStatus.pending),
+        orderStatusLabel(OrderStatus.partiallyCompleted),
+      ],
+    );
+    for (final row in pendingOrders) {
+      final orderId = row['id'] as int;
+      if (adjustToGivenOnly) {
+        await closeOrderWithDeliveredItemsOnly(orderId: orderId);
+      } else {
+        await closeOrderWithAllGiven(orderId);
+      }
+    }
+  }
+
+  /// Closes an order by marking ALL items as given (100% delivered) and setting full bill.
+  Future<void> closeOrderWithAllGiven(int orderId) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
-      final pendingOrders = await txn.query(
-        'orders',
-        columns: ['id'],
-        where: 'customer_id = ? AND status IN (?, ?)',
-        whereArgs: [
-          customerId,
-          orderStatusLabel(OrderStatus.pending),
-          orderStatusLabel(OrderStatus.partiallyCompleted),
-        ],
+      final itemRows = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
       );
-      for (final row in pendingOrders) {
-        final orderId = row['id'] as int;
-        await txn.rawUpdate(
-          'UPDATE order_items SET quantity_given = quantity_ordered, status = ?, procurement_status = ? WHERE order_id = ?',
-          [itemStatusLabel(ItemStatus.given), ProcurementStatus.notRequired.name, orderId],
+
+      double fullSubtotal = 0;
+      for (final row in itemRows) {
+        final itemId = row['id'] as int;
+        final ordered = (row['quantity_ordered'] as num).toDouble();
+        final unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        fullSubtotal += unitPrice * ordered;
+
+        await txn.update(
+          'order_items',
+          {
+            'quantity_given': ordered,
+            'status': itemStatusLabel(ItemStatus.given),
+            'procurement_status': ProcurementStatus.notRequired.name,
+          },
+          where: 'id = ?',
+          whereArgs: [itemId],
         );
       }
+
+      final orderRows = await txn.query(
+        'orders',
+        columns: ['notes'],
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+      final existingNotes = orderRows.isNotEmpty ? orderRows.first['notes'] as String? : null;
+      final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
+
+      BillBreakdown newBreakdown;
+      if (existingBreakdown != null) {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: fullSubtotal,
+          applyGst: existingBreakdown.applyGst,
+          gstRate: existingBreakdown.gstRate,
+          otherCharges: existingBreakdown.otherCharges,
+          note: 'All items marked as delivered and completed.',
+        );
+      } else {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: fullSubtotal,
+          note: 'All items marked as delivered and completed.',
+        );
+      }
+
       await txn.update(
         'orders',
-        {'status': orderStatusLabel(OrderStatus.completed)},
-        where: 'customer_id = ? AND status IN (?, ?)',
-        whereArgs: <Object?>[
-          customerId,
-          orderStatusLabel(OrderStatus.pending),
-          orderStatusLabel(OrderStatus.partiallyCompleted),
-        ],
+        {
+          'status': orderStatusLabel(OrderStatus.completed),
+          'estimate_total': newBreakdown.grandTotal,
+          'notes': jsonEncode(newBreakdown.toMap()),
+        },
+        where: 'id = ?',
+        whereArgs: [orderId],
       );
     });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
+  }
+
+  /// Closes an order billing ONLY the items that were actually given.
+  /// Recalculates the bill estimate, recomputes GST/charges, and attaches an audit note.
+  Future<void> closeOrderWithDeliveredItemsOnly({
+    required int orderId,
+    String? note,
+  }) async {
+    final db = await _databaseHelper.database;
+    await db.transaction((txn) async {
+      final itemRows = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
+      );
+
+      double deliveredSubtotal = 0;
+      final partialSummaryParts = <String>[];
+
+      for (final row in itemRows) {
+        final itemId = row['id'] as int;
+        final ordered = (row['quantity_ordered'] as num).toDouble();
+        final given = (row['quantity_given'] as num).toDouble();
+        final unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        final itemName = row['item_name'] as String;
+
+        deliveredSubtotal += unitPrice * given;
+
+        final itemStatus = given > 0 ? ItemStatus.given : ItemStatus.notGiven;
+
+        if (given < ordered) {
+          final ordStr = ordered % 1 == 0 ? ordered.toInt().toString() : ordered.toString();
+          final gvnStr = given % 1 == 0 ? given.toInt().toString() : given.toString();
+          partialSummaryParts.add('$itemName ($gvnStr/$ordStr given)');
+        }
+
+        await txn.update(
+          'order_items',
+          {
+            'status': itemStatusLabel(itemStatus),
+            'procurement_status': ProcurementStatus.notRequired.name,
+          },
+          where: 'id = ?',
+          whereArgs: [itemId],
+        );
+      }
+
+      final orderRows = await txn.query(
+        'orders',
+        columns: ['notes'],
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+      final existingNotes = orderRows.isNotEmpty ? orderRows.first['notes'] as String? : null;
+      final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
+
+      final fullNote = note ?? (partialSummaryParts.isNotEmpty
+          ? 'Closed with partial items delivered: ${partialSummaryParts.join(', ')}. Bill adjusted for given items.'
+          : 'Order closed and completed.');
+
+      BillBreakdown newBreakdown;
+      if (existingBreakdown != null) {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: deliveredSubtotal,
+          applyGst: existingBreakdown.applyGst,
+          gstRate: existingBreakdown.gstRate,
+          otherCharges: existingBreakdown.otherCharges,
+          note: fullNote,
+        );
+      } else {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: deliveredSubtotal,
+          note: fullNote,
+        );
+      }
+
+      await txn.update(
+        'orders',
+        {
+          'status': orderStatusLabel(OrderStatus.completed),
+          'estimate_total': newBreakdown.grandTotal,
+          'notes': jsonEncode(newBreakdown.toMap()),
+        },
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+    });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
   Future<void> closeOrder(int orderId) async {
-    final db = await _databaseHelper.database;
-    await db.transaction((txn) async {
-      await txn.rawUpdate(
-        'UPDATE order_items SET quantity_given = quantity_ordered, status = ?, procurement_status = ? WHERE order_id = ?',
-        [itemStatusLabel(ItemStatus.given), ProcurementStatus.notRequired.name, orderId],
-      );
-      await txn.update(
-        'orders',
-        {'status': orderStatusLabel(OrderStatus.completed)},
-        where: 'id = ?',
-        whereArgs: <Object?>[orderId],
-      );
-    });
+    await closeOrderWithAllGiven(orderId);
   }
 
 
@@ -380,6 +519,7 @@ class OrderRepository {
         whereArgs: [orderId],
       );
     });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
 

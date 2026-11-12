@@ -10,9 +10,11 @@ class BulkProductOptionsScreen extends StatefulWidget {
   const BulkProductOptionsScreen({
     super.key,
     required this.product,
+    this.existingItems = const <DraftOrderItem>[],
   });
 
   final Product product;
+  final List<DraftOrderItem> existingItems;
 
   @override
   State<BulkProductOptionsScreen> createState() =>
@@ -47,6 +49,76 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
         (widget.product.configuration.unitOptions.isEmpty
             ? 'Unit'
             : widget.product.configuration.unitOptions.first);
+
+    // Restore previously added items and quantities
+    if (widget.existingItems.isNotEmpty) {
+      for (final item in widget.existingItems) {
+        if (item.unit.isNotEmpty) {
+          _unit = item.unit;
+        }
+        if (_groupIndex != null) {
+          final groupKey = _steps[_groupIndex!].key;
+          final variantKey = _steps[_variantIndex].key;
+          final groupVal = item.options[groupKey] ??
+              item.options.entries
+                  .firstWhere(
+                    (e) => _steps[_groupIndex!].values.contains(e.value),
+                    orElse: () => const MapEntry('', ''),
+                  )
+                  .value;
+          final variantVal = item.options[variantKey] ??
+              item.options.entries
+                  .firstWhere(
+                    (e) => _steps[_variantIndex].values.contains(e.value),
+                    orElse: () => const MapEntry('', ''),
+                  )
+                  .value;
+
+          if (groupVal.isNotEmpty && variantVal.isNotEmpty) {
+            final key = '$groupVal::$variantVal';
+            _variantQuantities[key] =
+                (_variantQuantities[key] ?? 0) + item.quantity;
+            _selectedGroups.add(groupVal);
+            _activeGroupVariant[groupVal] = variantVal;
+            if (item.unitPrice != null && item.unitPrice! > 0) {
+              _customPrices[key] = item.unitPrice!;
+            }
+          }
+        } else if (_steps.isNotEmpty) {
+          final variantKey = _steps[_variantIndex].key;
+          final variantVal = item.options[variantKey] ??
+              item.options.entries
+                  .firstWhere(
+                    (e) => _steps[_variantIndex].values.contains(e.value),
+                    orElse: () => const MapEntry('', ''),
+                  )
+                  .value;
+          if (variantVal.isNotEmpty) {
+            _variantQuantities[variantVal] =
+                (_variantQuantities[variantVal] ?? 0) + item.quantity;
+            if (item.unitPrice != null && item.unitPrice! > 0) {
+              _customPrices[variantVal] = item.unitPrice!;
+            }
+          }
+        } else {
+          _variantQuantities[''] =
+              (_variantQuantities[''] ?? 0) + item.quantity;
+          if (item.unitPrice != null && item.unitPrice! > 0) {
+            _customPrices[''] = item.unitPrice!;
+          }
+        }
+
+        // Restore prefix options
+        for (final step in _steps) {
+          if (step.key != _steps[_variantIndex].key &&
+              (_groupIndex == null || step.key != _steps[_groupIndex!].key)) {
+            if (item.options.containsKey(step.key)) {
+              _prefixSelections[step.key] = item.options[step.key]!;
+            }
+          }
+        }
+      }
+    }
   }
 
   List<ProductStep> get _prefixSteps => _steps
@@ -103,7 +175,11 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     double? configuredPrice = variantPrices[comboKey] ??
         variantPrices[comboKey.toLowerCase()] ??
         variantPrices[variantName] ??
-        variantPrices[variantKey];
+        variantPrices[variantName.toLowerCase()] ??
+        variantPrices[variantKey] ??
+        (group.isNotEmpty
+            ? (variantPrices[group] ?? variantPrices[group.toLowerCase()])
+            : null);
 
     // 2. Case-insensitive & set-based match across option values
     if (configuredPrice == null || configuredPrice <= 0) {
@@ -343,12 +419,20 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _canAdd && _buildItems().isNotEmpty
+                  onPressed: _canAdd &&
+                          (_buildItems().isNotEmpty ||
+                              widget.existingItems.isNotEmpty)
                       ? () => Navigator.pop(context, _buildItems())
                       : null,
-                  icon: const Icon(Icons.playlist_add),
+                  icon: Icon(widget.existingItems.isNotEmpty
+                      ? Icons.check_circle_outline
+                      : Icons.playlist_add),
                   label: Text(
-                    '${s.t('addItem')} (${_buildItems().length})',
+                    widget.existingItems.isNotEmpty
+                        ? (_buildItems().isEmpty
+                            ? 'REMOVE FROM CART'
+                            : 'UPDATE CART (${_buildItems().length} items)')
+                        : '${s.t('addItem')} (${_buildItems().length})',
                   ),
                 ),
               ),
@@ -377,7 +461,13 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                      Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
                       if (price > 0)
                         Text('₹${price.toStringAsFixed(2)} / $_unit',
                             style: TextStyle(color: Colors.teal.shade800, fontSize: 12, fontWeight: FontWeight.w600)),
@@ -498,7 +588,10 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                             children: [
                               Text(
                                 '${s.catalog(group)} - ${s.catalog(currentVariant)}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 15),
                               ),
                               if (currentPrice > 0)
                                 Text(

@@ -118,8 +118,12 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
                     final value = _steps[_step].values[i];
                     return FilledButton.tonal(
                       onPressed: () => _nextStep(value),
-                      child: Text(s.catalog(value),
-                          style: const TextStyle(fontSize: 16)),
+                      child: Text(
+                        s.catalog(value),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 15),
+                      ),
                     );
                   },
                 ),
