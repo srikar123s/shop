@@ -8,17 +8,32 @@ class OrderRepository {
 
   final DatabaseHelper _databaseHelper;
 
-  Future<int> createOrder(DraftOrder draftOrder,
-      {double? estimateTotal}) async {
+  Future<int> createOrder(
+    DraftOrder draftOrder, {
+    double? estimateTotal,
+    BillBreakdown? billBreakdown,
+  }) async {
     final db = await _databaseHelper.database;
     return db.transaction((txn) async {
       final now = DateTime.now();
+      final notes = billBreakdown != null
+          ? jsonEncode(billBreakdown.toMap())
+          : (draftOrder.applyGst || draftOrder.otherCharges.isNotEmpty)
+              ? jsonEncode(BillBreakdown.calculate(
+                  subtotal: draftOrder.items.fold<double>(
+                      0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity),
+                  applyGst: draftOrder.applyGst,
+                  gstRate: draftOrder.gstRate,
+                  otherCharges: draftOrder.otherCharges,
+                  grandTotalOverride: estimateTotal ?? draftOrder.estimateTotal,
+                ).toMap())
+              : null;
       final orderId = await txn.insert('orders', {
         'customer_id': draftOrder.customer.id,
         'customer_name_snapshot': draftOrder.customer.name,
         'created_at': now.toIso8601String(),
         'status': orderStatusLabel(OrderStatus.pending),
-        'notes': null,
+        'notes': notes,
         'estimate_total': estimateTotal ?? draftOrder.estimateTotal ?? 0,
       });
 
@@ -66,6 +81,7 @@ class OrderRepository {
     required int orderId,
     required List<DraftOrderItem> items,
     double estimateTotalAddition = 0,
+    BillBreakdown? billBreakdown,
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
@@ -102,9 +118,15 @@ class OrderRepository {
           });
         }
       }
+      final orderUpdateData = <String, Object?>{
+        'status': orderStatusLabel(OrderStatus.partiallyCompleted),
+      };
+      if (billBreakdown != null) {
+        orderUpdateData['notes'] = jsonEncode(billBreakdown.toMap());
+      }
       await txn.update(
         'orders',
-        {'status': orderStatusLabel(OrderStatus.partiallyCompleted)},
+        orderUpdateData,
         where: 'id = ?',
         whereArgs: <Object?>[orderId],
       );
@@ -333,6 +355,22 @@ class OrderRepository {
       };
       if (newEstimateTotal > 0) {
         updateData['estimate_total'] = newEstimateTotal;
+        final orderRows = await txn.query('orders',
+            columns: ['notes'], where: 'id = ?', whereArgs: [orderId]);
+        if (orderRows.isNotEmpty) {
+          final existingNotes = orderRows.first['notes'] as String?;
+          final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
+          if (existingBreakdown != null) {
+            final updatedBreakdown = BillBreakdown.calculate(
+              subtotal: newEstimateTotal,
+              applyGst: existingBreakdown.applyGst,
+              gstRate: existingBreakdown.gstRate,
+              otherCharges: existingBreakdown.otherCharges,
+            );
+            updateData['notes'] = jsonEncode(updatedBreakdown.toMap());
+            updateData['estimate_total'] = updatedBreakdown.grandTotal;
+          }
+        }
       }
 
       await txn.update(

@@ -98,6 +98,20 @@ const Map<String, String> stringsEn = <String, String>{
   'anotherVariant': 'ANOTHER VARIANT',
   'suggestions': 'SUGGESTIONS',
   'addToOrder': 'ADD TO ORDER',
+  'billSummary': 'BILL SUMMARY',
+  'itemsSubtotal': 'Items Subtotal',
+  'applyGst': 'Apply GST (Tax)',
+  'gstRate': 'GST Rate (%)',
+  'changeGstRate': 'Change GST %',
+  'enterGstRate': 'Enter GST percentage',
+  'otherCharges': 'Other Charges (Optional)',
+  'addOtherCharge': '+ ADD OTHER CHARGE',
+  'chargeType': 'Charge Type (e.g. Delivery, Transport)',
+  'chargeAmount': 'Amount (₹)',
+  'noOtherCharges': 'No other charges added',
+  'grandTotal': 'Grand Total',
+  'optional': 'Optional',
+  'defaultGstHint': 'Default 18% • Tap to change',
 };
 
 const Map<String, String> catalogTe = <String, String>{

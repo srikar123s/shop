@@ -32,22 +32,165 @@ String orderStatusLabel(OrderStatus status) {
   }
 }
 
+class OtherCharge {
+  const OtherCharge({
+    required this.name,
+    required this.amount,
+  });
+
+  final String name;
+  final double amount;
+
+  OtherCharge copyWith({
+    String? name,
+    double? amount,
+  }) {
+    return OtherCharge(
+      name: name ?? this.name,
+      amount: amount ?? this.amount,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'name': name,
+    'amount': amount,
+  };
+
+  factory OtherCharge.fromMap(Map<String, dynamic> map) {
+    return OtherCharge(
+      name: map['name'] as String? ?? '',
+      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+class BillBreakdown {
+  const BillBreakdown({
+    required this.subtotal,
+    this.applyGst = false,
+    this.gstRate = 18.0,
+    this.gstAmount = 0.0,
+    this.otherCharges = const <OtherCharge>[],
+    this.otherChargesTotal = 0.0,
+    required this.grandTotal,
+  });
+
+  final double subtotal;
+  final bool applyGst;
+  final double gstRate;
+  final double gstAmount;
+  final List<OtherCharge> otherCharges;
+  final double otherChargesTotal;
+  final double grandTotal;
+
+  factory BillBreakdown.calculate({
+    required double subtotal,
+    bool applyGst = false,
+    double gstRate = 18.0,
+    List<OtherCharge> otherCharges = const <OtherCharge>[],
+    double? grandTotalOverride,
+  }) {
+    final gst = applyGst ? (subtotal * gstRate / 100.0) : 0.0;
+    final otherTotal =
+        otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount);
+    final calculatedGrandTotal = subtotal + gst + otherTotal;
+    return BillBreakdown(
+      subtotal: subtotal,
+      applyGst: applyGst,
+      gstRate: gstRate,
+      gstAmount: gst,
+      otherCharges: otherCharges,
+      otherChargesTotal: otherTotal,
+      grandTotal: grandTotalOverride ?? calculatedGrandTotal,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'subtotal': subtotal,
+    'applyGst': applyGst,
+    'gstRate': gstRate,
+    'gstAmount': gstAmount,
+    'otherCharges': otherCharges.map((e) => e.toMap()).toList(),
+    'otherChargesTotal': otherChargesTotal,
+    'grandTotal': grandTotal,
+  };
+
+  factory BillBreakdown.fromMap(Map<String, dynamic> map) {
+    final otherChargesList = (map['otherCharges'] as List<dynamic>? ?? [])
+        .map((e) => OtherCharge.fromMap(e as Map<String, dynamic>))
+        .toList();
+    return BillBreakdown(
+      subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0.0,
+      applyGst: map['applyGst'] as bool? ?? false,
+      gstRate: (map['gstRate'] as num?)?.toDouble() ?? 18.0,
+      gstAmount: (map['gstAmount'] as num?)?.toDouble() ?? 0.0,
+      otherCharges: otherChargesList,
+      otherChargesTotal: (map['otherChargesTotal'] as num?)?.toDouble() ??
+          otherChargesList.fold<double>(0.0, (sum, c) => sum + c.amount),
+      grandTotal: (map['grandTotal'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  static BillBreakdown? fromJsonString(String? jsonStr) {
+    if (jsonStr == null || jsonStr.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(jsonStr);
+      if (decoded is Map<String, dynamic>) {
+        if (decoded.containsKey('subtotal') ||
+            decoded.containsKey('applyGst') ||
+            decoded.containsKey('otherCharges')) {
+          return BillBreakdown.fromMap(decoded);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+}
+
 class DraftOrder {
   DraftOrder({
     required this.customer,
     List<DraftOrderItem>? items,
     this.estimateTotal,
-  }) : items = items ?? <DraftOrderItem>[];
+    this.applyGst = false,
+    this.gstRate = 18.0,
+    List<OtherCharge>? otherCharges,
+  })  : items = items ?? <DraftOrderItem>[],
+        otherCharges = otherCharges ?? <OtherCharge>[];
 
   final Customer customer;
   final List<DraftOrderItem> items;
   final double? estimateTotal;
+  final bool applyGst;
+  final double gstRate;
+  final List<OtherCharge> otherCharges;
+
+  DraftOrder copyWith({
+    Customer? customer,
+    List<DraftOrderItem>? items,
+    double? estimateTotal,
+    bool? applyGst,
+    double? gstRate,
+    List<OtherCharge>? otherCharges,
+  }) {
+    return DraftOrder(
+      customer: customer ?? this.customer,
+      items: items ?? this.items,
+      estimateTotal: estimateTotal ?? this.estimateTotal,
+      applyGst: applyGst ?? this.applyGst,
+      gstRate: gstRate ?? this.gstRate,
+      otherCharges: otherCharges ?? this.otherCharges,
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
       'customer': customer.toMap(),
       'items': items.map((e) => e.toMap()).toList(),
       'estimateTotal': estimateTotal,
+      'applyGst': applyGst,
+      'gstRate': gstRate,
+      'otherCharges': otherCharges.map((e) => e.toMap()).toList(),
     };
   }
 
@@ -58,6 +201,11 @@ class DraftOrder {
           .map((e) => DraftOrderItem.fromMap(e as Map<String, dynamic>))
           .toList(),
       estimateTotal: (map['estimateTotal'] as num?)?.toDouble(),
+      applyGst: map['applyGst'] as bool? ?? false,
+      gstRate: (map['gstRate'] as num?)?.toDouble() ?? 18.0,
+      otherCharges: (map['otherCharges'] as List<dynamic>? ?? [])
+          .map((e) => OtherCharge.fromMap(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
@@ -166,6 +314,8 @@ class OrderEntity {
 
   String get formattedOrderId =>
       id != null ? '#ORD-${id.toString().padLeft(4, '0')}' : '#ORD-NEW';
+
+  BillBreakdown? get billBreakdown => BillBreakdown.fromJsonString(notes);
 
   Map<String, Object?> toMap() {
     return {

@@ -216,13 +216,71 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       color: Colors.teal,
                     ),
                   ),
+                  if (order.billBreakdown != null &&
+                      (order.billBreakdown!.applyGst ||
+                          order.billBreakdown!.otherCharges.isNotEmpty)) ...[
+                    const SizedBox(height: 10),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(s.t('itemsSubtotal'),
+                            style: TextStyle(
+                                fontSize: 13, color: Colors.grey.shade700)),
+                        Text(
+                            '₹ ${order.billBreakdown!.subtotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 13)),
+                      ],
+                    ),
+                    if (order.billBreakdown!.applyGst) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                              'GST (${order.billBreakdown!.gstRate % 1 == 0 ? order.billBreakdown!.gstRate.toInt() : order.billBreakdown!.gstRate}%):',
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.grey.shade700)),
+                          Text(
+                              '+ ₹ ${order.billBreakdown!.gstAmount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: Colors.teal)),
+                        ],
+                      ),
+                    ],
+                    for (final charge in order.billBreakdown!.otherCharges) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('${charge.name}:',
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.grey.shade700)),
+                          Text('+ ₹ ${charge.amount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: Colors.teal)),
+                        ],
+                      ),
+                    ],
+                  ],
                   if (order.estimateTotal > 0) ...[
                     const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Estimated Total:', style: TextStyle(fontWeight: FontWeight.w600)),
-                        Text('₹ ${order.estimateTotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.teal, fontSize: 16)),
+                        Text(s.t('grandTotal'),
+                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text('₹ ${order.estimateTotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: Colors.teal,
+                                fontSize: 16)),
                       ],
                     ),
                   ],
