@@ -145,8 +145,15 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final errText = e.toString().contains('permission-denied')
+            ? 'Firebase Rules Locked! In Firebase Console -> Firestore Database -> Rules tab, change to "allow read, write: if true;" and click Publish.'
+            : 'Sync failed: $e';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sync failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(errText),
+            backgroundColor: Colors.red.shade800,
+            duration: const Duration(seconds: 6),
+          ),
         );
       }
     } finally {

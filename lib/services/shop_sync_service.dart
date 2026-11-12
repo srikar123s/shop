@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -115,6 +116,17 @@ class ShopSyncService extends ChangeNotifier {
     return 'SH-$randomDigits';
   }
 
+  String _cleanErrorMessage(dynamic e) {
+    final str = e.toString();
+    if (str.contains('permission-denied')) {
+      return 'Firebase Rules locked: In Firebase Console -> Firestore Database -> Rules tab, change to "allow read, write: if true;" and click Publish.';
+    }
+    if (str.contains('unavailable') || str.contains('network')) {
+      return 'Network offline. Please check your internet connection.';
+    }
+    return str;
+  }
+
   /// Create a new shop in cloud (for owner)
   Future<ShopProfile> createShop({
     required String shopName,
@@ -168,7 +180,7 @@ class ShopSyncService extends ChangeNotifier {
       } catch (e) {
         debugPrint('Error uploading shop to Firestore: $e');
         _status = SyncStatus.offline;
-        _statusMessage = 'Created locally. Cloud sync offline ($e)';
+        _statusMessage = _cleanErrorMessage(e);
       }
     } else {
       _status = SyncStatus.offline;
@@ -305,6 +317,15 @@ class ShopSyncService extends ChangeNotifier {
           optionsMap[opt['option_name'] as String] = opt['option_value'] as String;
         }
 
+        double unitPrice = 0.0;
+        final rawSnap = item['product_snapshot'] as String?;
+        if (rawSnap != null && rawSnap.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(rawSnap) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+
         itemsPayload.add({
           'id': item['id'],
           'product_id': item['product_id'],
@@ -312,13 +333,13 @@ class ShopSyncService extends ChangeNotifier {
           'quantity_ordered': item['quantity_ordered'],
           'quantity_given': item['quantity_given'],
           'unit': item['unit'],
-          'unit_price': item['unit_price'],
+          'unit_price': unitPrice,
           'status': item['status'],
           'is_other_item': item['is_other_item'],
           'procurement_status': item['procurement_status'],
           'details': item['details'],
           'notes': item['notes'],
-          'product_snapshot': item['product_snapshot'],
+          'product_snapshot': rawSnap ?? '{}',
           'options': optionsMap,
         });
       }
@@ -396,6 +417,11 @@ class ShopSyncService extends ChangeNotifier {
       for (final rawItem in rawItems) {
         final item = rawItem as Map<String, dynamic>;
         final itemId = item['id'] as int? ?? Random().nextInt(1000000);
+        final snapString = item['product_snapshot'] as String? ?? jsonEncode({
+          'itemName': item['item_name'],
+          'unitPrice': item['unit_price'] ?? 0.0,
+          'options': item['options'] ?? {},
+        });
         await db.insert('order_items', {
           'id': itemId,
           'order_id': orderId,
@@ -404,13 +430,12 @@ class ShopSyncService extends ChangeNotifier {
           'quantity_ordered': item['quantity_ordered'],
           'quantity_given': item['quantity_given'] ?? 0,
           'unit': item['unit'],
-          'unit_price': item['unit_price'],
           'status': item['status'],
           'is_other_item': item['is_other_item'] ?? 0,
           'procurement_status': item['procurement_status'],
           'details': item['details'],
           'notes': item['notes'],
-          'product_snapshot': item['product_snapshot'],
+          'product_snapshot': snapString,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
 
         final rawOptions = item['options'] as Map<String, dynamic>? ?? {};
@@ -450,6 +475,15 @@ class ShopSyncService extends ChangeNotifier {
           optionsMap[opt['option_name'] as String] = opt['option_value'] as String;
         }
 
+        double unitPrice = 0.0;
+        final rawSnap = item['product_snapshot'] as String?;
+        if (rawSnap != null && rawSnap.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(rawSnap) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+
         itemsPayload.add({
           'id': item['id'],
           'product_id': item['product_id'],
@@ -457,13 +491,13 @@ class ShopSyncService extends ChangeNotifier {
           'quantity_ordered': item['quantity_ordered'],
           'quantity_given': item['quantity_given'],
           'unit': item['unit'],
-          'unit_price': item['unit_price'],
+          'unit_price': unitPrice,
           'status': item['status'],
           'is_other_item': item['is_other_item'],
           'procurement_status': item['procurement_status'],
           'details': item['details'],
           'notes': item['notes'],
-          'product_snapshot': item['product_snapshot'],
+          'product_snapshot': rawSnap ?? '{}',
           'options': optionsMap,
         });
       }
@@ -562,6 +596,11 @@ class ShopSyncService extends ChangeNotifier {
           for (final rawItem in rawItems) {
             final item = rawItem as Map<String, dynamic>;
             final itemId = item['id'] as int? ?? Random().nextInt(1000000);
+            final snapString = item['product_snapshot'] as String? ?? jsonEncode({
+              'itemName': item['item_name'],
+              'unitPrice': item['unit_price'] ?? 0.0,
+              'options': item['options'] ?? {},
+            });
             await db.insert('order_items', {
               'id': itemId,
               'order_id': orderId,
@@ -570,13 +609,12 @@ class ShopSyncService extends ChangeNotifier {
               'quantity_ordered': item['quantity_ordered'],
               'quantity_given': item['quantity_given'] ?? 0,
               'unit': item['unit'],
-              'unit_price': item['unit_price'],
               'status': item['status'],
               'is_other_item': item['is_other_item'] ?? 0,
               'procurement_status': item['procurement_status'],
               'details': item['details'],
               'notes': item['notes'],
-              'product_snapshot': item['product_snapshot'],
+              'product_snapshot': snapString,
             }, conflictAlgorithm: ConflictAlgorithm.replace);
 
             final rawOptions = item['options'] as Map<String, dynamic>? ?? {};
