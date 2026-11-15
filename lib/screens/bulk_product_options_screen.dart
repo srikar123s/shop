@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/models/product.dart';
+import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/widgets/quantity_selector.dart';
 
 /// A compact variant matrix used when one product has several sizes, types,
@@ -287,10 +288,12 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   }
 
   Widget _compactPresets(Function(double) onSelected) {
+    final shortcuts = ShopCustomizationService.instance
+        .getShortcutsForProduct(widget.product.id);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
-        children: [5.0, 6.0, 10.0, 12.0].map((v) {
+        children: shortcuts.map((v) {
           final label = v % 1 == 0 ? v.toInt().toString() : v.toString();
           return Padding(
             padding: const EdgeInsets.only(right: 6),

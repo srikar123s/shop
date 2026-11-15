@@ -11,12 +11,21 @@ import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/home_screen.dart';
 import 'package:shop/services/backup_service.dart';
+import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
+
+const bool kPureOfflineMode =
+    bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DatabaseHelper.instance.database;
-  unawaited(ShopSyncService.instance.initialize());
+  await ShopCustomizationService.instance.initialize();
+  if (kPureOfflineMode) {
+    await ShopCustomizationService.instance.setPureOfflineMode(true);
+  } else {
+    unawaited(ShopSyncService.instance.initialize());
+  }
   final preferences = await SharedPreferences.getInstance();
   final languageCode = preferences.getString('language_code') ?? 'en';
   runApp(ShopApp(initialLocale: Locale(languageCode)));
@@ -60,7 +69,7 @@ class _ShopAppState extends State<ShopApp> {
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: rootMessengerKey,
 
-      title: 'Hardware Shop',
+      title: kPureOfflineMode ? 'Shop (Local)' : 'Shop (Cloud)',
       debugShowCheckedModeBanner: false,
       locale: _locale,
       supportedLocales: AppLocalizations.supportedLocales,

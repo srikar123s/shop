@@ -7,8 +7,14 @@ import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shop/database/database_helper.dart';
 import 'package:shop/screens/product_selection_screen.dart';
+import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/share_service.dart';
+import 'package:shop/services/shop_sync_service.dart';
+import 'package:shop/services/shop_customization_service.dart';
+
 import 'package:shop/widgets/large_action_button.dart';
 import 'package:shop/widgets/quantity_selector.dart';
 
@@ -427,6 +433,922 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     }
   }
 
+  Future<void> _navigateToAddProducts() async {
+    if (_details == null) return;
+    final order = _details!.order;
+    final customer =
+        await widget.customerRepository.getCustomerById(order.customerId);
+    if (!mounted || customer == null) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProductSelectionScreen(
+          customer: customer,
+          productRepository: widget.productRepository,
+          orderRepository: widget.orderRepository,
+          existingOrderId: order.id,
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<void> _repeatOrder() async {
+    if (_details == null) return;
+    final order = _details!.order;
+    final customer =
+        await widget.customerRepository.getCustomerById(order.customerId);
+    if (!mounted || customer == null) return;
+
+    final draftItems = _details!.items.map((item) {
+      return DraftOrderItem(
+        productId: item.productId,
+        itemName: item.itemName,
+        quantity: item.quantityOrdered,
+        unit: item.unit,
+        unitPrice: item.unitPrice > 0 ? item.unitPrice : null,
+        description: item.description,
+        notes: item.notes,
+        isOtherItem: item.isOtherItem,
+        options: {
+          for (final opt in item.options) opt.optionName: opt.optionValue
+        },
+      );
+    }).toList();
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProductSelectionScreen(
+          customer: customer,
+          productRepository: widget.productRepository,
+          orderRepository: widget.orderRepository,
+          initialItems: draftItems,
+        ),
+      ),
+    );
+  }
+
+  void _showPrintMenu() {
+    if (_details == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.print, color: Color(0xFF0F766E)),
+                ),
+                title: const Text('Thermal Printer (58mm Roll)',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle:
+                    const Text('Direct print via Bluetooth thermal printer'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await InvoicePdfService.instance.printReceipt(
+                    _details!,
+                    isThermal58mm: true,
+                  );
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.picture_as_pdf, color: Colors.blue),
+                ),
+                title: const Text('Share PDF Bill',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle:
+                    const Text('Standard format with shop stamp & details'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await InvoicePdfService.instance.sharePdf(_details!);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.local_shipping_outlined,
+                      color: Colors.orange),
+                ),
+                title: const Text('Delivery Challan (No-Price Slip)',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    'Dispatch slip for driver with items & address only'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await InvoicePdfService.instance.sharePdf(
+                    _details!,
+                    isDeliveryChallan: true,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showUpiQrDialog() {
+    if (_details == null) return;
+    final order = _details!.order;
+    final shopService = ShopCustomizationService.instance;
+    final upiId = shopService.upiId.trim();
+    final shopName = shopService.shopName.trim();
+    final amountToPay =
+        order.dueAmount > 0 ? order.dueAmount : order.estimateTotal;
+
+    if (upiId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please set your UPI ID first in Shop Settings!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final upiUri =
+        'upi://pay?pa=$upiId&pn=${Uri.encodeComponent(shopName)}&am=${amountToPay.toStringAsFixed(2)}&cu=INR&tn=${Uri.encodeComponent("Bill ${order.formattedOrderId}")}';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.qr_code_2, color: Color(0xFF0F766E), size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Scan & Pay UPI',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Customer scans to pay ₹${amountToPay.toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'UPI ID: $upiId',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: QrImageView(
+                data: upiUri,
+                version: QrVersions.auto,
+                size: 200,
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Payment & Khata Status Card
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: order.isFullyPaid
+                    ? Colors.teal.shade50
+                    : (order.paidAmount > 0
+                        ? Colors.amber.shade50
+                        : Colors.red.shade50),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: order.isFullyPaid
+                      ? Colors.teal.shade200
+                      : (order.paidAmount > 0
+                          ? Colors.amber.shade300
+                          : Colors.red.shade200),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            order.isFullyPaid
+                                ? Icons.check_circle
+                                : (order.paidAmount > 0
+                                    ? Icons.timelapse
+                                    : Icons.error_outline),
+                            size: 18,
+                            color: order.isFullyPaid
+                                ? Colors.teal.shade800
+                                : (order.paidAmount > 0
+                                    ? Colors.amber.shade900
+                                    : Colors.red.shade800),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            order.isFullyPaid
+                                ? 'PAID (${order.paymentMode.toUpperCase()})'
+                                : (order.paidAmount > 0
+                                    ? 'PARTIAL (${order.paymentMode.toUpperCase()})'
+                                    : 'UNPAID / UDHAAR (KHATA)'),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: order.isFullyPaid
+                                  ? Colors.teal.shade900
+                                  : (order.paidAmount > 0
+                                      ? Colors.amber.shade900
+                                      : Colors.red.shade900),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  if (order.dueAmount > 0.01) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Balance Due (Udhaar):',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.red.shade800,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          '₹ ${order.dueAmount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade800),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          icon: const Icon(Icons.qr_code_2, size: 16),
+                          label: const Text('UPI QR',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: _showUpiQrDialog,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          icon: const Icon(Icons.payments_outlined, size: 16),
+                          label: const Text('Pay / Khata',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: _showRecordPaymentDialog,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Supports Google Pay, PhonePe, Paytm, BHIM',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showRecordPaymentDialog();
+            },
+            child: const Text('Record Payment'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRecordPaymentDialog() {
+    if (_details == null) return;
+    final order = _details!.order;
+    final total = order.estimateTotal;
+    final currentPaid = order.paidAmount;
+    final due = order.dueAmount;
+
+    final amountController = TextEditingController(
+      text: due > 0
+          ? (due % 1 == 0 ? due.toInt().toString() : due.toStringAsFixed(2))
+          : '',
+    );
+    String selectedMode = 'UPI';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.account_balance_wallet_outlined,
+                  color: Color(0xFF0F766E)),
+              SizedBox(width: 8),
+              Text('Record Payment',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Total Bill: ₹${total.toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Due: ₹${due.toStringAsFixed(2)}',
+                      style: TextStyle(
+                          color: due > 0 ? Colors.red.shade700 : Colors.teal,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Amount Paid Now:',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: amountController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  prefixText: '₹ ',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Payment Mode:',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: ['Cash', 'UPI', 'Khata / Credit'].map((mode) {
+                  final isSelected = selectedMode == mode;
+                  return ChoiceChip(
+                    label: Text(mode),
+                    selected: isSelected,
+                    selectedColor: const Color(0xFF0F766E),
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black87,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    onSelected: (val) {
+                      if (val) setDialogState(() => selectedMode = mode);
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+              ),
+              onPressed: () async {
+                final entered =
+                    double.tryParse(amountController.text.trim()) ?? 0.0;
+                final newPaid = currentPaid + entered;
+                await DatabaseHelper.instance.recordOrderPayment(
+                  orderId: order.id!,
+                  paidAmount: newPaid,
+                  paymentMode: selectedMode,
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+                await _load();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Payment of ₹$entered recorded!'),
+                      backgroundColor: const Color(0xFF0F766E),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Save Payment'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEditBillDialog(OrderEntity order) async {
+    final breakdown = order.billBreakdown ??
+        BillBreakdown.calculate(
+          subtotal: _details!.items.fold<double>(
+            0.0,
+            (sum, i) => sum + (i.unitPrice * i.quantityOrdered),
+          ),
+          grandTotalOverride: order.estimateTotal,
+        );
+
+    bool applyDiscount = breakdown.applyDiscount;
+    String discountType = breakdown.discountType;
+    double discountValue = breakdown.discountValue;
+    bool applyGst = breakdown.applyGst;
+    double gstRate = breakdown.gstRate > 0 ? breakdown.gstRate : 18.0;
+    final otherCharges = List<OtherCharge>.from(breakdown.otherCharges);
+
+    final discountController = TextEditingController(
+      text: discountValue > 0
+          ? (discountValue % 1 == 0
+              ? discountValue.toInt().toString()
+              : discountValue.toString())
+          : '',
+    );
+    final gstController = TextEditingController(
+      text: gstRate % 1 == 0 ? gstRate.toInt().toString() : gstRate.toString(),
+    );
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final subtotal = _details!.items.fold<double>(
+              0.0,
+              (sum, i) =>
+                  sum +
+                  (i.unitPrice *
+                      (order.status == OrderStatus.completed &&
+                              i.quantityGiven > 0
+                          ? i.quantityGiven
+                          : i.quantityOrdered)),
+            );
+
+            double discountAmount = 0.0;
+            if (applyDiscount) {
+              if (discountType == 'percent') {
+                discountAmount = subtotal * discountValue / 100.0;
+              } else {
+                discountAmount = discountValue;
+              }
+            }
+
+            final taxable =
+                (subtotal - discountAmount).clamp(0.0, double.infinity);
+            final gstAmount = applyGst ? (taxable * gstRate / 100.0) : 0.0;
+            final otherTotal =
+                otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount);
+            final previewGrandTotal =
+                (taxable + gstAmount + otherTotal).clamp(0.0, double.infinity);
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Edit Bill (Charges & Discount)',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(),
+                    const SizedBox(height: 8),
+
+                    // Subtotal Display
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Items Subtotal:',
+                            style: TextStyle(fontSize: 14)),
+                        Text('₹ ${subtotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Discount Toggle & Input
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: applyDiscount,
+                              onChanged: (val) {
+                                setModalState(() => applyDiscount = val ?? false);
+                              },
+                            ),
+                            const Text('Discount / Offer',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        if (applyDiscount && discountAmount > 0)
+                          Text(
+                            '- ₹ ${discountAmount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                color: Colors.green.shade800,
+                                fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
+                    if (applyDiscount) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12, bottom: 8),
+                        child: Row(
+                          children: [
+                            SegmentedButton<String>(
+                              style: SegmentedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              segments: const [
+                                ButtonSegment(
+                                    value: 'flat',
+                                    label: Text('₹ Flat',
+                                        style: TextStyle(fontSize: 12))),
+                                ButtonSegment(
+                                    value: 'percent',
+                                    label: Text('% Off',
+                                        style: TextStyle(fontSize: 12))),
+                              ],
+                              selected: {discountType},
+                              onSelectionChanged: (set) {
+                                setModalState(() => discountType = set.first);
+                              },
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: discountController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                decoration: InputDecoration(
+                                  hintText: discountType == 'flat'
+                                      ? 'e.g. 100'
+                                      : 'e.g. 5',
+                                  prefixText:
+                                      discountType == 'flat' ? '₹ ' : null,
+                                  suffixText:
+                                      discountType == 'percent' ? '%' : null,
+                                  isDense: true,
+                                  border: const OutlineInputBorder(),
+                                ),
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    discountValue =
+                                        double.tryParse(val.trim()) ?? 0.0;
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const Divider(height: 20),
+
+                    // GST Toggle & Input
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: applyGst,
+                              onChanged: (val) {
+                                setModalState(() => applyGst = val ?? false);
+                              },
+                            ),
+                            const Text('Add GST',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        if (applyGst)
+                          Text(
+                            '+ ₹ ${gstAmount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                color: Colors.teal,
+                                fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
+                    if (applyGst) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12, bottom: 8),
+                        child: Row(
+                          children: [
+                            const Text('GST Rate: ',
+                                style: TextStyle(fontSize: 13)),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 90,
+                              child: TextField(
+                                controller: gstController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                decoration: const InputDecoration(
+                                  suffixText: '%',
+                                  isDense: true,
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (val) {
+                                  setModalState(() {
+                                    gstRate =
+                                        double.tryParse(val.trim()) ?? 18.0;
+                                  });
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Wrap(
+                              spacing: 4,
+                              children: [5.0, 12.0, 18.0, 28.0].map((r) {
+                                final rStr = r % 1 == 0
+                                    ? r.toInt().toString()
+                                    : r.toString();
+                                return ActionChip(
+                                  label: Text('$rStr%',
+                                      style: const TextStyle(fontSize: 11)),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () {
+                                    setModalState(() {
+                                      gstRate = r;
+                                      gstController.text = rStr;
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const Divider(height: 20),
+
+                    // Other Charges
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Other Charges (Transport, etc.):',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        TextButton.icon(
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Add Charge',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: () async {
+                            final nameCtrl = TextEditingController();
+                            final amtCtrl = TextEditingController();
+                            final added = await showDialog<bool>(
+                              context: ctx,
+                              builder: (dCtx) => AlertDialog(
+                                title: const Text('Add Other Charge'),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    TextField(
+                                      controller: nameCtrl,
+                                      decoration: const InputDecoration(
+                                          labelText:
+                                              'Charge Name (e.g. Transport, Labor)'),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextField(
+                                      controller: amtCtrl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                              decimal: true),
+                                      decoration: const InputDecoration(
+                                          labelText: 'Amount ₹'),
+                                    ),
+                                  ],
+                                ),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(dCtx, false),
+                                      child: const Text('CANCEL')),
+                                  FilledButton(
+                                      onPressed: () => Navigator.pop(dCtx, true),
+                                      child: const Text('ADD')),
+                                ],
+                              ),
+                            );
+                            if (added == true && amtCtrl.text.isNotEmpty) {
+                              final amt =
+                                  double.tryParse(amtCtrl.text.trim()) ?? 0.0;
+                              if (amt > 0) {
+                                setModalState(() {
+                                  otherCharges.add(OtherCharge(
+                                    name: nameCtrl.text.trim().isNotEmpty
+                                        ? nameCtrl.text.trim()
+                                        : 'Transport',
+                                    amount: amt,
+                                  ));
+                                });
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    for (int i = 0; i < otherCharges.length; i++)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(otherCharges[i].name),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '+ ₹ ${otherCharges[i].amount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.teal),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 18, color: Colors.red),
+                              onPressed: () {
+                                setModalState(() => otherCharges.removeAt(i));
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    const Divider(height: 24),
+
+                    // Grand Total Summary Box
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(ctx)
+                            .colorScheme
+                            .primaryContainer
+                            .withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Theme.of(ctx)
+                                .colorScheme
+                                .primary
+                                .withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Grand Total:',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text(
+                            '₹ ${previewGrandTotal.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.teal),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Save Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () async {
+                          final updatedBreakdown = BillBreakdown.calculate(
+                            subtotal: subtotal,
+                            applyDiscount: applyDiscount,
+                            discountType: discountType,
+                            discountValue: discountValue,
+                            applyGst: applyGst,
+                            gstRate: gstRate,
+                            otherCharges: otherCharges,
+                            note: breakdown.note,
+                          );
+
+                          await widget.orderRepository.updateOrderBillBreakdown(
+                            orderId: order.id!,
+                            billBreakdown: updatedBreakdown,
+                          );
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                          }
+                          await _load();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Bill updated successfully!'),
+                                backgroundColor: Color(0xFF0F766E),
+                              ),
+                            );
+                          }
+                        },
+                        child: const Text('SAVE BILL CHANGES',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
@@ -453,16 +1375,36 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
-            Text(
-              DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt),
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.normal,
-                  color: Colors.grey.shade600),
-            ),
+            if (!ShopCustomizationService.instance.isPureOfflineMode) ...[
+              Text(
+                'Taken by: ${order.takenBy != null && order.takenBy!.trim().isNotEmpty && order.takenBy!.trim() != 'Store' ? order.takenBy!.trim() : ShopSyncService.instance.currentUserOrDeviceName} • ${DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt)}',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.teal.shade800),
+              ),
+            ] else ...[
+              Text(
+                DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt),
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.normal,
+                    color: Colors.grey.shade600),
+              ),
+            ],
           ],
         ),
         actions: <Widget>[
+          IconButton(
+            tooltip: '1-Tap Repeat Order',
+            icon: const Icon(Icons.repeat_rounded),
+            onPressed: _repeatOrder,
+          ),
+          IconButton(
+            tooltip: 'Print & PDF Receipts',
+            icon: const Icon(Icons.print_outlined),
+            onPressed: _showPrintMenu,
+          ),
           IconButton(
             tooltip: 'Share Order Summary',
             icon: const Icon(Icons.share),
@@ -540,9 +1482,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       color: Colors.teal,
                     ),
                   ),
-                  if (order.billBreakdown != null &&
-                      (order.billBreakdown!.applyGst ||
-                          order.billBreakdown!.otherCharges.isNotEmpty)) ...[
+                  if (order.billBreakdown != null) ...[
                     const SizedBox(height: 10),
                     const Divider(height: 1),
                     const SizedBox(height: 8),
@@ -558,6 +1498,29 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 fontWeight: FontWeight.w600, fontSize: 13)),
                       ],
                     ),
+                    if (order.billBreakdown!.applyDiscount &&
+                        order.billBreakdown!.discountAmount > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Discount (${order.billBreakdown!.discountType == 'percent' ? '${order.billBreakdown!.discountValue % 1 == 0 ? order.billBreakdown!.discountValue.toInt() : order.billBreakdown!.discountValue}%' : 'Flat ₹${order.billBreakdown!.discountValue.toStringAsFixed(0)}'}):',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.green.shade800,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            '- ₹ ${order.billBreakdown!.discountAmount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Colors.green.shade800),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (order.billBreakdown!.applyGst) ...[
                       const SizedBox(height: 4),
                       Row(
@@ -608,6 +1571,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       ],
                     ),
                   ],
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: const Color(0xFF0F766E),
+                      ),
+                      icon: const Icon(Icons.tune, size: 16),
+                      label: const Text('Edit Bill (Charges & Discount)',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold)),
+                      onPressed: () => _showEditBillDialog(order),
+                    ),
+                  ),
                   if (order.billBreakdown?.note != null &&
                       order.billBreakdown!.note!.isNotEmpty) ...[
                     const SizedBox(height: 10),
@@ -641,10 +1619,151 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'ITEMS TO FULFILL',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Colors.grey, letterSpacing: 0.5),
+            const SizedBox(height: 10),
+
+            // Payment & Khata Status Card
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: order.isFullyPaid
+                    ? Colors.teal.shade50
+                    : (order.paidAmount > 0
+                        ? Colors.amber.shade50
+                        : Colors.red.shade50),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: order.isFullyPaid
+                      ? Colors.teal.shade200
+                      : (order.paidAmount > 0
+                          ? Colors.amber.shade300
+                          : Colors.red.shade200),
+                ),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            order.isFullyPaid
+                                ? Icons.check_circle
+                                : (order.paidAmount > 0
+                                    ? Icons.timelapse
+                                    : Icons.error_outline),
+                            size: 18,
+                            color: order.isFullyPaid
+                                ? Colors.teal.shade800
+                                : (order.paidAmount > 0
+                                    ? Colors.amber.shade900
+                                    : Colors.red.shade800),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            order.isFullyPaid
+                                ? 'PAID (${order.paymentMode.toUpperCase()})'
+                                : (order.paidAmount > 0
+                                    ? 'PARTIAL (${order.paymentMode.toUpperCase()})'
+                                    : 'UNPAID / UDHAAR (KHATA)'),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: order.isFullyPaid
+                                  ? Colors.teal.shade900
+                                  : (order.paidAmount > 0
+                                      ? Colors.amber.shade900
+                                      : Colors.red.shade900),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  if (order.dueAmount > 0.01) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Balance Due (Udhaar):',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.red.shade800,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          '₹ ${order.dueAmount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade800),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          icon: const Icon(Icons.qr_code_2, size: 16),
+                          label: const Text('UPI QR',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: _showUpiQrDialog,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          icon: const Icon(Icons.payments_outlined, size: 16),
+                          label: const Text('Pay / Khata',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: _showRecordPaymentDialog,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'ITEMS TO FULFILL',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: Colors.grey,
+                      letterSpacing: 0.5),
+                ),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: const Color(0xFF0F766E),
+                  ),
+                  icon: const Icon(Icons.add_circle_outline, size: 16),
+                  label: const Text('+ Add Items',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  onPressed: _navigateToAddProducts,
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             Expanded(
@@ -748,6 +1867,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               SizedBox(
                                 width: 120,
                                 child: TextField(
+                                  enabled: ShopSyncService.instance.canChangePrice,
                                   controller: TextEditingController(
                                     text: item.unitPrice > 0
                                         ? item.unitPrice.toStringAsFixed(2)
@@ -868,7 +1988,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     onTap: _saving ? null : _save,
                   ),
                 ),
-                if (order.status != OrderStatus.completed) ...[
+                if (order.status != OrderStatus.completed &&
+                    ShopSyncService.instance.canCloseOrders) ...[
                   const SizedBox(width: 10),
                   Expanded(
                     flex: 2,

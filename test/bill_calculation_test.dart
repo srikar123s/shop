@@ -267,6 +267,43 @@ void main() {
       expect(adjustedBill.grandTotal, 1239.0);
       expect(adjustedBill.note, contains('Paint 1L Red (3/5 given)'));
     });
+
+    test('Flat discount and Percentage discount calculate correctly with GST', () {
+      // Subtotal = 1000, Flat Discount = 100 -> Taxable = 900 -> GST (18%) = 162 -> Total = 1062
+      final flatBill = BillBreakdown.calculate(
+        subtotal: 1000.0,
+        applyDiscount: true,
+        discountType: 'flat',
+        discountValue: 100.0,
+        applyGst: true,
+        gstRate: 18.0,
+      );
+      expect(flatBill.discountAmount, 100.0);
+      expect(flatBill.gstAmount, 162.0);
+      expect(flatBill.grandTotal, 1062.0);
+
+      // Subtotal = 1000, 10% Discount = 100 -> Taxable = 900 -> GST (18%) = 162 -> Total = 1062
+      final percentBill = BillBreakdown.calculate(
+        subtotal: 1000.0,
+        applyDiscount: true,
+        discountType: 'percent',
+        discountValue: 10.0,
+        applyGst: true,
+        gstRate: 18.0,
+      );
+      expect(percentBill.discountAmount, 100.0);
+      expect(percentBill.gstAmount, 162.0);
+      expect(percentBill.grandTotal, 1062.0);
+
+      // JSON serialization check
+      final jsonMap = percentBill.toMap();
+      final restored = BillBreakdown.fromMap(jsonMap);
+      expect(restored.applyDiscount, isTrue);
+      expect(restored.discountType, 'percent');
+      expect(restored.discountValue, 10.0);
+      expect(restored.discountAmount, 100.0);
+      expect(restored.grandTotal, 1062.0);
+    });
   });
 }
 

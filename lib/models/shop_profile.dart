@@ -1,5 +1,19 @@
 import 'dart:convert';
 
+DateTime? _parseDateTime(dynamic val) {
+  if (val == null) return null;
+  if (val is DateTime) return val;
+  if (val is String) return DateTime.tryParse(val);
+  if (val is int) return DateTime.fromMillisecondsSinceEpoch(val);
+  try {
+    final dynamic dyn = val;
+    if (dyn.toDate is Function) {
+      return dyn.toDate() as DateTime?;
+    }
+  } catch (_) {}
+  return null;
+}
+
 class ShopProfile {
   const ShopProfile({
     required this.shopCode,
@@ -11,6 +25,7 @@ class ShopProfile {
     this.defaultGstRate = 18.0,
     this.role = 'owner', // 'owner' or 'staff'
     this.staffName = 'Counter 1',
+    this.status = 'approved', // 'pending', 'approved', 'rejected'
     this.createdAt,
     this.lastSyncedAt,
     this.isCloudEnabled = false,
@@ -25,11 +40,15 @@ class ShopProfile {
   final double defaultGstRate;
   final String role; // 'owner' or 'staff'
   final String staffName;
+  final String status; // 'pending', 'approved', 'rejected'
   final DateTime? createdAt;
   final DateTime? lastSyncedAt;
   final bool isCloudEnabled;
 
   bool get isOwner => role == 'owner';
+  bool get isPending => status == 'pending';
+  bool get isApproved => status == 'approved' || status.isEmpty;
+  bool get isRejected => status == 'rejected';
 
   ShopProfile copyWith({
     String? shopCode,
@@ -41,6 +60,7 @@ class ShopProfile {
     double? defaultGstRate,
     String? role,
     String? staffName,
+    String? status,
     DateTime? createdAt,
     DateTime? lastSyncedAt,
     bool? isCloudEnabled,
@@ -55,6 +75,7 @@ class ShopProfile {
       defaultGstRate: defaultGstRate ?? this.defaultGstRate,
       role: role ?? this.role,
       staffName: staffName ?? this.staffName,
+      status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
       isCloudEnabled: isCloudEnabled ?? this.isCloudEnabled,
@@ -72,6 +93,7 @@ class ShopProfile {
       'defaultGstRate': defaultGstRate,
       'role': role,
       'staffName': staffName,
+      'status': status,
       'createdAt': createdAt?.toIso8601String(),
       'lastSyncedAt': lastSyncedAt?.toIso8601String(),
       'isCloudEnabled': isCloudEnabled,
@@ -89,12 +111,9 @@ class ShopProfile {
       defaultGstRate: (map['defaultGstRate'] as num?)?.toDouble() ?? 18.0,
       role: map['role'] as String? ?? 'owner',
       staffName: map['staffName'] as String? ?? 'Counter 1',
-      createdAt: map['createdAt'] != null
-          ? DateTime.tryParse(map['createdAt'] as String)
-          : null,
-      lastSyncedAt: map['lastSyncedAt'] != null
-          ? DateTime.tryParse(map['lastSyncedAt'] as String)
-          : null,
+      status: map['status'] as String? ?? 'approved',
+      createdAt: _parseDateTime(map['createdAt']),
+      lastSyncedAt: _parseDateTime(map['lastSyncedAt']),
       isCloudEnabled: map['isCloudEnabled'] as bool? ?? false,
     );
   }
@@ -104,4 +123,98 @@ class ShopProfile {
   factory ShopProfile.fromJson(String source) =>
       ShopProfile.fromMap(jsonDecode(source) as Map<String, dynamic>);
 }
+
+class StaffDevice {
+  const StaffDevice({
+    required this.deviceId,
+    required this.staffName,
+    this.role = 'staff',
+    this.status = 'approved', // 'pending', 'approved', 'rejected'
+    this.canChangePrice = true,
+    this.canManageProducts = true,
+    this.canCloseOrders = true,
+    this.canChangeShortcuts = true,
+    this.canViewBillTotals = true,
+    this.requestedAt,
+    this.lastActive,
+  });
+
+  final String deviceId;
+  final String staffName;
+  final String role; // 'owner' or 'staff'
+  final String status; // 'pending', 'approved', 'rejected'
+  final bool canChangePrice;
+  final bool canManageProducts;
+  final bool canCloseOrders;
+  final bool canChangeShortcuts;
+  final bool canViewBillTotals;
+  final DateTime? requestedAt;
+  final DateTime? lastActive;
+
+  bool get isOwner => role == 'owner';
+  bool get isPending => status == 'pending';
+  bool get isApproved => status == 'approved' || status.isEmpty;
+  bool get isRejected => status == 'rejected';
+
+  StaffDevice copyWith({
+    String? deviceId,
+    String? staffName,
+    String? role,
+    String? status,
+    bool? canChangePrice,
+    bool? canManageProducts,
+    bool? canCloseOrders,
+    bool? canChangeShortcuts,
+    bool? canViewBillTotals,
+    DateTime? requestedAt,
+    DateTime? lastActive,
+  }) {
+    return StaffDevice(
+      deviceId: deviceId ?? this.deviceId,
+      staffName: staffName ?? this.staffName,
+      role: role ?? this.role,
+      status: status ?? this.status,
+      canChangePrice: canChangePrice ?? this.canChangePrice,
+      canManageProducts: canManageProducts ?? this.canManageProducts,
+      canCloseOrders: canCloseOrders ?? this.canCloseOrders,
+      canChangeShortcuts: canChangeShortcuts ?? this.canChangeShortcuts,
+      canViewBillTotals: canViewBillTotals ?? this.canViewBillTotals,
+      requestedAt: requestedAt ?? this.requestedAt,
+      lastActive: lastActive ?? this.lastActive,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'deviceId': deviceId,
+      'staffName': staffName,
+      'role': role,
+      'status': status,
+      'canChangePrice': canChangePrice,
+      'canManageProducts': canManageProducts,
+      'canCloseOrders': canCloseOrders,
+      'canChangeShortcuts': canChangeShortcuts,
+      'canViewBillTotals': canViewBillTotals,
+      'requestedAt': requestedAt?.toIso8601String(),
+      'lastActive': lastActive?.toIso8601String(),
+    };
+  }
+
+  factory StaffDevice.fromMap(Map<String, dynamic> map) {
+    return StaffDevice(
+      deviceId: map['deviceId'] as String? ?? '',
+      staffName: map['staffName'] as String? ?? 'Staff Counter',
+      role: map['role'] as String? ?? 'staff',
+      status: map['status'] as String? ?? 'approved',
+      canChangePrice: map['canChangePrice'] as bool? ?? true,
+      canManageProducts: map['canManageProducts'] as bool? ?? true,
+      canCloseOrders: map['canCloseOrders'] as bool? ?? true,
+      canChangeShortcuts: map['canChangeShortcuts'] as bool? ?? true,
+      canViewBillTotals: map['canViewBillTotals'] as bool? ?? true,
+      requestedAt: _parseDateTime(map['requestedAt']),
+      lastActive: _parseDateTime(map['lastActive']),
+    );
+  }
+}
+
 

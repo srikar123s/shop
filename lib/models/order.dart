@@ -72,8 +72,14 @@ class BillBreakdown {
     this.gstAmount = 0.0,
     this.otherCharges = const <OtherCharge>[],
     this.otherChargesTotal = 0.0,
+    this.applyDiscount = false,
+    this.discountType = 'flat', // 'flat' or 'percent'
+    this.discountValue = 0.0,
+    this.discountAmount = 0.0,
     required this.grandTotal,
     this.note,
+    this.customerPhone,
+    this.takenBy,
   });
 
   final double subtotal;
@@ -82,21 +88,73 @@ class BillBreakdown {
   final double gstAmount;
   final List<OtherCharge> otherCharges;
   final double otherChargesTotal;
+  final bool applyDiscount;
+  final String discountType;
+  final double discountValue;
+  final double discountAmount;
   final double grandTotal;
   final String? note;
+  final String? customerPhone;
+  final String? takenBy;
+
+  BillBreakdown copyWith({
+    double? subtotal,
+    bool? applyGst,
+    double? gstRate,
+    double? gstAmount,
+    List<OtherCharge>? otherCharges,
+    double? otherChargesTotal,
+    bool? applyDiscount,
+    String? discountType,
+    double? discountValue,
+    double? discountAmount,
+    double? grandTotal,
+    String? note,
+    String? customerPhone,
+    String? takenBy,
+  }) {
+    return BillBreakdown(
+      subtotal: subtotal ?? this.subtotal,
+      applyGst: applyGst ?? this.applyGst,
+      gstRate: gstRate ?? this.gstRate,
+      gstAmount: gstAmount ?? this.gstAmount,
+      otherCharges: otherCharges ?? this.otherCharges,
+      otherChargesTotal: otherChargesTotal ?? this.otherChargesTotal,
+      applyDiscount: applyDiscount ?? this.applyDiscount,
+      discountType: discountType ?? this.discountType,
+      discountValue: discountValue ?? this.discountValue,
+      discountAmount: discountAmount ?? this.discountAmount,
+      grandTotal: grandTotal ?? this.grandTotal,
+      note: note ?? this.note,
+      customerPhone: customerPhone ?? this.customerPhone,
+      takenBy: takenBy ?? this.takenBy,
+    );
+  }
 
   factory BillBreakdown.calculate({
     required double subtotal,
     bool applyGst = false,
     double gstRate = 18.0,
     List<OtherCharge> otherCharges = const <OtherCharge>[],
+    bool applyDiscount = false,
+    String discountType = 'flat',
+    double discountValue = 0.0,
     double? grandTotalOverride,
     String? note,
+    String? customerPhone,
+    String? takenBy,
   }) {
-    final gst = applyGst ? (subtotal * gstRate / 100.0) : 0.0;
+    final discount = applyDiscount
+        ? (discountType == 'percent'
+            ? (subtotal * discountValue / 100.0)
+            : discountValue)
+        : 0.0;
+    final taxableOrNet = (subtotal - discount).clamp(0.0, double.infinity);
+    final gst = applyGst ? (taxableOrNet * gstRate / 100.0) : 0.0;
     final otherTotal =
         otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount);
-    final calculatedGrandTotal = subtotal + gst + otherTotal;
+    final calculatedGrandTotal =
+        (taxableOrNet + gst + otherTotal).clamp(0.0, double.infinity);
     return BillBreakdown(
       subtotal: subtotal,
       applyGst: applyGst,
@@ -104,8 +162,14 @@ class BillBreakdown {
       gstAmount: gst,
       otherCharges: otherCharges,
       otherChargesTotal: otherTotal,
+      applyDiscount: applyDiscount,
+      discountType: discountType,
+      discountValue: discountValue,
+      discountAmount: discount,
       grandTotal: grandTotalOverride ?? calculatedGrandTotal,
       note: note,
+      customerPhone: customerPhone,
+      takenBy: takenBy,
     );
   }
 
@@ -116,24 +180,45 @@ class BillBreakdown {
     'gstAmount': gstAmount,
     'otherCharges': otherCharges.map((e) => e.toMap()).toList(),
     'otherChargesTotal': otherChargesTotal,
+    'applyDiscount': applyDiscount,
+    'discountType': discountType,
+    'discountValue': discountValue,
+    'discountAmount': discountAmount,
     'grandTotal': grandTotal,
     if (note != null && note!.isNotEmpty) 'note': note,
+    if (customerPhone != null && customerPhone!.isNotEmpty) 'customerPhone': customerPhone,
+    if (takenBy != null && takenBy!.isNotEmpty) 'takenBy': takenBy,
   };
 
   factory BillBreakdown.fromMap(Map<String, dynamic> map) {
     final otherChargesList = (map['otherCharges'] as List<dynamic>? ?? [])
         .map((e) => OtherCharge.fromMap(e as Map<String, dynamic>))
         .toList();
+    final sub = (map['subtotal'] as num?)?.toDouble() ?? 0.0;
+    final hasDisc = map['applyDiscount'] as bool? ?? false;
+    final dType = map['discountType'] as String? ?? 'flat';
+    final dVal = (map['discountValue'] as num?)?.toDouble() ?? 0.0;
+    final dAmt = (map['discountAmount'] as num?)?.toDouble() ??
+        (hasDisc
+            ? (dType == 'percent' ? (sub * dVal / 100.0) : dVal)
+            : 0.0);
+
     return BillBreakdown(
-      subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0.0,
+      subtotal: sub,
       applyGst: map['applyGst'] as bool? ?? false,
       gstRate: (map['gstRate'] as num?)?.toDouble() ?? 18.0,
       gstAmount: (map['gstAmount'] as num?)?.toDouble() ?? 0.0,
       otherCharges: otherChargesList,
       otherChargesTotal: (map['otherChargesTotal'] as num?)?.toDouble() ??
           otherChargesList.fold<double>(0.0, (sum, c) => sum + c.amount),
+      applyDiscount: hasDisc,
+      discountType: dType,
+      discountValue: dVal,
+      discountAmount: dAmt,
       grandTotal: (map['grandTotal'] as num?)?.toDouble() ?? 0.0,
       note: map['note'] as String?,
+      customerPhone: map['customerPhone'] as String?,
+      takenBy: map['takenBy'] as String?,
     );
   }
 
@@ -145,6 +230,7 @@ class BillBreakdown {
         if (decoded.containsKey('subtotal') ||
             decoded.containsKey('applyGst') ||
             decoded.containsKey('otherCharges') ||
+            decoded.containsKey('applyDiscount') ||
             decoded.containsKey('note')) {
           return BillBreakdown.fromMap(decoded);
         }
@@ -162,6 +248,9 @@ class DraftOrder {
     this.applyGst = false,
     this.gstRate = 18.0,
     List<OtherCharge>? otherCharges,
+    this.applyDiscount = false,
+    this.discountType = 'flat',
+    this.discountValue = 0.0,
   })  : items = items ?? <DraftOrderItem>[],
         otherCharges = otherCharges ?? <OtherCharge>[];
 
@@ -171,6 +260,9 @@ class DraftOrder {
   final bool applyGst;
   final double gstRate;
   final List<OtherCharge> otherCharges;
+  final bool applyDiscount;
+  final String discountType;
+  final double discountValue;
 
   DraftOrder copyWith({
     Customer? customer,
@@ -179,6 +271,9 @@ class DraftOrder {
     bool? applyGst,
     double? gstRate,
     List<OtherCharge>? otherCharges,
+    bool? applyDiscount,
+    String? discountType,
+    double? discountValue,
   }) {
     return DraftOrder(
       customer: customer ?? this.customer,
@@ -187,6 +282,9 @@ class DraftOrder {
       applyGst: applyGst ?? this.applyGst,
       gstRate: gstRate ?? this.gstRate,
       otherCharges: otherCharges ?? this.otherCharges,
+      applyDiscount: applyDiscount ?? this.applyDiscount,
+      discountType: discountType ?? this.discountType,
+      discountValue: discountValue ?? this.discountValue,
     );
   }
 
@@ -198,6 +296,9 @@ class DraftOrder {
       'applyGst': applyGst,
       'gstRate': gstRate,
       'otherCharges': otherCharges.map((e) => e.toMap()).toList(),
+      'applyDiscount': applyDiscount,
+      'discountType': discountType,
+      'discountValue': discountValue,
     };
   }
 
@@ -213,6 +314,9 @@ class DraftOrder {
       otherCharges: (map['otherCharges'] as List<dynamic>? ?? [])
           .map((e) => OtherCharge.fromMap(e as Map<String, dynamic>))
           .toList(),
+      applyDiscount: map['applyDiscount'] as bool? ?? false,
+      discountType: map['discountType'] as String? ?? 'flat',
+      discountValue: (map['discountValue'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }
@@ -305,34 +409,82 @@ class OrderEntity {
     this.id,
     required this.customerId,
     required this.customerNameSnapshot,
+    this.customerPhone,
+    this.takenBy,
     required this.createdAt,
     required this.status,
     this.notes,
     this.estimateTotal = 0,
+    this.paidAmount = 0,
+    this.paymentMode = 'unpaid',
+    this.paymentStatus = 'unpaid',
   });
 
   final int? id;
   final int customerId;
   final String customerNameSnapshot;
+  final String? customerPhone;
+  final String? takenBy;
   final DateTime createdAt;
   final OrderStatus status;
   final String? notes;
   final double estimateTotal;
+  final double paidAmount;
+  final String paymentMode;
+  final String paymentStatus;
 
   String get formattedOrderId =>
       id != null ? '#ORD-${id.toString().padLeft(4, '0')}' : '#ORD-NEW';
 
   BillBreakdown? get billBreakdown => BillBreakdown.fromJsonString(notes);
 
+  double get dueAmount => (estimateTotal - paidAmount).clamp(0, double.infinity);
+  bool get isFullyPaid => dueAmount <= 0.01 && estimateTotal > 0;
+
+  OrderEntity copyWith({
+    int? id,
+    int? customerId,
+    String? customerNameSnapshot,
+    String? customerPhone,
+    String? takenBy,
+    DateTime? createdAt,
+    OrderStatus? status,
+    String? notes,
+    double? estimateTotal,
+    double? paidAmount,
+    String? paymentMode,
+    String? paymentStatus,
+  }) {
+    return OrderEntity(
+      id: id ?? this.id,
+      customerId: customerId ?? this.customerId,
+      customerNameSnapshot: customerNameSnapshot ?? this.customerNameSnapshot,
+      customerPhone: customerPhone ?? this.customerPhone,
+      takenBy: takenBy ?? this.takenBy,
+      createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
+      notes: notes ?? this.notes,
+      estimateTotal: estimateTotal ?? this.estimateTotal,
+      paidAmount: paidAmount ?? this.paidAmount,
+      paymentMode: paymentMode ?? this.paymentMode,
+      paymentStatus: paymentStatus ?? this.paymentStatus,
+    );
+  }
+
   Map<String, Object?> toMap() {
     return {
       'id': id,
       'customer_id': customerId,
       'customer_name_snapshot': customerNameSnapshot,
+      'customer_phone': customerPhone,
+      'taken_by': takenBy,
       'created_at': createdAt.toIso8601String(),
       'status': orderStatusLabel(status),
       'notes': notes,
       'estimate_total': estimateTotal,
+      'paid_amount': paidAmount,
+      'payment_mode': paymentMode,
+      'payment_status': paymentStatus,
     };
   }
 }
@@ -435,21 +587,35 @@ class OrderSummary {
     required this.orderId,
     required this.customerId,
     required this.customerName,
+    this.customerPhone,
+    this.takenBy,
     required this.createdAt,
     required this.totalItems,
     required this.pendingCount,
     required this.status,
     this.estimateTotal = 0,
+    this.paidAmount = 0.0,
+    this.paymentMode,
+    this.paymentStatus,
   });
 
   final int orderId;
   final int customerId;
   final String customerName;
+  final String? customerPhone;
+  final String? takenBy;
   final DateTime createdAt;
   final int totalItems;
   final int pendingCount;
   final OrderStatus status;
   final double estimateTotal;
+  final double paidAmount;
+  final String? paymentMode;
+  final String? paymentStatus;
+
+  double get dueAmount =>
+      (estimateTotal - paidAmount).clamp(0.0, double.infinity);
+  bool get isFullyPaid => estimateTotal > 0 && paidAmount >= estimateTotal;
 
   String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
 }

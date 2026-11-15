@@ -21,15 +21,59 @@ class CustomerRepository {
     return result.map(Customer.fromMap).toList();
   }
 
+  Future<Customer?> findByNameAndPhone(String name, String? phone) async {
+    final cleanPhone = phone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+    if (cleanPhone != null && cleanPhone.isNotEmpty) {
+      final byPhone = await findByPhone(cleanPhone);
+      if (byPhone != null) return byPhone;
+    }
+    final db = await _databaseHelper.database;
+    final result = await db.query(
+      'customers',
+      where: 'LOWER(TRIM(name)) = ?',
+      whereArgs: [name.trim().toLowerCase()],
+      limit: 1,
+    );
+    if (result.isNotEmpty) {
+      final c = Customer.fromMap(result.first);
+      if (cleanPhone == null ||
+          cleanPhone.isEmpty ||
+          c.phone == null ||
+          c.phone!.trim().isEmpty ||
+          c.phone!.replaceAll(RegExp(r'[^0-9+]'), '').trim() == cleanPhone) {
+        return c;
+      }
+    }
+    return null;
+  }
+
   Future<Customer> createCustomer({
     required String name,
     String? phone,
     String? address,
   }) async {
+    final cleanPhone = phone?.trim().isEmpty == true ? null : phone?.trim();
+    final existing = await findByNameAndPhone(name, cleanPhone);
+    if (existing != null) {
+      if ((cleanPhone != null && cleanPhone != existing.phone) ||
+          (address != null &&
+              address.trim().isNotEmpty &&
+              address != existing.address)) {
+        await updateCustomer(
+          id: existing.id!,
+          name: name.trim().isNotEmpty ? name.trim() : existing.name,
+          phone: cleanPhone ?? existing.phone,
+          address: address ?? existing.address,
+        );
+        return (await getCustomerById(existing.id!))!;
+      }
+      return existing;
+    }
+
     final db = await _databaseHelper.database;
     final customer = Customer(
       name: name.trim(),
-      phone: phone?.trim().isEmpty == true ? null : phone?.trim(),
+      phone: cleanPhone,
       address: address?.trim().isEmpty == true ? null : address?.trim(),
       createdAt: DateTime.now(),
     );

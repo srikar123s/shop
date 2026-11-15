@@ -9,9 +9,18 @@ import 'package:shop/screens/customer_screen.dart';
 import 'package:shop/screens/history_screen.dart';
 import 'package:shop/screens/order_details_screen.dart';
 import 'package:shop/screens/shop_settings_screen.dart';
+import 'package:shop/database/database_helper.dart';
+import 'package:shop/models/top_product_stat.dart';
+import 'package:shop/screens/top_selling_screen.dart';
+import 'package:shop/screens/price_list_screen.dart';
+import 'package:shop/screens/khata_book_screen.dart';
+import 'package:shop/screens/evening_report_screen.dart';
+import 'package:shop/screens/app_documentation_screen.dart';
+
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
 import 'package:shop/services/backup_service.dart';
+import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -37,15 +46,19 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _isTopSellingExpanded = false;
   @override
   void initState() {
     super.initState();
     ShopSyncService.instance.addListener(_onSyncUpdate);
+    ShopCustomizationService.instance.addListener(_onSyncUpdate);
   }
 
   @override
   void dispose() {
     ShopSyncService.instance.removeListener(_onSyncUpdate);
+    ShopCustomizationService.instance.removeListener(_onSyncUpdate);
     super.dispose();
   }
 
@@ -86,7 +99,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
 
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: _buildSideDrawer(context, theme, s),
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Menu & Insights (Side Bar)',
+          icon: const Icon(Icons.menu_rounded),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
         title: Row(
           children: [
             Container(
@@ -99,46 +119,69 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: theme.colorScheme.primary, size: 20),
             ),
             const SizedBox(width: 10),
-            Text(
-              s.t('appTitle'),
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-                letterSpacing: 0.5,
+            Expanded(
+              child: Text(
+                ShopCustomizationService.instance.shopName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  letterSpacing: 0.5,
+                ),
               ),
             ),
           ],
         ),
         actions: <Widget>[
           IconButton(
-            tooltip: 'Shop Sync & Team',
+            tooltip: 'Quick Price List',
+            icon: const Icon(Icons.sell_outlined),
             onPressed: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute<void>(builder: (_) => const ShopSyncScreen()),
+                MaterialPageRoute<void>(
+                  builder: (_) => PriceListScreen(
+                    productRepository: widget.productRepository,
+                  ),
+                ),
               );
               setState(() {});
             },
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.cloud_sync_outlined),
-                if (ShopSyncService.instance.isConnected)
-                  Positioned(
-                    right: -1,
-                    top: -1,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
-                        shape: BoxShape.circle,
+          ),
+          if (!ShopCustomizationService.instance.isPureOfflineMode &&
+              !const bool.fromEnvironment('STANDALONE_LOCAL',
+                  defaultValue: false))
+            IconButton(
+              tooltip: 'Shop Sync & Team',
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                      builder: (_) => const ShopSyncScreen()),
+                );
+                setState(() {});
+              },
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.cloud_sync_outlined),
+                  if (ShopSyncService.instance.isConnected)
+                    Positioned(
+                      right: -1,
+                      top: -1,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
           IconButton(
             tooltip: s.t('shopSettings'),
             onPressed: () async {
@@ -165,6 +208,10 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // Top Expandable Bar: Top Selling Products
+              _buildTopSellingExpandableBar(theme),
+              const SizedBox(height: 8),
+
               // Date Banner & Shop Sync Pill
               Container(
                 width: double.infinity,
@@ -191,190 +238,265 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 8),
+              if (!ShopCustomizationService.instance.isPureOfflineMode) ...[
+                const SizedBox(height: 8),
+                // Shop Cloud Sync Banner
+                Builder(
+                  builder: (context) {
+                    final sync = ShopSyncService.instance;
+                    final hasShop = sync.hasShop;
+                    final shop = sync.currentShop;
 
-              // Shop Cloud Sync Banner
-              Builder(
-                builder: (context) {
-                  final sync = ShopSyncService.instance;
-                  final hasShop = sync.hasShop;
-                  final shop = sync.currentShop;
-
-                  return Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => const ShopSyncScreen(),
-                          ),
-                        );
-                        setState(() {});
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: hasShop
-                              ? const Color(0xFFF0FDF4)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => const ShopSyncScreen(),
+                            ),
+                          );
+                          setState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
                             color: hasShop
-                                ? const Color(0xFFBBF7D0)
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              hasShop
-                                  ? Icons.storefront_rounded
-                                  : Icons.cloud_queue_rounded,
-                              size: 16,
+                                ? const Color(0xFFF0FDF4)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
                               color: hasShop
-                                  ? const Color(0xFF15803D)
-                                  : const Color(0xFF64748B),
+                                  ? const Color(0xFFBBF7D0)
+                                  : const Color(0xFFE2E8F0),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                hasShop
-                                    ? '${shop!.shopName} (${shop.shopCode}) • ${shop.isOwner ? "Owner" : shop.staffName}'
-                                    : 'Share shop data with other staff (Cloud Sync)',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: hasShop
-                                      ? const Color(0xFF166534)
-                                      : const Color(0xFF475569),
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Icon(
-                              Icons.chevron_right_rounded,
-                              size: 18,
-                              color: hasShop
-                                  ? const Color(0xFF15803D)
-                                  : const Color(0xFF94A3B8),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Hero: Create Order Card
-              Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.25),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(20),
-                    onTap: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => CustomerScreen(
-                            customerRepository: widget.customerRepository,
-                            productRepository: widget.productRepository,
-                            orderRepository: widget.orderRepository,
                           ),
-                        ),
-                      );
-                      setState(() {});
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          child: Row(
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.add_shopping_cart,
-                                  color: Colors.white,
-                                  size: 26,
+                              Icon(
+                                hasShop
+                                    ? Icons.storefront_rounded
+                                    : Icons.cloud_queue_rounded,
+                                size: 16,
+                                color: hasShop
+                                    ? const Color(0xFF15803D)
+                                    : const Color(0xFF64748B),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  hasShop
+                                      ? '${shop!.shopName} (${shop.shopCode}) • ${shop.isOwner ? "Owner" : shop.staffName}'
+                                      : 'Share shop data with other staff (Cloud Sync)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: hasShop
+                                        ? const Color(0xFF166534)
+                                        : const Color(0xFF475569),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.25),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      'Quick Start',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    SizedBox(width: 4),
-                                    Icon(Icons.arrow_forward_ios,
-                                        size: 10, color: Colors.white),
-                                  ],
-                                ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: hasShop
+                                    ? const Color(0xFF15803D)
+                                    : const Color(0xFF94A3B8),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 18),
-                          Text(
-                            s.t('createOrder'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Select customer, pick items, apply GST & create bill',
-                            style: TextStyle(
-                              color: Colors.teal.shade50,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                            ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+              const SizedBox(height: 16),
+
+              // Hero: Create Order & Khata Book Side-by-Side
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
                           ),
                         ],
                       ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => CustomerScreen(
+                                  customerRepository: widget.customerRepository,
+                                  productRepository: widget.productRepository,
+                                  orderRepository: widget.orderRepository,
+                                ),
+                              ),
+                            );
+                            setState(() {});
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.2),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(
+                                        Icons.add_shopping_cart,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                    ),
+                                    const Icon(Icons.arrow_forward_ios,
+                                        size: 11, color: Colors.white70),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  s.t('createOrder'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'New Bill / Cart',
+                                  style: TextStyle(
+                                    color: Colors.teal.shade50,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF312E81), Color(0xFF4F46E5)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF4F46E5).withValues(alpha: 0.25),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => KhataBookScreen(
+                                  customerRepository: widget.customerRepository,
+                                  orderRepository: widget.orderRepository,
+                                  productRepository: widget.productRepository,
+                                ),
+                              ),
+                            );
+                            setState(() {});
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white
+                                            .withValues(alpha: 0.2),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: const Icon(
+                                        Icons.menu_book_rounded,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                    ),
+                                    const Icon(Icons.arrow_forward_ios,
+                                        size: 11, color: Colors.white70),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'KHATA BOOK',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Credit & Udhaar Ledger',
+                                  style: TextStyle(
+                                    color: Colors.indigo.shade50,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
 
@@ -587,6 +709,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
                   return Column(
                     children: orders.map((order) {
+                      final displayTakenBy = (order.takenBy != null &&
+                              order.takenBy!.trim().isNotEmpty &&
+                              order.takenBy!.trim() != 'Store')
+                          ? order.takenBy!.trim()
+                          : ShopSyncService.instance.currentUserOrDeviceName;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Card(
@@ -669,6 +796,25 @@ class _HomeScreenState extends State<HomeScreen> {
                                       fontSize: 15,
                                     ),
                                   ),
+                                  if (!ShopCustomizationService.instance.isPureOfflineMode) ...[
+                                    const SizedBox(height: 3),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.person_pin_circle_outlined,
+                                            size: 13,
+                                            color: Colors.teal.shade700),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Taken by: $displayTakenBy',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.teal.shade800,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                   const SizedBox(height: 6),
                                   Row(
                                     mainAxisAlignment:
@@ -683,7 +829,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                       if (order.estimateTotal > 0)
                                         Text(
-                                          '₹ ${order.estimateTotal.toStringAsFixed(2)}',
+                                          ShopSyncService.instance.canViewBillTotals
+                                              ? '₹ ${order.estimateTotal.toStringAsFixed(2)}'
+                                              : '₹ ••••',
                                           style: const TextStyle(
                                             fontWeight: FontWeight.w900,
                                             fontSize: 14,
@@ -704,6 +852,416 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopSellingExpandableBar(ThemeData theme) {
+    return FutureBuilder<List<TopProductStat>>(
+      future: DatabaseHelper.instance.getTopSellingProducts(limit: 3),
+      builder: (context, snapshot) {
+        final list = snapshot.data ?? [];
+        if (list.isEmpty) return const SizedBox.shrink();
+
+        final top1 = list.first;
+
+        return Card(
+          elevation: 1,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.amber.shade200, width: 1),
+          ),
+          color: const Color(0xFFFFFBEB),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () {
+              setState(() => _isTopSellingExpanded = !_isTopSellingExpanded);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade100,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.local_fire_department_rounded,
+                            size: 16, color: Colors.amber.shade900),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _isTopSellingExpanded
+                              ? 'TOP SELLING PRODUCTS (FAST MOVERS)'
+                              : '🔥 #1 Best Seller: ${top1.itemName} (${top1.totalQuantity % 1 == 0 ? top1.totalQuantity.toInt() : top1.totalQuantity.toStringAsFixed(1)} sold)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.amber.shade900,
+                            letterSpacing: 0.3,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(
+                        _isTopSellingExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: Colors.amber.shade900,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                  if (_isTopSellingExpanded) ...[
+                    const Divider(height: 16, color: Color(0xFFFDE68A)),
+                    ...list.map((item) {
+                      final idx = list.indexOf(item);
+                      final badge = idx == 0 ? '🥇' : (idx == 1 ? '🥈' : '🥉');
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            Text(badge, style: const TextStyle(fontSize: 15)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                item.itemName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Color(0xFF1E293B),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Text(
+                              '${item.totalQuantity % 1 == 0 ? item.totalQuantity.toInt() : item.totalQuantity.toStringAsFixed(1)} ${item.unit}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Color(0xFF0F766E),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              '₹ ${item.totalRevenue.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                                color: Colors.grey.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            foregroundColor: const Color(0xFF0F766E),
+                          ),
+                          icon: const Icon(Icons.analytics_outlined, size: 15),
+                          label: const Text(
+                            'View Full Analytics & Revenue →',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const TopSellingScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSideDrawer(BuildContext context, ThemeData theme, AppLocalizations s) {
+    final shopName = ShopCustomizationService.instance.shopName;
+    final isOffline = ShopCustomizationService.instance.isPureOfflineMode;
+    final sync = ShopSyncService.instance;
+
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            // Drawer Header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const CircleAvatar(
+                    radius: 26,
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.storefront_rounded,
+                        color: Color(0xFF0F766E), size: 30),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    shopName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      isOffline
+                          ? 'Pure Local Offline'
+                          : (sync.hasShop
+                              ? '${sync.currentShop?.shopCode ?? ''} • ${sync.currentUserOrDeviceName}'
+                              : 'Cloud Sync Ready'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  // Top Selling Section (Expandable)
+                  Theme(
+                    data: theme.copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      initiallyExpanded: true,
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.local_fire_department_rounded,
+                            color: Colors.amber.shade800, size: 22),
+                      ),
+                      title: const Text(
+                        'Top Selling Products',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      subtitle: const Text(
+                        'Fast moving items & revenue',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                      children: [
+                        FutureBuilder<List<TopProductStat>>(
+                          future: DatabaseHelper.instance.getTopSellingProducts(limit: 5),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                              );
+                            }
+                            final list = snapshot.data ?? [];
+                            if (list.isEmpty) {
+                              return Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Text('No sales records yet.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              );
+                            }
+                            return Column(
+                              children: [
+                                ...list.take(3).map((item) {
+                                  final idx = list.indexOf(item);
+                                  final badge = idx == 0 ? '🥇' : (idx == 1 ? '🥈' : '🥉');
+                                  return ListTile(
+                                    dense: true,
+                                    leading: Text(badge, style: const TextStyle(fontSize: 16)),
+                                    title: Text(item.itemName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    subtitle: Text('${item.totalQuantity % 1 == 0 ? item.totalQuantity.toInt() : item.totalQuantity.toStringAsFixed(1)} ${item.unit} sold', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                    trailing: Text('₹ ${item.totalRevenue.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF0F766E), fontSize: 12)),
+                                  );
+                                }),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      style: OutlinedButton.styleFrom(
+                                        visualDensity: VisualDensity.compact,
+                                        side: const BorderSide(color: Color(0xFF0F766E)),
+                                      ),
+                                      icon: const Icon(Icons.analytics_outlined, size: 16, color: Color(0xFF0F766E)),
+                                      label: const Text('View Full Analytics', style: TextStyle(color: Color(0xFF0F766E), fontSize: 12)),
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TopSellingScreen()));
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Divider(),
+
+                  // Quick Features List
+                  ListTile(
+                    leading: const Icon(Icons.sell_outlined,
+                        color: Color(0xFF0F766E)),
+                    title: const Text('Quick Price List',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text(
+                        'Check item prices without starting order',
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => PriceListScreen(
+                            productRepository: widget.productRepository,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.menu_book_rounded,
+                        color: Color(0xFF0F766E)),
+                    title: const Text('Khata Book (Udhaar)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text(
+                        'Customer balances & payment reminders',
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => KhataBookScreen(
+                            customerRepository: widget.customerRepository,
+                            orderRepository: widget.orderRepository,
+                            productRepository: widget.productRepository,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.nightlight_round,
+                        color: Color(0xFF0F766E)),
+                    title: const Text('Evening Closing Report',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text(
+                        'Day-end business summary & WhatsApp',
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const EveningReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    leading: const Icon(Icons.inventory_2_outlined,
+                        color: Color(0xFF0F766E)),
+                    title: const Text('Manage Products Catalog', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SimpleProductAdminScreen(productRepository: widget.productRepository)));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.receipt_long_outlined, color: Color(0xFF0F766E)),
+                    title: const Text('Order History & Bills', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => HistoryScreen(customerRepository: widget.customerRepository, orderRepository: widget.orderRepository, productRepository: widget.productRepository, backupService: widget.backupService)));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings_outlined, color: Color(0xFF0F766E)),
+                    title: const Text('Shop Settings & Shortcuts', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShopSettingsScreen(productRepository: widget.productRepository, locale: widget.locale, onLocaleChanged: widget.onLocaleChanged)));
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.menu_book_rounded, color: Color(0xFF0F766E)),
+                    title: const Text('App Documentation & Manual', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text('Pin-to-pin guide for all app features', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AppDocumentationScreen()));
+                    },
+                  ),
+                  if (!isOffline) ...[
+                    ListTile(
+                      leading: const Icon(Icons.cloud_sync_outlined, color: Color(0xFF0F766E)),
+                      title: const Text('Shop Cloud Sync & Staff', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ShopSyncScreen()));
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

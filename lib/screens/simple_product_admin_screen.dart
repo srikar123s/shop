@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shop/models/product.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/services/excel_product_service.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class SimpleProductAdminScreen extends StatefulWidget {
   const SimpleProductAdminScreen({super.key, required this.productRepository});
@@ -218,6 +219,17 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
         return;
       }
 
+      if (!ShopSyncService.instance.canManageProducts) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Product catalog editing is locked by shop owner for this device.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
       final file = File(result.files.first.path!);
       final products = await ExcelProductService.parseProductsFromFile(file);
 
@@ -226,72 +238,194 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       if (products.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No valid products found in the file. Please check column headers.'),
+            content: Text('No valid products found in the file. Please check column headers or download the sample template.'),
           ),
         );
         return;
       }
 
-      // Show preview dialog
+      final selectedIndices = List<int>.generate(products.length, (i) => i).toSet();
+      String previewFilter = '';
+
+      // Show upgraded pre-import preview dialog
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) {
-          return AlertDialog(
-            title: Text('Import ${products.length} Products?'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 260,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Found ${products.length} products in file:',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: products.length,
-                      itemBuilder: (context, i) {
-                        final p = products[i];
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.inventory_2_outlined, size: 20),
-                          title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(
-                            '${p.category} • Base ₹${p.configuration.basePrice} • ${p.configuration.steps.length} steps • ${p.configuration.variantPrices.length} prices',
-                          ),
-                        );
-                      },
+          return StatefulBuilder(
+            builder: (ctx, setPreviewState) {
+              final filtered = <int>[];
+              for (int i = 0; i < products.length; i++) {
+                final p = products[i];
+                if (previewFilter.isEmpty ||
+                    p.name.toLowerCase().contains(previewFilter.toLowerCase()) ||
+                    p.category.toLowerCase().contains(previewFilter.toLowerCase())) {
+                  filtered.add(i);
+                }
+              }
+
+              return AlertDialog(
+                title: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.table_view_rounded, color: Colors.teal),
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Import ${products.length} Products',
+                              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                          Text('${selectedIndices.length} selected to import',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  height: 380,
+                  child: Column(
+                    children: [
+                      TextField(
+                        decoration: InputDecoration(
+                          hintText: 'Search parsed products...',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onChanged: (val) {
+                          setPreviewState(() => previewFilter = val.trim());
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              setPreviewState(() {
+                                if (selectedIndices.length == products.length) {
+                                  selectedIndices.clear();
+                                } else {
+                                  selectedIndices.addAll(List.generate(products.length, (i) => i));
+                                }
+                              });
+                            },
+                            child: Text(selectedIndices.length == products.length
+                                ? 'Deselect All'
+                                : 'Select All (${products.length})'),
+                          ),
+                          Text('${filtered.length} visible',
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (context, idx) {
+                            final i = filtered[idx];
+                            final p = products[i];
+                            final isChecked = selectedIndices.contains(i);
+                            final optionsSummary = p.configuration.steps
+                                .map((s) => '${s.label}: ${s.values.length}')
+                                .join(' • ');
+
+                            return CheckboxListTile(
+                              dense: true,
+                              value: isChecked,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(p.name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(p.category,
+                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        p.configuration.basePrice > 0
+                                            ? 'Rate: ₹${p.configuration.basePrice.toStringAsFixed(2)} / ${p.configuration.defaultUnit}'
+                                            : 'Unit: ${p.configuration.defaultUnit}',
+                                        style: TextStyle(fontSize: 11, color: Colors.teal.shade800),
+                                      ),
+                                    ],
+                                  ),
+                                  if (optionsSummary.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        optionsSummary,
+                                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              onChanged: (val) {
+                                setPreviewState(() {
+                                  if (val == true) {
+                                    selectedIndices.add(i);
+                                  } else {
+                                    selectedIndices.remove(i);
+                                  }
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('CANCEL'),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                    onPressed: selectedIndices.isEmpty
+                        ? null
+                        : () => Navigator.pop(context, true),
+                    child: Text('IMPORT ${selectedIndices.length} PRODUCTS'),
                   ),
                 ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('CANCEL'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text('IMPORT ${products.length} PRODUCTS'),
-              ),
-            ],
+              );
+            },
           );
         },
       );
 
-      if (confirm == true) {
+      if (confirm == true && selectedIndices.isNotEmpty) {
         setState(() => _loading = true);
-        for (final product in products) {
+        int count = 0;
+        for (final idx in selectedIndices) {
+          final product = products[idx];
           await widget.productRepository.upsertProduct(product);
+          count++;
         }
         await _load();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Successfully imported ${products.length} products!'),
+              content: Text('Successfully imported $count products!'),
               backgroundColor: Colors.teal,
             ),
           );
@@ -499,6 +633,16 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
   }
 
   Future<void> _editProduct({Product? product}) async {
+    if (!ShopSyncService.instance.canManageProducts) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Product editing is locked by shop owner for this device.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     final name = TextEditingController(text: product?.name ?? '');
     final categoryCtrl =
         TextEditingController(text: product?.category ?? 'General');

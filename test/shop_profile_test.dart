@@ -53,6 +53,64 @@ void main() {
       expect(staffProfile.staffName, equals('Counter 2'));
       expect(staffProfile.shopCode, equals('SH-1234'));
     });
+
+    test('StaffDevice serializes and deserializes with permissions correctly', () {
+      final device = StaffDevice(
+        deviceId: 'dev_949369',
+        staffName: 'Sridevi',
+        role: 'staff',
+        status: 'pending',
+        canChangePrice: false,
+        canManageProducts: false,
+        canCloseOrders: true,
+        canChangeShortcuts: false,
+        canViewBillTotals: true,
+        lastActive: DateTime(2026, 11, 15, 1, 0),
+      );
+
+      final map = device.toMap();
+      expect(map['deviceId'], 'dev_949369');
+      expect(map['staffName'], 'Sridevi');
+      expect(map['status'], 'pending');
+      expect(map['canChangePrice'], isFalse);
+      expect(map['canManageProducts'], isFalse);
+      expect(map['canCloseOrders'], isTrue);
+      expect(map['canChangeShortcuts'], isFalse);
+      expect(map['canViewBillTotals'], isTrue);
+
+      final restored = StaffDevice.fromMap(map);
+      expect(restored.deviceId, 'dev_949369');
+      expect(restored.isPending, isTrue);
+      expect(restored.isApproved, isFalse);
+      expect(restored.canChangePrice, isFalse);
+      expect(restored.canManageProducts, isFalse);
+      expect(restored.canCloseOrders, isTrue);
+      expect(restored.canChangeShortcuts, isFalse);
+      expect(restored.canViewBillTotals, isTrue);
+      expect(restored.isOwner, isFalse);
+    });
+
+    test('StaffDevice handles simulated Timestamp object safely', () {
+      final dummyMap = {
+        'deviceId': 'dev_123456',
+        'staffName': 'Counter 1',
+        'role': 'staff',
+        'status': 'pending',
+        // Object with toDate method like Firestore Timestamp
+        'lastActive': _FakeTimestamp(DateTime(2026, 11, 15, 12, 0)),
+      };
+
+      final device = StaffDevice.fromMap(dummyMap);
+      expect(device.deviceId, 'dev_123456');
+      expect(device.lastActive, equals(DateTime(2026, 11, 15, 12, 0)));
+      expect(device.isPending, isTrue);
+    });
   });
+}
+
+class _FakeTimestamp {
+  _FakeTimestamp(this._dt);
+  final DateTime _dt;
+  DateTime toDate() => _dt;
 }
 

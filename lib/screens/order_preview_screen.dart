@@ -29,8 +29,12 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   bool _applyGst = false;
   double _gstRate = 18.0;
   final List<OtherCharge> _otherCharges = <OtherCharge>[];
+  bool _applyDiscount = false;
+  String _discountType = 'flat'; // 'flat' or 'percent'
+  double _discountValue = 0.0;
 
   late final TextEditingController _estimateController;
+  late final TextEditingController _discountController;
   late final List<TextEditingController> _priceControllers;
 
   @override
@@ -39,6 +43,17 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     _applyGst = widget.draftOrder.applyGst;
     _gstRate = widget.draftOrder.gstRate > 0 ? widget.draftOrder.gstRate : 18.0;
     _otherCharges.addAll(widget.draftOrder.otherCharges);
+    _applyDiscount = widget.draftOrder.applyDiscount;
+    _discountType = widget.draftOrder.discountType;
+    _discountValue = widget.draftOrder.discountValue;
+
+    _discountController = TextEditingController(
+      text: _discountValue > 0
+          ? (_discountValue % 1 == 0
+              ? _discountValue.toInt().toString()
+              : _discountValue.toString())
+          : '',
+    );
 
     _estimateController = TextEditingController(
       text: _calculateGrandTotal().toStringAsFixed(2),
@@ -54,15 +69,33 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         (sum, item) => sum + (item.unitPrice ?? 0) * item.quantity,
       );
 
-  double _calculateGstAmount(double subtotal) =>
-      _applyGst ? (subtotal * _gstRate / 100.0) : 0.0;
+  double _calculateDiscountAmount(double subtotal) {
+    if (!_applyDiscount) return 0.0;
+    if (_discountType == 'percent') {
+      return subtotal * _discountValue / 100.0;
+    }
+    return _discountValue;
+  }
+
+  double _calculateTaxableSubtotal() {
+    final subtotal = _calculateSubtotal();
+    final discount = _calculateDiscountAmount(subtotal);
+    return (subtotal - discount).clamp(0.0, double.infinity);
+  }
+
+  double _calculateGstAmount(double subtotal) {
+    final taxable = _calculateTaxableSubtotal();
+    return _applyGst ? (taxable * _gstRate / 100.0) : 0.0;
+  }
 
   double _calculateOtherChargesTotal() =>
       _otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount);
 
   double _calculateGrandTotal() {
-    final subtotal = _calculateSubtotal();
-    return subtotal + _calculateGstAmount(subtotal) + _calculateOtherChargesTotal();
+    final taxable = _calculateTaxableSubtotal();
+    final gst = _calculateGstAmount(_calculateSubtotal());
+    final other = _calculateOtherChargesTotal();
+    return (taxable + gst + other).clamp(0.0, double.infinity);
   }
 
   void _recalculateEstimate() {
@@ -76,6 +109,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       applyGst: _applyGst,
       gstRate: _gstRate,
       otherCharges: List<OtherCharge>.from(_otherCharges),
+      applyDiscount: _applyDiscount,
+      discountType: _discountType,
+      discountValue: _discountValue,
       grandTotalOverride: totalOverride ??
           (double.tryParse(_estimateController.text.trim()) ??
               _calculateGrandTotal()),
@@ -85,6 +121,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   @override
   void dispose() {
     _estimateController.dispose();
+    _discountController.dispose();
     for (final controller in _priceControllers) {
       controller.dispose();
     }
@@ -292,6 +329,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       applyGst: _applyGst,
       gstRate: _gstRate,
       otherCharges: _otherCharges,
+      applyDiscount: _applyDiscount,
+      discountType: _discountType,
+      discountValue: _discountValue,
       estimateTotal: estimate,
     );
 
@@ -317,6 +357,19 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     }
     setState(() => _saving = false);
     final orderIdFormatted = '#ORD-${newOrderId.toString().padLeft(4, '0')}';
+
+    if (widget.existingOrderId != null) {
+      // Pop back to OrderDetailsScreen so the user sees the updated order with added items
+      Navigator.of(context).pop();
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Items added to $orderIdFormatted successfully!'),
+          backgroundColor: const Color(0xFF0F766E),
+        ),
+      );
+      return;
+    }
 
     // Immediately navigate back to Home Screen
     Navigator.popUntil(context, (route) => route.isFirst);
@@ -688,6 +741,137 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const Divider(height: 24),
+
+                          // Discount Section
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Checkbox(
+                                    value: _applyDiscount,
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _applyDiscount = val ?? false;
+                                        _recalculateEstimate();
+                                      });
+                                    },
+                                  ),
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _applyDiscount = !_applyDiscount;
+                                        _recalculateEstimate();
+                                      });
+                                    },
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Discount',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14),
+                                        ),
+                                        Text(
+                                          '(${s.t('optional')})',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (_applyDiscount)
+                                Text(
+                                  '- ₹ ${_calculateDiscountAmount(subtotal).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                    color: Colors.green,
+                                  ),
+                                )
+                              else
+                                Text(
+                                  s.t('optional'),
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600),
+                                ),
+                            ],
+                          ),
+                          if (_applyDiscount) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 48, top: 4, bottom: 8, right: 8),
+                              child: Row(
+                                children: [
+                                  SegmentedButton<String>(
+                                    style: SegmentedButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6),
+                                    ),
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: 'flat',
+                                        label: Text('₹ Flat',
+                                            style: TextStyle(fontSize: 12)),
+                                      ),
+                                      ButtonSegment(
+                                        value: 'percent',
+                                        label: Text('% Off',
+                                            style: TextStyle(fontSize: 12)),
+                                      ),
+                                    ],
+                                    selected: {_discountType},
+                                    onSelectionChanged: (set) {
+                                      setState(() {
+                                        _discountType = set.first;
+                                        _recalculateEstimate();
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _discountController,
+                                      keyboardType: const TextInputType
+                                          .numberWithOptions(decimal: true),
+                                      decoration: InputDecoration(
+                                        hintText: _discountType == 'flat'
+                                            ? 'e.g. 100'
+                                            : 'e.g. 5',
+                                        prefixText: _discountType == 'flat'
+                                            ? '₹ '
+                                            : null,
+                                        suffixText: _discountType == 'percent'
+                                            ? '%'
+                                            : null,
+                                        isDense: true,
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 8),
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _discountValue =
+                                              double.tryParse(val.trim()) ??
+                                                  0.0;
+                                          _recalculateEstimate();
+                                        });
+                                      },
                                     ),
                                   ),
                                 ],

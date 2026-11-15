@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/models/order.dart';
+import 'package:shop/services/shop_customization_service.dart';
 
 class ShareService {
   static Future<void> shareDraftEstimate(DraftOrder draftOrder,
@@ -90,12 +91,17 @@ class ShareService {
       };
     }).toList();
 
-    final breakdown = order.billBreakdown ??
-        BillBreakdown.calculate(
-          subtotal: calculatedTotal,
-          grandTotalOverride: order.estimateTotal > 0 ? order.estimateTotal : calculatedTotal,
-        );
-    final finalTotal = order.estimateTotal > 0 ? order.estimateTotal : breakdown.grandTotal;
+    var breakdown = order.billBreakdown;
+    if (breakdown == null || (breakdown.subtotal == 0 && calculatedTotal > 0)) {
+      breakdown = BillBreakdown.calculate(
+        subtotal: calculatedTotal,
+        applyGst: breakdown?.applyGst ?? false,
+        gstRate: breakdown?.gstRate ?? 18.0,
+        otherCharges: breakdown?.otherCharges ?? const [],
+        note: breakdown?.note,
+      );
+    }
+    final finalTotal = breakdown.grandTotal > 0 ? breakdown.grandTotal : (order.estimateTotal > 0 ? order.estimateTotal : calculatedTotal);
 
     try {
       final imageFile = await _generateEstimateImage(
@@ -128,15 +134,19 @@ class ShareService {
     required double grandTotal,
     BillBreakdown? billBreakdown,
   }) async {
+    final customShopName = ShopCustomizationService.instance.shopName.toUpperCase();
     const double width = 800;
     final double headerHeight = 220;
     final double itemHeight = 65;
     final bool hasBreakdown = billBreakdown != null &&
-        (billBreakdown.applyGst || billBreakdown.otherCharges.isNotEmpty);
+        (billBreakdown.applyDiscount ||
+            billBreakdown.applyGst ||
+            billBreakdown.otherCharges.isNotEmpty);
     final double breakdownHeight = hasBreakdown
         ? (35.0 +
-            (billBreakdown.applyGst ? 30.0 : 0.0) +
-            (billBreakdown.otherCharges.length * 30.0) +
+            (billBreakdown.applyDiscount ? 28.0 : 0.0) +
+            (billBreakdown.applyGst ? 28.0 : 0.0) +
+            (billBreakdown.otherCharges.length * 28.0) +
             15.0)
         : 0.0;
     final double footerHeight = 160;
@@ -163,7 +173,7 @@ class ShareService {
     // Title Text
     final titlePainter = TextPainter(
       text: TextSpan(
-        text: 'HARDWARE SHOP • $title',
+        text: '$customShopName • $title',
         style: const TextStyle(
             color: Colors.white,
             fontSize: 24,
@@ -272,6 +282,23 @@ class ShareService {
           currentY, 15, FontWeight.w700, const Color(0xFF1E293B));
       currentY += 28;
 
+      if (billBreakdown.applyDiscount && billBreakdown.discountAmount > 0) {
+        final discLabel = billBreakdown.discountType == 'percent'
+            ? 'Discount (${billBreakdown.discountValue % 1 == 0 ? billBreakdown.discountValue.toInt() : billBreakdown.discountValue}%)'
+            : 'Discount (Flat)';
+        _drawText(canvas, discLabel, 40, currentY, 15, FontWeight.w600,
+            const Color(0xFF166534));
+        _drawText(
+            canvas,
+            '- ₹ ${billBreakdown.discountAmount.toStringAsFixed(2)}',
+            680,
+            currentY,
+            15,
+            FontWeight.w700,
+            const Color(0xFF166534));
+        currentY += 28;
+      }
+
       if (billBreakdown.applyGst) {
         final rateStr = billBreakdown.gstRate % 1 == 0
             ? billBreakdown.gstRate.toInt().toString()
@@ -312,7 +339,7 @@ class ShareService {
     // Footer
     _drawText(
         canvas,
-        'Thank you for your business! • Hardware Shop Notebook',
+        'Thank you for your business! • $customShopName',
         220,
         currentY + 105,
         14,
@@ -349,6 +376,7 @@ class ShareService {
     double? totalOverride,
     BillBreakdown? billBreakdown,
   }) async {
+    final shopName = ShopCustomizationService.instance.shopName;
     final subtotal = draftOrder.items.fold<double>(
         0, (sum, item) => sum + (item.unitPrice ?? 0) * item.quantity);
     final breakdown = billBreakdown ??
@@ -357,12 +385,15 @@ class ShareService {
           applyGst: draftOrder.applyGst,
           gstRate: draftOrder.gstRate,
           otherCharges: draftOrder.otherCharges,
+          applyDiscount: draftOrder.applyDiscount,
+          discountType: draftOrder.discountType,
+          discountValue: draftOrder.discountValue,
           grandTotalOverride: totalOverride ?? draftOrder.estimateTotal,
         );
     final total = totalOverride ?? breakdown.grandTotal;
 
     final buffer = StringBuffer();
-    buffer.writeln('📋 *ORDER ESTIMATE*');
+    buffer.writeln('📋 *$shopName • ORDER ESTIMATE*');
     buffer.writeln('Customer: ${draftOrder.customer.name}');
     buffer.writeln(
         'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}');
@@ -378,15 +409,24 @@ class ShareService {
           ? item.quantity.toInt().toString()
           : item.quantity.toString();
       final priceStr = item.unitPrice != null && item.unitPrice! > 0
-          ? ' @ ₹${item.unitPrice!.toStringAsFixed(2)}'
+          ? ' @ ₹${item.unitPrice!.toStringAsFixed(2)} = ₹${((item.unitPrice ?? 0) * item.quantity).toStringAsFixed(2)}'
           : '';
       buffer.writeln(
           '${i + 1}. *${item.itemName}*$optsStr - $qtyStr ${item.unit}$priceStr');
     }
     buffer.writeln('--------------------------------');
-    if (breakdown.applyGst || breakdown.otherCharges.isNotEmpty) {
+    if (breakdown.applyDiscount ||
+        breakdown.applyGst ||
+        breakdown.otherCharges.isNotEmpty) {
       buffer.writeln(
           'Items Subtotal: ₹${breakdown.subtotal.toStringAsFixed(2)}');
+      if (breakdown.applyDiscount && breakdown.discountAmount > 0) {
+        final discStr = breakdown.discountType == 'percent'
+            ? '${breakdown.discountValue % 1 == 0 ? breakdown.discountValue.toInt() : breakdown.discountValue}%'
+            : '₹${breakdown.discountValue.toStringAsFixed(2)}';
+        buffer.writeln(
+            'Discount ($discStr): -₹${breakdown.discountAmount.toStringAsFixed(2)}');
+      }
       if (breakdown.applyGst) {
         final rateStr = breakdown.gstRate % 1 == 0
             ? breakdown.gstRate.toInt().toString()
@@ -411,10 +451,11 @@ class ShareService {
 
   static Future<void> _shareOrderAsText(OrderDetails details,
       {BillBreakdown? billBreakdown}) async {
+    final shopName = ShopCustomizationService.instance.shopName;
     final order = details.order;
     final breakdown = billBreakdown ?? order.billBreakdown;
     final buffer = StringBuffer();
-    buffer.writeln('📋 *ORDER ${order.formattedOrderId}*');
+    buffer.writeln('📋 *$shopName • ORDER ${order.formattedOrderId}*');
     buffer.writeln('Customer: ${order.customerNameSnapshot}');
     buffer.writeln(
         'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt)}');
@@ -428,14 +469,26 @@ class ShareService {
       final orderedStr = item.quantityOrdered % 1 == 0
           ? item.quantityOrdered.toInt().toString()
           : item.quantityOrdered.toString();
+      final priceStr = item.unitPrice > 0
+          ? ' @ ₹${item.unitPrice.toStringAsFixed(2)} = ₹${(item.unitPrice * item.quantityOrdered).toStringAsFixed(2)}'
+          : '';
       buffer.writeln(
-          '${i + 1}. *${item.itemName}*$optsStr - $orderedStr ${item.unit}');
+          '${i + 1}. *${item.itemName}*$optsStr - $orderedStr ${item.unit}$priceStr');
     }
     buffer.writeln('--------------------------------');
     if (breakdown != null &&
-        (breakdown.applyGst || breakdown.otherCharges.isNotEmpty)) {
+        (breakdown.applyDiscount ||
+            breakdown.applyGst ||
+            breakdown.otherCharges.isNotEmpty)) {
       buffer.writeln(
           'Items Subtotal: ₹${breakdown.subtotal.toStringAsFixed(2)}');
+      if (breakdown.applyDiscount && breakdown.discountAmount > 0) {
+        final discStr = breakdown.discountType == 'percent'
+            ? '${breakdown.discountValue % 1 == 0 ? breakdown.discountValue.toInt() : breakdown.discountValue}%'
+            : '₹${breakdown.discountValue.toStringAsFixed(2)}';
+        buffer.writeln(
+            'Discount ($discStr): -₹${breakdown.discountAmount.toStringAsFixed(2)}');
+      }
       if (breakdown.applyGst) {
         final rateStr = breakdown.gstRate % 1 == 0
             ? breakdown.gstRate.toInt().toString()

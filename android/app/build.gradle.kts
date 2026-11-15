@@ -1,7 +1,50 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val dartDefinesRaw = if (project.hasProperty("dart-defines")) {
+    project.property("dart-defines") as String
+} else {
+    ""
+}
+
+var dartDefinesDecoded = ""
+if (dartDefinesRaw.isNotEmpty()) {
+    dartDefinesDecoded = try {
+        dartDefinesRaw.split(",").joinToString(",") { chunk ->
+            try {
+                String(Base64.getDecoder().decode(chunk))
+            } catch (e: Exception) {
+                chunk
+            }
+        }
+    } catch (e: Exception) {
+        dartDefinesRaw
+    }
+}
+
+val isLocalMode = (project.hasProperty("standalone") && project.property("standalone") == "true")
+        || dartDefinesDecoded.contains("STANDALONE_LOCAL=true")
+        || dartDefinesRaw.contains("STANDALONE_LOCAL")
+
+val customAppId = if (project.hasProperty("appId")) {
+    project.property("appId") as String
+} else if (isLocalMode) {
+    "com.example.shop.local"
+} else {
+    "com.example.shop"
+}
+
+val customAppName = if (project.hasProperty("appName")) {
+    project.property("appName") as String
+} else if (isLocalMode) {
+    "Shop (Local)"
+} else {
+    "Shop (Cloud)"
 }
 
 if (file("google-services.json").exists()) {
@@ -19,8 +62,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.shop"
+        applicationId = customAppId
+        manifestPlaceholders["appName"] = customAppName
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

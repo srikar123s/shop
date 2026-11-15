@@ -9,29 +9,54 @@ import 'package:shop/models/product.dart';
 class ExcelProductService {
   static String normalizeUnit(String raw) {
     final lower = raw.trim().toLowerCase();
-    if (lower == 'piece' || lower == 'pieces' || lower == 'pcs' || lower == 'pc') {
+    if (lower == 'piece' ||
+        lower == 'pieces' ||
+        lower == 'pcs' ||
+        lower == 'pc' ||
+        lower == 'nos' ||
+        lower == 'no') {
       return 'Piece';
     }
-    if (lower == 'box' || lower == 'boxes') {
+    if (lower == 'box' || lower == 'boxes' || lower == 'bx') {
       return 'Box';
     }
-    if (lower == 'kg' || lower == 'kgs') {
+    if (lower == 'kg' || lower == 'kgs' || lower == 'kilo' || lower == 'kilogram') {
       return 'Kg';
     }
-    if (lower == 'litre' || lower == 'litres' || lower == 'liter' || lower == 'liters' || lower == 'l') {
+    if (lower == 'litre' ||
+        lower == 'litres' ||
+        lower == 'liter' ||
+        lower == 'liters' ||
+        lower == 'l' ||
+        lower == 'ltr' ||
+        lower == 'ltrs') {
       return 'Litre';
     }
-    if (lower == 'packet' || lower == 'packets' || lower == 'pkt' || lower == 'pkts') {
+    if (lower == 'packet' ||
+        lower == 'packets' ||
+        lower == 'pkt' ||
+        lower == 'pkts' ||
+        lower == 'pack' ||
+        lower == 'packs') {
       return 'Packet';
     }
-    if (lower == 'feet' || lower == 'feets' || lower == 'ft') {
+    if (lower == 'feet' || lower == 'feets' || lower == 'ft' || lower == 'foot') {
       return 'Feet';
+    }
+    if (lower == 'meter' || lower == 'meters' || lower == 'mtr' || lower == 'm') {
+      return 'Meter';
+    }
+    if (lower == 'set' || lower == 'sets') {
+      return 'Set';
+    }
+    if (lower == 'roll' || lower == 'rolls') {
+      return 'Roll';
     }
     if (raw.trim().isEmpty) return 'Piece';
     return raw.trim()[0].toUpperCase() + raw.trim().substring(1);
   }
 
-  /// Parses a file (Excel .xlsx / .xls or .csv) matching the exact catalog format.
+  /// Parses a file (.xlsx, .xls, or .csv) with fuzzy header detection and auto-grouping
   static Future<List<Product>> parseProductsFromFile(File file) async {
     final filePath = file.path.toLowerCase();
     final bytes = await file.readAsBytes();
@@ -51,11 +76,21 @@ class ExcelProductService {
   }
 
   static List<List<String>> parseCsvBytes(List<int> bytes) {
-    final content = String.fromCharCodes(bytes);
-    final rawRows = const CsvToListConverter(eol: '\n').convert(content);
-    return rawRows
-        .map((r) => r.map((c) => c?.toString().trim() ?? '').toList())
-        .toList();
+    try {
+      final content = utf8.decode(bytes);
+      final rawRows = const CsvToListConverter(eol: '\n').convert(content);
+      return rawRows
+          .map((r) => r.map((c) => c?.toString().trim() ?? '').toList())
+          .where((r) => r.any((c) => c.isNotEmpty))
+          .toList();
+    } catch (_) {
+      final content = String.fromCharCodes(bytes);
+      final rawRows = const CsvToListConverter(eol: '\n').convert(content);
+      return rawRows
+          .map((r) => r.map((c) => c?.toString().trim() ?? '').toList())
+          .where((r) => r.any((c) => c.isNotEmpty))
+          .toList();
+    }
   }
 
   static List<List<String>> parseXlsxArchive(List<int> bytes) {
@@ -148,28 +183,92 @@ class ExcelProductService {
     return rows;
   }
 
+  /// Upgraded 100x parser supporting both standard multi-option tables
+  /// and flat variant rows with auto-grouping and fuzzy column matching
   static List<Product> parseProductsFromRows(List<List<String>> rows) {
     if (rows.isEmpty) return <Product>[];
 
-    final headers = rows.first.map((h) => h.trim().toLowerCase()).toList();
-
-    int getIdx(List<String> matches) {
-      return headers.indexWhere((h) => matches.contains(h));
+    // Find header row (first row with at least 1 non-empty cell)
+    int headerRowIndex = 0;
+    for (int i = 0; i < rows.length; i++) {
+      if (rows[i].any((c) => c.trim().isNotEmpty)) {
+        headerRowIndex = i;
+        break;
+      }
     }
 
-    final nameIdx = getIdx(['product name', 'name', 'product', 'item']);
+    final rawHeaders = rows[headerRowIndex].map((h) => h.trim().toLowerCase()).toList();
+
+    int findHeaderIndex(List<String> variants) {
+      for (final v in variants) {
+        final idx = rawHeaders.indexWhere((h) => h == v || h.contains(v));
+        if (idx != -1) return idx;
+      }
+      return -1;
+    }
+
+    final nameIdx = findHeaderIndex([
+      'product name',
+      'product_name',
+      'product',
+      'item name',
+      'item_name',
+      'item',
+      'item description',
+      'description',
+      'title',
+      'name',
+    ]);
+
     if (nameIdx == -1) return <Product>[];
 
-    final unitIdx = getIdx(['unit', 'default unit']);
-    final conversionIdx =
-        getIdx(['unit conversion', 'conversion', 'unit conversions']);
-    final brandIdx = getIdx(['brands', 'brand']);
-    final colourIdx = getIdx(['colours', 'colour', 'colors', 'color']);
-    final sizeIdx = getIdx(['sizes', 'size']);
-    final typeIdx = getIdx(['types', 'type']);
-    final weightIdx = getIdx(['weights', 'weight']);
-    final modelIdx = getIdx(['models', 'model']);
-    final basePriceIdx = getIdx(['base price', 'rate']);
+    final categoryIdx = findHeaderIndex([
+      'category name',
+      'category',
+      'group name',
+      'group',
+      'department',
+      'dept',
+      'section',
+    ]);
+
+    final unitIdx = findHeaderIndex([
+      'default unit',
+      'unit of measure',
+      'uom',
+      'unit',
+      'packaging',
+      'packing',
+      'measure',
+    ]);
+
+    final conversionIdx = findHeaderIndex([
+      'unit conversion',
+      'conversion',
+      'unit conversions',
+      'conversions',
+      'packing size',
+      'packet conversion',
+    ]);
+
+    final basePriceIdx = findHeaderIndex([
+      'base price',
+      'selling price',
+      'unit price',
+      'standard rate',
+      'rate',
+      'price',
+      'mrp',
+      'cost',
+      'amount',
+    ]);
+
+    final brandIdx = findHeaderIndex(['brands', 'brand', 'company', 'make', 'mfr']);
+    final colourIdx = findHeaderIndex(['colours', 'colour', 'colors', 'color', 'shade']);
+    final sizeIdx = findHeaderIndex(['sizes', 'size', 'dimension', 'length', 'gauge']);
+    final typeIdx = findHeaderIndex(['types', 'type', 'grade', 'variant']);
+    final weightIdx = findHeaderIndex(['weights', 'weight', 'capacity', 'volume']);
+    final modelIdx = findHeaderIndex(['models', 'model', 'specification', 'spec']);
 
     final stepIndices = <String, Map<String, dynamic>>{
       'brand': {'idx': brandIdx, 'label': 'Brand'},
@@ -182,12 +281,16 @@ class ExcelProductService {
 
     final productMap = <String, Product>{};
 
-    for (int r = 1; r < rows.length; r++) {
+    for (int r = headerRowIndex + 1; r < rows.length; r++) {
       final row = rows[r];
       if (row.length <= nameIdx) continue;
 
       final name = row[nameIdx].trim();
       if (name.isEmpty) continue;
+
+      final category = (categoryIdx != -1 && row.length > categoryIdx)
+          ? (row[categoryIdx].trim().isNotEmpty ? row[categoryIdx].trim() : 'General')
+          : 'General';
 
       final rawDefaultUnit = (unitIdx != -1 && row.length > unitIdx)
           ? row[unitIdx].trim()
@@ -228,43 +331,36 @@ class ExcelProductService {
       final unitOptions = unitOptionsSet.toList();
 
       final basePrice = (basePriceIdx != -1 && row.length > basePriceIdx)
-          ? double.tryParse(row[basePriceIdx].trim()) ?? 0.0
+          ? double.tryParse(row[basePriceIdx].replaceAll(RegExp(r'[^\d.]'), '').trim()) ?? 0.0
           : 0.0;
 
-      // Build Steps in standard order
-      final steps = <ProductStep>[];
+      // Extract row's individual step choices
+      final rowStepValues = <String, List<String>>{};
       stepIndices.forEach((key, info) {
         final idx = info['idx'] as int;
-        final label = info['label'] as String;
         if (idx != -1 && row.length > idx) {
           final rawVal = row[idx].trim();
           if (rawVal.isNotEmpty) {
             final choices = rawVal
-                .split(RegExp(r'[,|]'))
+                .split(RegExp(r'[,|/]'))
                 .map((c) => c.trim())
                 .where((c) => c.isNotEmpty)
                 .toList();
             if (choices.isNotEmpty) {
-              steps.add(ProductStep(
-                key: key,
-                label: label,
-                type: 'select',
-                values: choices,
-              ));
+              rowStepValues[key] = choices;
             }
           }
         }
       });
 
-      // Parse Combination Prices by scanning ALL cells in the row for price assignment patterns:
-      // Pattern: "UF + 3.15mm + Steel = 150" or "BOSCH + 4 inch = 55"
+      // Parse combination prices from cells e.g. "UF + 3.15mm = 150" or "4 inch = 45"
       final variantPrices = <String, double>{};
       final priceAssignRegExp = RegExp(r'([^=;:\n]+)\s*[:=]\s*([\d.]+)');
 
       for (int c = 0; c < row.length; c++) {
         final cellText = row[c].trim();
         if (cellText.isEmpty) continue;
-        if (c == conversionIdx) continue; // Skip unit conversion column e.g. "1 Box = 20 Pieces"
+        if (c == conversionIdx) continue;
 
         final matches = priceAssignRegExp.allMatches(cellText);
         for (final match in matches) {
@@ -272,7 +368,6 @@ class ExcelProductService {
           final priceVal = double.tryParse(match.group(2)!.trim());
 
           if (comboStr.isNotEmpty && priceVal != null && priceVal > 0) {
-            // Check if comboStr is not a unit conversion like "1 Box"
             if (RegExp(r'^\d+\s+[A-Za-z]+$').hasMatch(comboStr)) continue;
 
             final optionVals = comboStr
@@ -289,6 +384,40 @@ class ExcelProductService {
           }
         }
       }
+
+      // If this row has specific single values (flat list entry) and a price,
+      // map the combination of this row's choices to this row's basePrice!
+      if (basePrice > 0 && rowStepValues.isNotEmpty) {
+        final singleComboValues = <String>[];
+        for (final key in stepIndices.keys) {
+          if (rowStepValues.containsKey(key) && rowStepValues[key]!.length == 1) {
+            singleComboValues.add(rowStepValues[key]!.first);
+          }
+        }
+        if (singleComboValues.isNotEmpty) {
+          final comboKey = singleComboValues.join(' • ');
+          variantPrices[comboKey] = basePrice;
+          variantPrices[comboKey.toLowerCase()] = basePrice;
+          for (final val in singleComboValues) {
+            variantPrices[val] = basePrice;
+            variantPrices[val.toLowerCase()] = basePrice;
+          }
+        }
+      }
+
+      // Build product steps
+      final steps = <ProductStep>[];
+      stepIndices.forEach((key, info) {
+        final label = info['label'] as String;
+        if (rowStepValues.containsKey(key)) {
+          steps.add(ProductStep(
+            key: key,
+            label: label,
+            type: 'select',
+            values: rowStepValues[key]!,
+          ));
+        }
+      });
 
       final lowerName = name.toLowerCase();
       if (productMap.containsKey(lowerName)) {
@@ -313,8 +442,9 @@ class ExcelProductService {
         }
 
         productMap[lowerName] = Product(
+          id: existing.id,
           name: name,
-          category: 'General',
+          category: category != 'General' ? category : existing.category,
           isActive: true,
           configuration: ProductConfiguration(
             basePrice:
@@ -337,7 +467,7 @@ class ExcelProductService {
       } else {
         productMap[lowerName] = Product(
           name: name,
-          category: 'General',
+          category: category,
           isActive: true,
           configuration: ProductConfiguration(
             basePrice: basePrice,
@@ -371,90 +501,112 @@ class ExcelProductService {
         .replaceAll('&apos;', "'");
   }
 
-  /// Shares the sample template file.
+  /// Shares a rich, professional sample CSV template
   static Future<void> shareSampleTemplate() async {
-    const templateFile =
-        r'c:\Users\srikar\OneDrive\Desktop\shop\simple_shop_product_catalog_with_unit_conversion.xlsx';
-    final sourceFile = File(templateFile);
-    final directory = await getTemporaryDirectory();
-    final targetPath =
-        '${directory.path}/simple_shop_product_catalog_with_unit_conversion.xlsx';
-
-    if (await sourceFile.exists()) {
-      await sourceFile.copy(targetPath);
-      await Share.shareXFiles(
-        [XFile(targetPath)],
-        text: 'Sample Product Catalog Excel Template for Shop App',
-      );
-      return;
-    }
-
-    // Fallback CSV generation if file not found locally
     const csvData = [
       [
         'Product Name',
-        'Unit',
+        'Category',
+        'Default Unit',
         'Unit Conversion',
+        'Base Price',
         'Brands',
-        'Colours',
         'Sizes',
+        'Colours',
         'Types',
         'Weights',
-        'Models',
-        'Combination Prices',
-        'Notes'
+        'Combination Prices'
       ],
       [
         'Welding Rod',
+        'Welding',
         'Box',
         '1 Box = 20 Pieces',
+        '140',
         'POWERTEX, UF',
-        '',
         '3.15mm, 4mm',
+        '',
         'Steel, General',
         '',
-        '',
-        'UF + 3.15mm + Steel = 150; POWERTEX + 3.15mm + Steel = 140',
-        ''
+        'UF + 3.15mm = 150; POWERTEX + 3.15mm = 140'
       ],
       [
         'Cutting Wheel',
+        'Abrasives',
         'Piece',
         '1 Box = 25 Pieces',
+        '45',
         'BOSCH, POWERTEX',
-        '',
         '4 inch, 7 inch',
         '',
         '',
         '',
-        'BOSCH + 4 inch = 55; BOSCH + 7 inch = 110',
+        'BOSCH + 4 inch = 55; BOSCH + 7 inch = 110; POWERTEX + 4 inch = 45'
+      ],
+      [
+        'Wall Paint Primer',
+        'Paints',
+        'Litre',
+        '1 Box = 12 Litre',
+        '220',
+        'Asian Paints, Berger',
+        '1 Litre, 4 Litre, 10 Litre, 20 Litre',
+        'White',
+        '',
+        '',
+        '1 Litre = 220; 4 Litre = 820; 10 Litre = 1950; 20 Litre = 3700'
+      ],
+      [
+        'PVC Pipe 4 inch',
+        'Plumbing',
+        'Feet',
+        '1 Bundle = 10 Feet',
+        '65',
+        'Supreme, Finolex, Ashirvad',
+        '10 Feet, 20 Feet',
+        'Grey, White',
+        'Heavy, Medium',
+        '',
         ''
       ],
-      ['Safety Helmet', 'Piece', '', 'KARAM', '', '', '', '', '', '', ''],
       [
-        'Paint',
-        'Litre',
-        '1 Box = 12 Litres',
+        'Safety Helmet',
+        'Safety Gear',
+        'Piece',
         '',
-        'Red, Blue, Green, White',
-        '1 L, 4 L, 10 L, 20 L',
+        '180',
+        'KARAM',
+        '',
+        'Yellow, White, Blue',
+        '',
+        '',
+        ''
+      ],
+      [
+        'Metal Paste',
+        'Adhesives',
+        'Piece',
+        '1 Box = 20 Pieces',
+        '20',
         '',
         '',
         '',
         '',
-        'Example only'
+        '100g, 250g, 500g',
+        '100g = 20; 250g = 40; 500g = 100'
       ],
     ];
 
+    final directory = await getTemporaryDirectory();
     final csvString =
         const ListToCsvConverter(fieldDelimiter: ',').convert(csvData);
-    final csvPath = '${directory.path}/sample_products_template.csv';
+    final csvPath = '${directory.path}/sample_shop_products_template.csv';
     final csvFile = File(csvPath);
     await csvFile.writeAsString(csvString);
 
     await Share.shareXFiles(
       [XFile(csvPath)],
-      text: 'Sample Product Catalog Template for Shop App',
+      text: 'Sample Product Catalog Excel/CSV Template for Shop App',
     );
   }
 }

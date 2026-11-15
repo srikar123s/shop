@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:path/path.dart' as p;
+import 'package:shop/models/top_product_stat.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
@@ -9,7 +10,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 2;
+  static const int dbVersion = 3;
 
   Database? _database;
 
@@ -35,6 +36,36 @@ class DatabaseHelper {
     _database = await _initDb();
   }
 
+  Future<void> clearOrderHistory() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('order_item_options');
+      await txn.delete('order_items');
+      await txn.delete('orders');
+    });
+  }
+
+  Future<void> clearProductsCatalog() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('product_options');
+      await txn.delete('products');
+    });
+  }
+
+  Future<void> resetAllShopData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('order_item_options');
+      await txn.delete('order_items');
+      await txn.delete('orders');
+      await txn.delete('product_options');
+      await txn.delete('products');
+      await txn.delete('customers');
+    });
+    await _seedInitialProducts(db);
+  }
+
   Future<Database> _initDb() async {
     final path = await getDatabaseFullPath();
     return openDatabase(
@@ -43,6 +74,39 @@ class DatabaseHelper {
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
+        try {
+          await db.execute('ALTER TABLE orders ADD COLUMN customer_phone TEXT');
+        } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE orders ADD COLUMN taken_by TEXT');
+        } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
+        } catch (_) {}
+        try {
+          await db.execute("ALTER TABLE orders ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'unpaid'");
+        } catch (_) {}
+        try {
+          await db.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid'");
+        } catch (_) {}
+        try {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS customer_payments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              customer_id INTEGER NOT NULL,
+              amount REAL NOT NULL,
+              payment_mode TEXT NOT NULL,
+              notes TEXT,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(customer_id) REFERENCES customers(id)
+            )
+          ''');
+        } catch (_) {}
+        try {
+          await db.execute(
+            "UPDATE orders SET taken_by = 'Srikar' WHERE taken_by IS NULL OR taken_by = '' OR taken_by = 'Store'",
+          );
+        } catch (_) {}
         await _seedInitialProducts(db);
       },
     );
@@ -53,6 +117,14 @@ class DatabaseHelper {
       await db.execute(
         'ALTER TABLE orders ADD COLUMN estimate_total REAL NOT NULL DEFAULT 0',
       );
+    }
+    if (oldVersion < 3) {
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN customer_phone TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN taken_by TEXT');
+      } catch (_) {}
     }
   }
 
@@ -94,6 +166,8 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id INTEGER NOT NULL,
         customer_name_snapshot TEXT NOT NULL,
+        customer_phone TEXT,
+        taken_by TEXT,
         created_at TEXT NOT NULL,
         status TEXT NOT NULL,
         notes TEXT,
@@ -321,5 +395,226 @@ class DatabaseHelper {
     for (final product in sampleProducts) {
       await db.insert('products', product);
     }
+  }
+
+  Future<List<TopProductStat>> getTopSellingProducts({
+    String timeRange = 'all',
+    String sortBy = 'quantity',
+    int limit = 20,
+  }) async {
+    final db = await database;
+    DateTime? since;
+    final now = DateTime.now();
+    if (timeRange == 'today') {
+      since = DateTime(now.year, now.month, now.day);
+    } else if (timeRange == 'week') {
+      since = now.subtract(const Duration(days: 7));
+    } else if (timeRange == 'month') {
+      since = DateTime(now.year, now.month, 1);
+    }
+
+    final whereClause = since != null ? 'WHERE o.created_at >= ?' : '';
+    final whereArgs = since != null ? [since.toIso8601String()] : <String>[];
+    final sortField = sortBy == 'revenue' ? 'total_revenue' : 'total_quantity';
+
+    final query = '''
+      SELECT 
+        oi.item_name,
+        oi.product_id,
+        oi.unit,
+        SUM(COALESCE(oi.quantity_given, oi.quantity_ordered, 0)) as total_quantity,
+        SUM(COALESCE(oi.quantity_given, oi.quantity_ordered, 0) * COALESCE(oi.unit_price, 0)) as total_revenue,
+        COUNT(DISTINCT oi.order_id) as order_count
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      $whereClause
+      GROUP BY oi.item_name
+      ORDER BY $sortField DESC
+      LIMIT $limit
+    ''';
+
+    final results = await db.rawQuery(query, whereArgs);
+    return results.map((row) => TopProductStat.fromMap(row)).toList();
+  }
+
+  Future<void> recordOrderPayment({
+    required int orderId,
+    required double paidAmount,
+    required String paymentMode,
+  }) async {
+    final db = await database;
+    final order =
+        await db.query('orders', where: 'id = ?', whereArgs: [orderId]);
+    if (order.isEmpty) return;
+    final total = (order.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
+    final status = paidAmount >= total
+        ? 'paid'
+        : (paidAmount > 0 ? 'partial' : 'unpaid');
+
+    await db.update(
+      'orders',
+      {
+        'paid_amount': paidAmount,
+        'payment_mode': paymentMode,
+        'payment_status': status,
+      },
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+  }
+
+  Future<void> recordCustomerKhataPayment({
+    required int customerId,
+    required double amount,
+    required String paymentMode,
+    String? notes,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final now = DateTime.now().toIso8601String();
+      await txn.insert('customer_payments', {
+        'customer_id': customerId,
+        'amount': amount,
+        'payment_mode': paymentMode,
+        'notes': notes,
+        'created_at': now,
+      });
+
+      // Apply payment to oldest pending/partial orders first
+      final unpaidOrders = await txn.query(
+        'orders',
+        where: 'customer_id = ? AND estimate_total > paid_amount',
+        whereArgs: [customerId],
+        orderBy: 'created_at ASC',
+      );
+
+      double remainingToApply = amount;
+      for (final row in unpaidOrders) {
+        if (remainingToApply <= 0) break;
+        final orderId = row['id'] as int;
+        final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
+        final alreadyPaid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
+        final due = total - alreadyPaid;
+
+        if (due > 0) {
+          final payingForThis =
+              remainingToApply >= due ? due : remainingToApply;
+          final newPaid = alreadyPaid + payingForThis;
+          final newStatus = newPaid >= total ? 'paid' : 'partial';
+
+          await txn.update(
+            'orders',
+            {
+              'paid_amount': newPaid,
+              'payment_status': newStatus,
+              'payment_mode': paymentMode,
+            },
+            where: 'id = ?',
+            whereArgs: [orderId],
+          );
+          remainingToApply -= payingForThis;
+        }
+      }
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getCustomerKhataList() async {
+    final db = await database;
+    final query = '''
+      SELECT 
+        c.id as customer_id,
+        c.name as customer_name,
+        c.phone as customer_phone,
+        COALESCE(SUM(o.estimate_total), 0) as total_billed,
+        COALESCE(SUM(o.paid_amount), 0) as total_paid,
+        (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due,
+        COUNT(DISTINCT o.id) as order_count
+      FROM customers c
+      LEFT JOIN orders o ON c.id = o.customer_id
+      GROUP BY c.id
+      HAVING balance_due > 0.01 OR total_billed > 0
+      ORDER BY balance_due DESC, c.name ASC
+    ''';
+    return await db.rawQuery(query);
+  }
+
+  Future<Map<String, dynamic>> getEveningClosingReport(DateTime date) async {
+    final db = await database;
+    final startOfDay =
+        DateTime(date.year, date.month, date.day).toIso8601String();
+    final endOfDay =
+        DateTime(date.year, date.month, date.day, 23, 59, 59).toIso8601String();
+
+    final orderRows = await db.query(
+      'orders',
+      where: 'created_at >= ? AND created_at <= ?',
+      whereArgs: [startOfDay, endOfDay],
+    );
+
+    double totalSales = 0;
+    double cashSales = 0;
+    double upiSales = 0;
+    double creditSales = 0;
+    int completedCount = 0;
+    int pendingCount = 0;
+
+    for (final row in orderRows) {
+      final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
+      final mode = (row['payment_mode'] as String?)?.toLowerCase() ?? 'unpaid';
+      final status = (row['status'] as String?) ?? '';
+
+      totalSales += total;
+      if (status == 'Completed' || status == 'Closed') {
+        completedCount++;
+      } else {
+        pendingCount++;
+      }
+
+      if (mode == 'cash') {
+        cashSales += paid;
+      } else if (mode == 'upi') {
+        upiSales += paid;
+      }
+      final due = total - paid;
+      if (due > 0) {
+        creditSales += due;
+      }
+    }
+
+    // Direct Khata payments received today
+    final paymentRows = await db.query(
+      'customer_payments',
+      where: 'created_at >= ? AND created_at <= ?',
+      whereArgs: [startOfDay, endOfDay],
+    );
+
+    double directPayments = 0;
+    for (final p in paymentRows) {
+      final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
+      final mode = (p['payment_mode'] as String?)?.toLowerCase() ?? '';
+      directPayments += amt;
+      if (mode == 'cash') cashSales += amt;
+      if (mode == 'upi') upiSales += amt;
+    }
+
+    final topItems =
+        await getTopSellingProducts(timeRange: 'today', limit: 1);
+    final topItem = topItems.isNotEmpty ? topItems.first : null;
+
+    return {
+      'date': date,
+      'totalOrders': orderRows.length,
+      'completedOrders': completedCount,
+      'pendingOrders': pendingCount,
+      'totalSales': totalSales,
+      'cashSales': cashSales,
+      'upiSales': upiSales,
+      'creditSales': creditSales,
+      'directPayments': directPayments,
+      'topItemName': topItem?.itemName ?? 'None',
+      'topItemQty': topItem?.totalQuantity ?? 0,
+      'topItemUnit': topItem?.unit ?? '',
+    };
   }
 }

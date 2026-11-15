@@ -11,6 +11,7 @@ import 'package:shop/screens/order_preview_screen.dart';
 import 'package:shop/screens/bulk_product_options_screen.dart';
 import 'package:shop/screens/product_options_screen.dart';
 import 'package:shop/services/draft_order_service.dart';
+import 'package:shop/services/voice_search_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 import 'package:shop/widgets/order_item_card.dart';
 import 'package:shop/widgets/product_card.dart';
@@ -23,12 +24,14 @@ class ProductSelectionScreen extends StatefulWidget {
     required this.productRepository,
     required this.orderRepository,
     this.existingOrderId,
+    this.initialItems,
   });
 
   final Customer customer;
   final ProductRepository productRepository;
   final OrderRepository orderRepository;
   final int? existingOrderId;
+  final List<DraftOrderItem>? initialItems;
 
   @override
   State<ProductSelectionScreen> createState() => _ProductSelectionScreenState();
@@ -47,8 +50,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialItems != null && widget.initialItems!.isNotEmpty) {
+      _items.addAll(widget.initialItems!);
+    }
     _loadProducts();
-    _checkDraft();
+    if (widget.initialItems == null || widget.initialItems!.isEmpty) {
+      _checkDraft();
+    }
   }
 
   Future<void> _checkDraft() async {
@@ -503,9 +511,36 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                 controller: _searchController,
                 decoration: InputDecoration(
                   labelText: s.t('searchItems'),
-                  suffixIcon: IconButton(
-                    onPressed: _loadProducts,
-                    icon: const Icon(Icons.search),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_searchController.text.isNotEmpty)
+                        IconButton(
+                          icon: const Icon(Icons.clear, size: 20),
+                          onPressed: () {
+                            _searchController.clear();
+                            _loadProducts();
+                          },
+                        ),
+                      IconButton(
+                        tooltip: 'Voice Search Product',
+                        icon: const Icon(Icons.mic, color: Color(0xFF0F766E)),
+                        onPressed: () async {
+                          final text = await VoiceSearchService.instance
+                              .recordSpeech(
+                            context,
+                            title: 'Search Product',
+                            hint:
+                                'Say product name (e.g. Cut-off Wheels, Paints)...',
+                          );
+                          if (text != null && text.trim().isNotEmpty) {
+                            _searchController.text = text.trim();
+                            _loadProducts();
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 onChanged: _onSearchChanged,

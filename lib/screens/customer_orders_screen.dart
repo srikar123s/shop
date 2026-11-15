@@ -8,12 +8,15 @@ import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/order_details_screen.dart';
 import 'package:shop/screens/product_selection_screen.dart';
 import 'package:shop/services/share_service.dart';
+import 'package:shop/services/shop_customization_service.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class CustomerOrdersScreen extends StatefulWidget {
   const CustomerOrdersScreen({
     super.key,
     required this.customerId,
     required this.customerName,
+    this.customerPhone,
     required this.customerRepository,
     required this.productRepository,
     required this.orderRepository,
@@ -21,6 +24,7 @@ class CustomerOrdersScreen extends StatefulWidget {
 
   final int customerId;
   final String customerName;
+  final String? customerPhone;
   final CustomerRepository customerRepository;
   final ProductRepository productRepository;
   final OrderRepository orderRepository;
@@ -41,8 +45,11 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final orders = await widget.orderRepository
-        .getCustomerOrderSummaries(widget.customerId);
+    final orders = await widget.orderRepository.getCustomerOrderSummaries(
+      widget.customerId,
+      customerName: widget.customerName,
+      customerPhone: widget.customerPhone,
+    );
     if (!mounted) return;
     setState(() {
       _orders = orders;
@@ -51,14 +58,20 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
   }
 
   Future<void> _createOrder() async {
-    final Customer? customer =
+    Customer? customer =
         await widget.customerRepository.getCustomerById(widget.customerId);
-    if (!mounted || customer == null) return;
+    customer ??= await widget.customerRepository
+        .findByNameAndPhone(widget.customerName, widget.customerPhone);
+    customer ??= await widget.customerRepository.createCustomer(
+      name: widget.customerName,
+      phone: widget.customerPhone,
+    );
+    if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute<void>(
         builder: (_) => ProductSelectionScreen(
-          customer: customer,
+          customer: customer!,
           productRepository: widget.productRepository,
           orderRepository: widget.orderRepository,
         ),
@@ -445,8 +458,13 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.customerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text('${_orders.length} total orders', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+            Text(widget.customerName,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text(
+                '${widget.customerPhone != null && widget.customerPhone!.isNotEmpty ? "${widget.customerPhone} • " : ""}${_orders.length} total orders',
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.normal)),
           ],
         ),
         actions: <Widget>[
@@ -550,7 +568,13 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                           _MetricStat(label: 'Pending', value: '$pendingCount', color: Colors.deepOrange.shade800),
                           _MetricStat(label: 'Completed', value: '$completedCount', color: Colors.teal.shade800),
                           if (totalEstimateSum > 0)
-                            _MetricStat(label: 'Total Value', value: '₹${totalEstimateSum.toStringAsFixed(0)}', color: Colors.purple.shade900),
+                            _MetricStat(
+                              label: 'Total Value',
+                              value: ShopSyncService.instance.canViewBillTotals
+                                  ? '₹${totalEstimateSum.toStringAsFixed(0)}'
+                                  : '₹ ••••',
+                              color: Colors.purple.shade900,
+                            ),
                         ],
                       ),
                     ),
@@ -639,6 +663,25 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                       ],
                                     ),
                                     const SizedBox(height: 6),
+                                    if (!ShopCustomizationService.instance.isPureOfflineMode) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.person_pin_circle_outlined,
+                                              size: 13,
+                                              color: Colors.teal.shade700),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Taken by: ${order.takenBy != null && order.takenBy!.trim().isNotEmpty && order.takenBy!.trim() != 'Store' ? order.takenBy!.trim() : ShopSyncService.instance.currentUserOrDeviceName}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.teal.shade800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                     Text(
                                       DateFormat('dd MMM yyyy, hh:mm a')
                                           .format(order.createdAt),

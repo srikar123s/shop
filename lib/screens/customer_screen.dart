@@ -6,6 +6,7 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/product_selection_screen.dart';
+import 'package:shop/services/voice_search_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
 class CustomerScreen extends StatefulWidget {
@@ -74,11 +75,15 @@ class _CustomerScreenState extends State<CustomerScreen> {
                 TextField(
                   controller: nameCtrl,
                   decoration: InputDecoration(labelText: '${s.t('name')} *'),
+                  autofocus: true,
                 ),
                 TextField(
                   controller: phoneCtrl,
                   keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(labelText: s.t('phone')),
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number * (Compulsory)',
+                    hintText: 'e.g. 9876543210',
+                  ),
                 ),
                 TextField(
                   controller: addressCtrl,
@@ -94,12 +99,26 @@ class _CustomerScreenState extends State<CustomerScreen> {
             ),
             FilledButton(
               onPressed: () async {
-                if (nameCtrl.text.trim().isEmpty) {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Customer Name is required.')),
+                  );
+                  return;
+                }
+                final phone = phoneCtrl.text.trim();
+                final cleanP = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                if (cleanP.length < 6) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Phone Number is compulsory (minimum 6 digits).')),
+                  );
                   return;
                 }
                 final customer = await widget.customerRepository.createCustomer(
-                  name: nameCtrl.text,
-                  phone: phoneCtrl.text,
+                  name: name,
+                  phone: phone,
                   address: addressCtrl.text,
                 );
                 if (context.mounted) {
@@ -280,13 +299,67 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final phone = fullContact.phones.isEmpty
         ? null
         : fullContact.phones.first.number.trim();
-    final customer = phone == null
-        ? await widget.customerRepository.createCustomer(name: contactName)
-        : await widget.customerRepository.findByPhone(phone) ??
-            await widget.customerRepository.createCustomer(
-              name: contactName,
-              phone: phone,
-            );
+    Customer? customer;
+    if (phone != null && phone.isNotEmpty) {
+      customer = await widget.customerRepository.findByPhone(phone) ??
+          await widget.customerRepository.createCustomer(
+            name: contactName,
+            phone: phone,
+          );
+    } else {
+      final phoneCtrl = TextEditingController();
+      final enteredPhone = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Phone Number Required'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  'Phone number is compulsory to create orders for "$contactName":'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number *',
+                  hintText: 'e.g. 9876543210',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCEL')),
+            FilledButton(
+              onPressed: () {
+                final p =
+                    phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
+                if (p.length < 6) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                        content: Text('Please enter at least 6 digits')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, phoneCtrl.text.trim());
+              },
+              child: const Text('SAVE'),
+            ),
+          ],
+        ),
+      );
+      if (enteredPhone == null || !mounted) return;
+      customer = await widget.customerRepository.createCustomer(
+        name: contactName,
+        phone: enteredPhone,
+      );
+    }
     if (!mounted) return;
     setState(() => _selected = customer);
     await _loadCustomers();
@@ -296,6 +369,98 @@ class _CustomerScreenState extends State<CustomerScreen> {
       duration: const Duration(seconds: 3),
     ));
 
+  }
+
+  Future<void> _proceedWithCustomer(Customer customer) async {
+    final cleanP =
+        customer.phone?.replaceAll(RegExp(r'[^0-9]'), '').trim() ?? '';
+    if (cleanP.length < 6) {
+      final phoneCtrl = TextEditingController();
+      final savedPhone = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Phone Number Required',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Phone number is compulsory to create an order for "${customer.name}":',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number *',
+                  hintText: 'e.g. 9876543210',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final p =
+                    phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
+                if (p.length < 6) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Please enter a valid phone number (at least 6 digits)')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, phoneCtrl.text.trim());
+              },
+              child: const Text('SAVE & CONTINUE'),
+            ),
+          ],
+        ),
+      );
+
+      if (savedPhone == null || !mounted) return;
+      if (customer.id != null) {
+        await widget.customerRepository.updateCustomer(
+          id: customer.id!,
+          name: customer.name,
+          phone: savedPhone,
+          address: customer.address,
+        );
+        customer = (await widget.customerRepository
+                .getCustomerById(customer.id!)) ??
+            customer.copyWith(phone: savedPhone);
+      } else {
+        customer = await widget.customerRepository.createCustomer(
+          name: customer.name,
+          phone: savedPhone,
+          address: customer.address,
+        );
+      }
+      setState(() => _selected = customer);
+      await _loadCustomers();
+    }
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => ProductSelectionScreen(
+          customer: customer,
+          productRepository: widget.productRepository,
+          orderRepository: widget.orderRepository,
+        ),
+      ),
+    );
   }
 
   @override
@@ -343,15 +508,35 @@ class _CustomerScreenState extends State<CustomerScreen> {
               decoration: InputDecoration(
                 hintText: s.t('searchCustomer'),
                 prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_searchController.text.isNotEmpty)
+                      IconButton(
                         icon: const Icon(Icons.clear, size: 18),
                         onPressed: () {
                           _searchController.clear();
                           _loadCustomers();
                         },
-                      )
-                    : null,
+                      ),
+                    IconButton(
+                      tooltip: 'Voice Search Customer',
+                      icon: const Icon(Icons.mic, color: Color(0xFF0F766E), size: 20),
+                      onPressed: () async {
+                        final text = await VoiceSearchService.instance
+                            .recordSpeech(
+                          context,
+                          title: 'Search Customer',
+                          hint: 'Say customer name (e.g. Srikar, Kamal)...',
+                        );
+                        if (text != null && text.trim().isNotEmpty) {
+                          _searchController.text = text.trim();
+                          _loadCustomers();
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
               onChanged: (_) => _loadCustomers(),
             ),
@@ -611,18 +796,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   _selected == null ? 'SELECT A CUSTOMER' : '${s.t('next')} →',
               onTap: _selected == null
                   ? null
-                  : () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => ProductSelectionScreen(
-                            customer: _selected!,
-                            productRepository: widget.productRepository,
-                            orderRepository: widget.orderRepository,
-                          ),
-                        ),
-                      );
-                    },
+                  : () => _proceedWithCustomer(_selected!),
             ),
           ],
         ),

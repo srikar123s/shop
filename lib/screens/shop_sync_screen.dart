@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shop/models/shop_profile.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
 class ShopSyncScreen extends StatefulWidget {
@@ -241,40 +242,55 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                   const SizedBox(height: 18),
 
                   if (hasShop && _activeView == 0) ...[
-                    // Active Shop Details Card
-                    _buildActiveShopCard(shop!),
-                    const SizedBox(height: 18),
+                    if (_syncService.isPendingApproval) ...[
+                      _buildPendingApprovalView(shop!),
+                    ] else ...[
+                      // Active Shop Details Card
+                      _buildActiveShopCard(shop!),
+                      const SizedBox(height: 18),
 
-                    // QR Code & Share Card
-                    _buildQrAndShareCard(shop),
-                    const SizedBox(height: 18),
+                      // QR Code & Share Card (OWNER ONLY!)
+                      if (shop.isOwner) ...[
+                        _buildQrAndShareCard(shop),
+                        const SizedBox(height: 18),
+                      ],
 
-                    // Device & Role Info Card
-                    _buildDeviceRoleCard(shop),
-                    const SizedBox(height: 24),
+                      // Device & Role Info Card
+                      _buildDeviceRoleCard(shop),
+                      const SizedBox(height: 18),
 
-                    // Action Buttons
-                    FilledButton.icon(
-                      onPressed: _isLoading ? null : _handleManualSync,
-                      icon: const Icon(Icons.sync_rounded),
-                      label: Text(_isLoading ? 'Syncing...' : 'FORCE SYNC WITH CLOUD NOW'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      // Connected Staff & Permissions (Owner manages staff; Staff sees permissions overview)
+                      if (shop.isOwner) ...[
+                        _buildConnectedDevicesCard(shop),
+                        const SizedBox(height: 24),
+                      ] else ...[
+                        _buildStaffPermissionsOverviewCard(),
+                        const SizedBox(height: 24),
+                      ],
+
+                      // Action Buttons
+                      FilledButton.icon(
+                        onPressed: _isLoading ? null : _handleManualSync,
+                        icon: const Icon(Icons.sync_rounded),
+                        label: Text(_isLoading ? 'Syncing...' : 'FORCE SYNC WITH CLOUD NOW'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _handleDisconnect,
-                      icon: const Icon(Icons.logout_rounded, color: Colors.red),
-                      label: const Text('DISCONNECT FROM THIS SHOP', style: TextStyle(color: Colors.red)),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: Colors.red.shade300),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _handleDisconnect,
+                        icon: const Icon(Icons.logout_rounded, color: Colors.red),
+                        label: const Text('DISCONNECT FROM THIS SHOP', style: TextStyle(color: Colors.red)),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.red.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
-                    ),
+                    ],
                   ] else if (_activeView == 1) ...[
                     // Create Shop View
                     _buildCreateShopForm(),
@@ -308,6 +324,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
         textColor = const Color(0xFF065F46);
         icon = Icons.check_circle_rounded;
         text = _syncService.statusMessage;
+        break;
+      case SyncStatus.pendingApproval:
+        bg = const Color(0xFFFEF3C7);
+        textColor = const Color(0xFF92400E);
+        icon = Icons.hourglass_top_rounded;
+        text = 'Join Request Pending: Waiting for Shop Owner to accept...';
         break;
       case SyncStatus.syncing:
         bg = const Color(0xFFEFF6FF);
@@ -558,6 +580,10 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
   }
 
   Widget _buildDeviceRoleCard(dynamic shop) {
+    final isOwner = shop.isOwner;
+    final displayName = isOwner
+        ? (shop.ownerName.isNotEmpty ? shop.ownerName : 'Srikar')
+        : (shop.staffName.isNotEmpty ? shop.staffName : 'Staff');
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -567,21 +593,717 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.devices_other_rounded, color: Color(0xFF64748B), size: 24),
+          CircleAvatar(
+            radius: 18,
+            backgroundColor:
+                isOwner ? Colors.amber.shade100 : Colors.teal.shade100,
+            child: Icon(
+              isOwner ? Icons.admin_panel_settings : Icons.person,
+              color: isOwner ? Colors.amber.shade900 : Colors.teal.shade800,
+              size: 20,
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Connected as: ${shop.staffName}',
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF1E293B)),
+                  'Connected as: $displayName (${isOwner ? "Owner / Master" : "Staff"})',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: Color(0xFF1E293B)),
                 ),
                 Text(
                   'Device ID: ${_syncService.deviceId}',
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  style:
+                      const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingApprovalView(ShopProfile shop) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFFDE68A), width: 2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0C000000),
+            blurRadius: 16,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: const BoxDecoration(
+              color: Color(0xFFFEF3C7),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.hourglass_top_rounded,
+              color: Color(0xFFD97706),
+              size: 48,
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Join Request Pending Approval',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Waiting for the shop owner (${shop.ownerName.isNotEmpty ? shop.ownerName : "Master Device"}) to accept your join request.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 13, color: Colors.grey.shade700, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              children: [
+                _buildPendingInfoRow('Shop Name', shop.shopName),
+                const Divider(height: 16),
+                _buildPendingInfoRow('Your Staff Name', shop.staffName),
+                const Divider(height: 16),
+                _buildPendingInfoRow('Device ID', _syncService.deviceId),
+                const Divider(height: 16),
+                _buildPendingInfoRow('Status', '⏳ PENDING OWNER APPROVAL',
+                    color: const Color(0xFFD97706)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: Color(0xFFD97706),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This screen will automatically update when the owner approves your device.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade500,
+                fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: _handleDisconnect,
+            icon: const Icon(Icons.close_rounded, color: Colors.red),
+            label: const Text('CANCEL JOIN REQUEST',
+                style: TextStyle(color: Colors.red)),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.red.shade300),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingInfoRow(String label, String value, {Color? color}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: color ?? const Color(0xFF0F172A),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectedDevicesCard(dynamic shop) {
+    return StreamBuilder<List<StaffDevice>>(
+      stream: _syncService.streamConnectedDevices(),
+      builder: (context, snapshot) {
+        final devices = snapshot.data ?? [];
+        final pendingDevices =
+            devices.where((d) => d.isPending && !d.isOwner).toList();
+        final approvedDevices =
+            devices.where((d) => d.isApproved || d.isOwner).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // PENDING REQUESTS SECTION
+            if (pendingDevices.isNotEmpty) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
+                  boxShadow: const [
+                    BoxShadow(
+                        color: Color(0x0A000000),
+                        blurRadius: 10,
+                        offset: Offset(0, 4)),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFDE68A),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.person_add_rounded,
+                              color: Color(0xFFB45309), size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Pending Join Requests (${pendingDevices.length})',
+                                style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF92400E)),
+                              ),
+                              const Text(
+                                'Staff devices waiting for your approval to connect to this shop.',
+                                style: TextStyle(
+                                    fontSize: 12, color: Color(0xFF78350F)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ...pendingDevices
+                        .map((pDev) => _buildPendingRequestItem(pDev)),
+                  ],
+                ),
+              ),
+            ],
+
+            // CONNECTED STAFF & DEVICES CARD
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x08000000),
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F766E)
+                                  .withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.people_alt_rounded,
+                                color: Color(0xFF0F766E), size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text(
+                            'Connected Staff & Devices',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF0F172A)),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD1FAE5),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${approvedDevices.length} Connected',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF065F46)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (approvedDevices.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'No other devices connected yet. Staff can scan the QR code above or enter code "${shop.shopCode}" to send a join request.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                            fontStyle: FontStyle.italic),
+                      ),
+                    )
+                  else
+                    ...approvedDevices.map(
+                        (device) => _buildApprovedDeviceItem(device, shop)),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildPendingRequestItem(StaffDevice device) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFFEF3C7),
+                child: const Icon(Icons.person_outline,
+                    color: Color(0xFFB45309), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      device.staffName.isNotEmpty
+                          ? device.staffName
+                          : 'New Staff Member',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Color(0xFF0F172A)),
+                    ),
+                    Text(
+                      'Device ID: ${device.deviceId}',
+                      style:
+                          TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    await _syncService.approveStaffDevice(device.deviceId);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              'Accepted ${device.staffName}! Device is now synced.'),
+                          backgroundColor: const Color(0xFF0F766E),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.check, size: 16),
+                  label: const Text('ACCEPT REQUEST'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await _syncService.rejectStaffDevice(device.deviceId);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              'Declined join request from ${device.staffName}.'),
+                          backgroundColor: Colors.red.shade700,
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                  label:
+                      const Text('DECLINE', style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: Colors.red.shade300),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApprovedDeviceItem(StaffDevice device, dynamic shop) {
+    final isCurrentDevice = device.deviceId == _syncService.deviceId;
+    final isOwnerDevice = device.role == 'owner';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrentDevice
+            ? const Color(0xFFF0FDF4)
+            : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isCurrentDevice
+              ? const Color(0xFF86EFAC)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: isOwnerDevice
+                    ? Colors.amber.shade100
+                    : Colors.teal.shade100,
+                child: Icon(
+                  isOwnerDevice ? Icons.admin_panel_settings : Icons.person,
+                  size: 18,
+                  color: isOwnerDevice
+                      ? Colors.amber.shade900
+                      : Colors.teal.shade800,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            device.staffName.isNotEmpty
+                                ? device.staffName
+                                : (isOwnerDevice ? 'Owner' : 'Staff Counter'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        if (isCurrentDevice) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('THIS DEVICE',
+                                style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF166534))),
+                          ),
+                        ],
+                      ],
+                    ),
+                    Text(
+                      'ID: ${device.deviceId} • ${isOwnerDevice ? "Owner / Master" : "Staff Member"}',
+                      style:
+                          TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (shop.isOwner && !isOwnerDevice) ...[
+            const Divider(height: 16),
+            const Text(
+              'Owner Controls & Permissions:',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF475569)),
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow Changing Prices in Bills',
+                  style: TextStyle(fontSize: 12)),
+              value: device.canChangePrice,
+              onChanged: (val) {
+                _syncService.updateDevicePermission(
+                  targetDeviceId: device.deviceId,
+                  permissionKey: 'canChangePrice',
+                  value: val,
+                );
+              },
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow Adding & Editing Products',
+                  style: TextStyle(fontSize: 12)),
+              value: device.canManageProducts,
+              onChanged: (val) {
+                _syncService.updateDevicePermission(
+                  targetDeviceId: device.deviceId,
+                  permissionKey: 'canManageProducts',
+                  value: val,
+                );
+              },
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow Completing & Closing Orders',
+                  style: TextStyle(fontSize: 12)),
+              value: device.canCloseOrders,
+              onChanged: (val) {
+                _syncService.updateDevicePermission(
+                  targetDeviceId: device.deviceId,
+                  permissionKey: 'canCloseOrders',
+                  value: val,
+                );
+              },
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                  'Allow Editing Ordering Shortcuts (+5, +6, etc.)',
+                  style: TextStyle(fontSize: 12)),
+              value: device.canChangeShortcuts,
+              onChanged: (val) {
+                _syncService.updateDevicePermission(
+                  targetDeviceId: device.deviceId,
+                  permissionKey: 'canChangeShortcuts',
+                  value: val,
+                );
+              },
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Allow Viewing Total Bill Values & Revenue',
+                  style: TextStyle(fontSize: 12)),
+              value: device.canViewBillTotals,
+              onChanged: (val) {
+                _syncService.updateDevicePermission(
+                  targetDeviceId: device.deviceId,
+                  permissionKey: 'canViewBillTotals',
+                  value: val,
+                );
+              },
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: Text('Remove ${device.staffName}?'),
+                      content: Text(
+                          'This will revoke access for ${device.staffName} and disconnect their device from this shop.'),
+                      actions: [
+                        TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('CANCEL')),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: Colors.red),
+                          child: const Text('REMOVE'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    await _syncService.revokeStaffDevice(device.deviceId);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text(
+                                'Revoked access for ${device.staffName}')),
+                      );
+                    }
+                  }
+                },
+                icon: const Icon(Icons.person_remove_rounded,
+                    color: Colors.red, size: 16),
+                label: const Text('Revoke Access / Remove Staff',
+                    style: TextStyle(color: Colors.red, fontSize: 12)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStaffPermissionsOverviewCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.verified_user_rounded,
+                    color: Color(0xFF0F766E), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Your Staff Permissions',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF0F172A)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Permissions configured and managed by shop owner.',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 14),
+          _buildPermissionStatusRow(
+              'Change Prices in Bills', _syncService.canChangePrice),
+          _buildPermissionStatusRow(
+              'Add & Edit Products', _syncService.canManageProducts),
+          _buildPermissionStatusRow(
+              'Close & Complete Orders', _syncService.canCloseOrders),
+          _buildPermissionStatusRow(
+              'Edit Quantity Shortcuts', _syncService.canChangeShortcuts),
+          _buildPermissionStatusRow(
+              'View Bill Totals & Sales', _syncService.canViewBillTotals),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionStatusRow(String label, bool allowed) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF334155))),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color:
+                  allowed ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              allowed ? 'ALLOWED' : 'RESTRICTED',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: allowed
+                    ? const Color(0xFF166534)
+                    : const Color(0xFF991B1B),
+              ),
             ),
           ),
         ],

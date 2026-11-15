@@ -14,25 +14,50 @@ class OrderRepository {
     DraftOrder draftOrder, {
     double? estimateTotal,
     BillBreakdown? billBreakdown,
+    String? takenBy,
   }) async {
     final db = await _databaseHelper.database;
     final createdOrderId = await db.transaction((txn) async {
       final now = DateTime.now();
+      final effectiveTakenBy =
+          takenBy ?? ShopSyncService.instance.currentUserOrDeviceName;
+      final phone = draftOrder.customer.phone;
+
       final notes = billBreakdown != null
-          ? jsonEncode(billBreakdown.toMap())
-          : (draftOrder.applyGst || draftOrder.otherCharges.isNotEmpty)
+          ? jsonEncode(billBreakdown
+              .copyWith(
+                customerPhone: phone,
+                takenBy: effectiveTakenBy,
+              )
+              .toMap())
+          : (draftOrder.applyGst ||
+                  draftOrder.otherCharges.isNotEmpty ||
+                  draftOrder.applyDiscount)
               ? jsonEncode(BillBreakdown.calculate(
                   subtotal: draftOrder.items.fold<double>(
                       0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity),
                   applyGst: draftOrder.applyGst,
                   gstRate: draftOrder.gstRate,
                   otherCharges: draftOrder.otherCharges,
+                  applyDiscount: draftOrder.applyDiscount,
+                  discountType: draftOrder.discountType,
+                  discountValue: draftOrder.discountValue,
                   grandTotalOverride: estimateTotal ?? draftOrder.estimateTotal,
+                  customerPhone: phone,
+                  takenBy: effectiveTakenBy,
                 ).toMap())
-              : null;
+              : jsonEncode(BillBreakdown.calculate(
+                  subtotal: draftOrder.items.fold<double>(
+                      0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity),
+                  customerPhone: phone,
+                  takenBy: effectiveTakenBy,
+                ).toMap());
+
       final orderId = await txn.insert('orders', {
         'customer_id': draftOrder.customer.id,
         'customer_name_snapshot': draftOrder.customer.name,
+        'customer_phone': phone,
+        'taken_by': effectiveTakenBy,
         'created_at': now.toIso8601String(),
         'status': orderStatusLabel(OrderStatus.pending),
         'notes': notes,
@@ -123,11 +148,51 @@ class OrderRepository {
           });
         }
       }
+
+      // Query all items for this order to calculate the complete combined subtotal
+      final allItemRows = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: <Object?>[orderId],
+      );
+      double combinedSubtotal = 0.0;
+      for (final row in allItemRows) {
+        final qty = (row['quantity_ordered'] as num).toDouble();
+        double uPrice = 0.0;
+        final snapRaw = row['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+        combinedSubtotal += uPrice * qty;
+      }
+
+      final combinedBreakdown = billBreakdown != null
+          ? BillBreakdown.calculate(
+              subtotal: combinedSubtotal,
+              applyGst: billBreakdown.applyGst,
+              gstRate: billBreakdown.gstRate,
+              otherCharges: billBreakdown.otherCharges,
+              applyDiscount: billBreakdown.applyDiscount,
+              discountType: billBreakdown.discountType,
+              discountValue: billBreakdown.discountValue,
+              note: billBreakdown.note,
+            )
+          : null;
+
       final orderUpdateData = <String, Object?>{
         'status': orderStatusLabel(OrderStatus.partiallyCompleted),
       };
-      if (billBreakdown != null) {
-        orderUpdateData['notes'] = jsonEncode(billBreakdown.toMap());
+      if (combinedBreakdown != null) {
+        orderUpdateData['notes'] = jsonEncode(combinedBreakdown.toMap());
+        orderUpdateData['estimate_total'] = combinedBreakdown.grandTotal;
+      } else if (estimateTotalAddition != 0) {
+        await txn.rawUpdate(
+          'UPDATE orders SET estimate_total = estimate_total + ? WHERE id = ?',
+          <Object?>[estimateTotalAddition, orderId],
+        );
       }
       await txn.update(
         'orders',
@@ -135,12 +200,6 @@ class OrderRepository {
         where: 'id = ?',
         whereArgs: <Object?>[orderId],
       );
-      if (estimateTotalAddition != 0) {
-        await txn.rawUpdate(
-          'UPDATE orders SET estimate_total = estimate_total + ? WHERE id = ?',
-          <Object?>[estimateTotalAddition, orderId],
-        );
-      }
     });
     unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
@@ -158,6 +217,17 @@ class OrderRepository {
     final summaries = <OrderSummary>[];
     for (final row in orderRows) {
       final orderId = row['id'] as int;
+      final notes = row['notes'] as String?;
+      final breakdown = BillBreakdown.fromJsonString(notes);
+      final customerPhone =
+          (row['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final rawTakenBy = (row['taken_by'] as String?) ?? breakdown?.takenBy;
+      final takenBy = (rawTakenBy != null &&
+              rawTakenBy.trim().isNotEmpty &&
+              rawTakenBy.trim() != 'Store')
+          ? rawTakenBy.trim()
+          : ShopSyncService.instance.currentUserOrDeviceName;
+
       final itemRows = await db.query(
         'order_items',
         where: 'order_id = ?',
@@ -173,31 +243,55 @@ class OrderRepository {
           orderId: orderId,
           customerId: row['customer_id'] as int,
           customerName: row['customer_name_snapshot'] as String,
+          customerPhone: customerPhone,
+          takenBy: takenBy,
           createdAt: DateTime.parse(row['created_at'] as String),
           totalItems: itemRows.length,
           pendingCount: pendingCount,
           status: status,
           estimateTotal: (row['estimate_total'] as num?)?.toDouble() ?? 0,
+          paidAmount: (row['paid_amount'] as num?)?.toDouble() ?? 0.0,
+          paymentMode: row['payment_mode'] as String?,
+          paymentStatus: row['payment_status'] as String?,
         ),
       );
     }
     return summaries;
   }
 
-  Future<List<OrderSummary>> getCustomerOrderSummaries(int customerId) async {
-    final db = await _databaseHelper.database;
-    final customer = await db.query(
-      'customers',
-      columns: <String>['name'],
-      where: 'id = ?',
-      whereArgs: <Object?>[customerId],
-      limit: 1,
-    );
-    if (customer.isEmpty) return <OrderSummary>[];
-    return searchOrderSummaries(customer.first['name'] as String).then(
-      (orders) =>
-          orders.where((order) => order.customerId == customerId).toList(),
-    );
+  Future<List<OrderSummary>> getCustomerOrderSummaries(
+    int customerId, {
+    String? customerName,
+    String? customerPhone,
+  }) async {
+    final all = await searchOrderSummaries('');
+    final cleanPhone =
+        customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+    final lowerName = customerName?.trim().toLowerCase();
+
+    return all.where((o) {
+      if (cleanPhone != null && cleanPhone.isNotEmpty) {
+        final orderPhone =
+            o.customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+        if (orderPhone != null && orderPhone.isNotEmpty) {
+          return orderPhone == cleanPhone;
+        }
+      }
+      if (lowerName != null && lowerName.isNotEmpty) {
+        if (o.customerName.trim().toLowerCase() == lowerName) {
+          final orderPhone =
+              o.customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+          if (cleanPhone == null ||
+              cleanPhone.isEmpty ||
+              orderPhone == null ||
+              orderPhone.isEmpty ||
+              orderPhone == cleanPhone) {
+            return true;
+          }
+        }
+      }
+      return o.customerId == customerId;
+    }).toList();
   }
 
   Future<void> closePendingOrdersForCustomer(int customerId, {bool adjustToGivenOnly = false}) async {
@@ -236,7 +330,14 @@ class OrderRepository {
       for (final row in itemRows) {
         final itemId = row['id'] as int;
         final ordered = (row['quantity_ordered'] as num).toDouble();
-        final unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        double unitPrice = 0.0;
+        final snapRaw = row['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
         fullSubtotal += unitPrice * ordered;
 
         await txn.update(
@@ -311,7 +412,14 @@ class OrderRepository {
         final itemId = row['id'] as int;
         final ordered = (row['quantity_ordered'] as num).toDouble();
         final given = (row['quantity_given'] as num).toDouble();
-        final unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        double unitPrice = 0.0;
+        final snapRaw = row['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
         final itemName = row['item_name'] as String;
 
         deliveredSubtotal += unitPrice * given;
@@ -382,6 +490,23 @@ class OrderRepository {
     await closeOrderWithAllGiven(orderId);
   }
 
+  Future<void> updateOrderBillBreakdown({
+    required int orderId,
+    required BillBreakdown billBreakdown,
+  }) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'orders',
+      {
+        'estimate_total': billBreakdown.grandTotal,
+        'notes': jsonEncode(billBreakdown.toMap()),
+      },
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
+  }
+
 
   Future<OrderDetails?> getOrderDetails(int orderId) async {
     final db = await _databaseHelper.database;
@@ -443,15 +568,75 @@ class OrderRepository {
       );
     }
 
-    final order = OrderEntity(
+    final notes = orderRow['notes'] as String?;
+    final breakdown = BillBreakdown.fromJsonString(notes);
+    final customerPhone =
+        (orderRow['customer_phone'] as String?) ?? breakdown?.customerPhone;
+    final rawTakenBy =
+        (orderRow['taken_by'] as String?) ?? breakdown?.takenBy;
+    final takenBy = (rawTakenBy != null &&
+            rawTakenBy.trim().isNotEmpty &&
+            rawTakenBy.trim() != 'Store')
+        ? rawTakenBy.trim()
+        : ShopSyncService.instance.currentUserOrDeviceName;
+
+    var order = OrderEntity(
       id: orderId,
       customerId: orderRow['customer_id'] as int,
       customerNameSnapshot: orderRow['customer_name_snapshot'] as String,
+      customerPhone: customerPhone,
+      takenBy: takenBy,
       createdAt: DateTime.parse(orderRow['created_at'] as String),
       status: _orderStatusFromLabel(orderRow['status'] as String),
-      notes: orderRow['notes'] as String?,
+      notes: notes,
       estimateTotal: (orderRow['estimate_total'] as num?)?.toDouble() ?? 0,
+      paidAmount: (orderRow['paid_amount'] as num?)?.toDouble() ?? 0,
+      paymentMode: (orderRow['payment_mode'] as String?) ?? 'unpaid',
+      paymentStatus: (orderRow['payment_status'] as String?) ?? 'unpaid',
     );
+
+    // Auto-heal if billBreakdown subtotal is 0 but items have non-zero prices
+    final hasItemsWithPrices = items.any((i) => i.unitPrice > 0);
+    if (hasItemsWithPrices && (breakdown == null || breakdown.subtotal == 0)) {
+      double correctedSubtotal = 0;
+      if (order.status == OrderStatus.completed) {
+        final hasGiven = items.any((i) => i.quantityGiven > 0);
+        if (hasGiven) {
+          correctedSubtotal = items.fold(0.0, (sum, i) => sum + i.unitPrice * i.quantityGiven);
+        } else {
+          correctedSubtotal = items.fold(0.0, (sum, i) => sum + i.unitPrice * i.quantityOrdered);
+        }
+      } else {
+        correctedSubtotal = items.fold(0.0, (sum, i) => sum + i.unitPrice * i.quantityOrdered);
+      }
+
+      if (correctedSubtotal > 0) {
+        final healedBreakdown = BillBreakdown.calculate(
+          subtotal: correctedSubtotal,
+          applyGst: breakdown?.applyGst ?? false,
+          gstRate: breakdown?.gstRate ?? 18.0,
+          otherCharges: breakdown?.otherCharges ?? const [],
+          note: breakdown?.note,
+        );
+
+        order = order.copyWith(
+          estimateTotal: healedBreakdown.grandTotal,
+          notes: jsonEncode(healedBreakdown.toMap()),
+        );
+
+        unawaited(db.update(
+          'orders',
+          {
+            'estimate_total': healedBreakdown.grandTotal,
+            'notes': jsonEncode(healedBreakdown.toMap()),
+          },
+          where: 'id = ?',
+          whereArgs: [orderId],
+        ).then((_) {
+          ShopSyncService.instance.syncOrder(orderId);
+        }));
+      }
+    }
 
     return OrderDetails(order: order, items: items);
   }

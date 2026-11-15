@@ -9,13 +9,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/firebase_options.dart';
 import 'package:shop/models/customer.dart';
+import 'package:shop/models/order.dart';
 import 'package:shop/models/product.dart';
 import 'package:shop/models/shop_profile.dart';
+import 'package:shop/services/shop_customization_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 enum SyncStatus {
   notConfigured,
   connecting,
+  pendingApproval,
   connected,
   syncing,
   offline,
@@ -41,15 +44,63 @@ class ShopSyncService extends ChangeNotifier {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _productsSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _ordersSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _customersSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _deviceSub;
+
+  StaffDevice? _myDevicePermissions;
 
   ShopProfile? get currentShop => _currentShop;
   SyncStatus get status => _status;
   String get statusMessage => _statusMessage;
   DateTime? get lastSyncTime => _lastSyncTime;
-  bool get isConnected => _status == SyncStatus.connected || _status == SyncStatus.syncing;
-  bool get hasShop => _currentShop != null && _currentShop!.shopCode.isNotEmpty;
+  bool get isConnected =>
+      !ShopCustomizationService.instance.isPureOfflineMode &&
+      (_status == SyncStatus.connected || _status == SyncStatus.syncing);
+  bool get isPendingApproval =>
+      !ShopCustomizationService.instance.isPureOfflineMode &&
+      (_status == SyncStatus.pendingApproval ||
+          (_currentShop != null &&
+              !_currentShop!.isOwner &&
+              _currentShop!.isPending));
+  bool get hasShop =>
+      !ShopCustomizationService.instance.isPureOfflineMode &&
+      _currentShop != null &&
+      _currentShop!.shopCode.isNotEmpty;
   bool get isFirebaseAvailable => _isFirebaseAvailable;
   String get deviceId => _deviceId ?? 'unknown';
+
+  bool get canChangePrice =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop?.isOwner == true ||
+      (_myDevicePermissions?.canChangePrice ?? true);
+  bool get canManageProducts =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop?.isOwner == true ||
+      (_myDevicePermissions?.canManageProducts ?? true);
+  bool get canCloseOrders =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop?.isOwner == true ||
+      (_myDevicePermissions?.canCloseOrders ?? true);
+  bool get canChangeShortcuts =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop?.isOwner == true ||
+      (_myDevicePermissions?.canChangeShortcuts ?? true);
+  bool get canViewBillTotals =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop?.isOwner == true ||
+      (_myDevicePermissions?.canViewBillTotals ?? true);
+
+  String get currentUserOrDeviceName {
+    final shop = _currentShop;
+    if (shop != null) {
+      if (shop.isOwner) {
+        return shop.ownerName.trim().isNotEmpty ? shop.ownerName.trim() : 'Srikar';
+      } else {
+        return shop.staffName.trim().isNotEmpty ? shop.staffName.trim() : 'Staff';
+      }
+    }
+    return 'Srikar';
+  }
+
 
   /// Initializes the sync service, loads local shop profile, and tests Firebase.
   Future<void> initialize() async {
@@ -91,9 +142,32 @@ class ShopSyncService extends ChangeNotifier {
       }
 
       if (_currentShop != null && _isFirebaseAvailable) {
-        _status = SyncStatus.connected;
-        _statusMessage = 'Synced with ${_currentShop!.shopName}';
-        _startRealtimeListeners();
+        if (_currentShop!.isOwner) {
+          _status = SyncStatus.connected;
+          _statusMessage = 'Synced with ${_currentShop!.shopName}';
+          unawaited(FirebaseFirestore.instance
+              .collection('shops')
+              .doc(_currentShop!.shopCode)
+              .set({
+            ..._currentShop!.toMap(),
+            'updatedAt': FieldValue.serverTimestamp(),
+            'lastUpdatedByDevice': _deviceId,
+          }, SetOptions(merge: true)));
+          _startRealtimeListeners();
+          unawaited(_registerCurrentDevice());
+        } else {
+          // Staff Device
+          if (_currentShop!.isPending) {
+            _status = SyncStatus.pendingApproval;
+            _statusMessage = 'Waiting for shop owner to accept request...';
+            _listenForStaffApproval(_currentShop!.shopCode);
+          } else {
+            _status = SyncStatus.connected;
+            _statusMessage = 'Synced with ${_currentShop!.shopName}';
+            _startRealtimeListeners();
+            unawaited(_registerCurrentDevice());
+          }
+        }
       } else if (_currentShop != null) {
         _status = SyncStatus.offline;
         _statusMessage = 'Offline (Firebase pending setup)';
@@ -177,6 +251,7 @@ class ShopSyncService extends ChangeNotifier {
         _status = SyncStatus.connected;
         _statusMessage = 'Shop created and live synced!';
         _startRealtimeListeners();
+        unawaited(_registerCurrentDevice());
       } catch (e) {
         debugPrint('Error uploading shop to Firestore: $e');
         _status = SyncStatus.offline;
@@ -200,7 +275,12 @@ class ShopSyncService extends ChangeNotifier {
     _statusMessage = 'Connecting to shop $shopCode...';
     notifyListeners();
 
-    final normalizedCode = shopCode.trim().toUpperCase();
+    var normalizedCode = shopCode.trim().toUpperCase().replaceAll(' ', '');
+    if (!normalizedCode.contains('-') && normalizedCode.startsWith('SH') && normalizedCode.length > 2) {
+      normalizedCode = 'SH-${normalizedCode.substring(2)}';
+    } else if (!normalizedCode.startsWith('SH-') && normalizedCode.length == 4) {
+      normalizedCode = 'SH-$normalizedCode';
+    }
 
     if (!_isFirebaseAvailable) {
       _status = SyncStatus.error;
@@ -213,17 +293,34 @@ class ShopSyncService extends ChangeNotifier {
       final firestore = FirebaseFirestore.instance;
       final doc = await firestore.collection('shops').doc(normalizedCode).get();
 
-      if (!doc.exists || doc.data() == null) {
-        _status = SyncStatus.error;
-        _statusMessage = 'Shop code "$normalizedCode" not found! Please check and try again.';
-        notifyListeners();
-        return false;
+      Map<String, dynamic> data;
+      if (doc.exists && doc.data() != null) {
+        data = doc.data()!;
+      } else {
+        // Fallback: check if subcollections exist under this shopCode
+        final prodCheck = await firestore
+            .collection('shops')
+            .doc(normalizedCode)
+            .collection('products')
+            .limit(1)
+            .get();
+        if (prodCheck.docs.isNotEmpty) {
+          data = {
+            'shopCode': normalizedCode,
+            'shopName': 'Shop ($normalizedCode)',
+          };
+        } else {
+          _status = SyncStatus.error;
+          _statusMessage = 'Shop code "$normalizedCode" not found! Please check and try again.';
+          notifyListeners();
+          return false;
+        }
       }
 
-      final data = doc.data()!;
       final profile = ShopProfile.fromMap(data).copyWith(
         role: 'staff',
         staffName: staffName.trim().isNotEmpty ? staffName.trim() : 'Staff',
+        status: 'pending',
         lastSyncedAt: DateTime.now(),
         isCloudEnabled: true,
       );
@@ -232,18 +329,35 @@ class ShopSyncService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefKeyShopProfile, profile.toJson());
 
-      // Download all existing products, customers, and orders from cloud
-      await downloadCloudDataToLocal();
+      // Register device request as 'pending' in Firestore
+      await firestore
+          .collection('shops')
+          .doc(normalizedCode)
+          .collection('devices')
+          .doc(_deviceId!)
+          .set({
+        'deviceId': _deviceId,
+        'staffName': profile.staffName,
+        'role': 'staff',
+        'status': 'pending',
+        'canChangePrice': false,
+        'canManageProducts': false,
+        'canCloseOrders': true,
+        'canChangeShortcuts': false,
+        'canViewBillTotals': true,
+        'requestedAt': FieldValue.serverTimestamp(),
+        'lastActive': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-      _status = SyncStatus.connected;
-      _statusMessage = 'Successfully joined ${profile.shopName}!';
-      _startRealtimeListeners();
+      _status = SyncStatus.pendingApproval;
+      _statusMessage = 'Request sent to shop owner. Waiting for approval...';
+      _listenForStaffApproval(normalizedCode);
       notifyListeners();
       return true;
     } catch (e) {
       debugPrint('Error joining shop: $e');
       _status = SyncStatus.error;
-      _statusMessage = 'Could not join shop: $e';
+      _statusMessage = _cleanErrorMessage(e);
       notifyListeners();
       return false;
     }
@@ -267,7 +381,15 @@ class ShopSyncService extends ChangeNotifier {
     final shopCode = _currentShop!.shopCode;
     final db = await _dbHelper.database;
 
-    // 1. Products
+    try {
+      // 0. Ensure root Shop Profile document exists in Firestore!
+      await firestore.collection('shops').doc(shopCode).set({
+        ..._currentShop!.toMap(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastUpdatedByDevice': _deviceId,
+      }, SetOptions(merge: true));
+
+      // 1. Products
     final products = await db.query('products');
     final productBatch = firestore.batch();
     for (final p in products) {
@@ -344,10 +466,19 @@ class ShopSyncService extends ChangeNotifier {
         });
       }
 
+      final notes = o['notes'] as String?;
+      final breakdown = BillBreakdown.fromJsonString(notes);
+      final customerPhone =
+          (o['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final takenBy =
+          (o['taken_by'] as String?) ?? breakdown?.takenBy ?? 'Store';
+
       await firestore.collection('shops').doc(shopCode).collection('orders').doc('$orderId').set({
         'id': o['id'],
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
+        'customer_phone': customerPhone,
+        'taken_by': takenBy,
         'created_at': o['created_at'],
         'status': o['status'],
         'notes': o['notes'],
@@ -358,8 +489,17 @@ class ShopSyncService extends ChangeNotifier {
       }, SetOptions(merge: true));
     }
 
-    _lastSyncTime = DateTime.now();
-    notifyListeners();
+      _lastSyncTime = DateTime.now();
+      _status = SyncStatus.connected;
+      _statusMessage = 'Synced with ${_currentShop!.shopName}';
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error uploading local data to cloud: $e');
+      _status = SyncStatus.offline;
+      _statusMessage = _cleanErrorMessage(e);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Downloads all cloud products, customers, and orders into local SQLite
@@ -369,7 +509,8 @@ class ShopSyncService extends ChangeNotifier {
     final shopCode = _currentShop!.shopCode;
     final db = await _dbHelper.database;
 
-    // 1. Sync Products
+    try {
+      // 1. Sync Products
     final productSnaps = await firestore.collection('shops').doc(shopCode).collection('products').get();
     for (final doc in productSnaps.docs) {
       final data = doc.data();
@@ -401,11 +542,43 @@ class ShopSyncService extends ChangeNotifier {
     for (final doc in orderSnaps.docs) {
       final data = doc.data();
       final orderId = data['id'] as int;
+      final rawNotes = data['notes'] as String?;
+      final incomingBreakdown = BillBreakdown.fromJsonString(rawNotes);
+      final incomingPhone = (data['customer_phone'] as String?) ??
+          incomingBreakdown?.customerPhone;
+      final incomingTakenBy =
+          (data['taken_by'] as String?) ?? incomingBreakdown?.takenBy ?? 'Store';
+
+      int localCustId = data['customer_id'] as int? ?? 1;
+      final custName =
+          data['customer_name_snapshot'] as String? ?? 'Customer';
+      if (incomingPhone != null && incomingPhone.isNotEmpty) {
+        final existingCust = await db.query('customers',
+            where: 'phone = ?', whereArgs: [incomingPhone]);
+        if (existingCust.isNotEmpty) {
+          localCustId = existingCust.first['id'] as int;
+        } else {
+          localCustId = await db.insert('customers', {
+            'name': custName,
+            'phone': incomingPhone,
+            'created_at': DateTime.now().toIso8601String(),
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+      } else {
+        final existingCust = await db.query('customers',
+            where: 'LOWER(TRIM(name)) = ?',
+            whereArgs: [custName.trim().toLowerCase()]);
+        if (existingCust.isNotEmpty) {
+          localCustId = existingCust.first['id'] as int;
+        }
+      }
 
       await db.insert('orders', {
         'id': orderId,
-        'customer_id': data['customer_id'],
-        'customer_name_snapshot': data['customer_name_snapshot'],
+        'customer_id': localCustId,
+        'customer_name_snapshot': custName,
+        'customer_phone': incomingPhone,
+        'taken_by': incomingTakenBy,
         'created_at': data['created_at'],
         'status': data['status'],
         'notes': data['notes'],
@@ -449,8 +622,17 @@ class ShopSyncService extends ChangeNotifier {
       }
     }
 
-    _lastSyncTime = DateTime.now();
-    notifyListeners();
+      _lastSyncTime = DateTime.now();
+      _status = SyncStatus.connected;
+      _statusMessage = 'Synced with ${_currentShop!.shopName}';
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error downloading cloud data to local: $e');
+      _status = SyncStatus.offline;
+      _statusMessage = _cleanErrorMessage(e);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Push a single newly created or updated order to the cloud in real-time
@@ -502,10 +684,19 @@ class ShopSyncService extends ChangeNotifier {
         });
       }
 
+      final notes = o['notes'] as String?;
+      final breakdown = BillBreakdown.fromJsonString(notes);
+      final customerPhone =
+          (o['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final takenBy =
+          (o['taken_by'] as String?) ?? breakdown?.takenBy ?? 'Store';
+
       await firestore.collection('shops').doc(shopCode).collection('orders').doc('$orderId').set({
         'id': o['id'],
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
+        'customer_phone': customerPhone,
+        'taken_by': takenBy,
         'created_at': o['created_at'],
         'status': o['status'],
         'notes': o['notes'],
@@ -582,10 +773,44 @@ class ShopSyncService extends ChangeNotifier {
           if (data['lastUpdatedByDevice'] == _deviceId) continue;
 
           final orderId = data['id'] as int;
+          final rawNotes = data['notes'] as String?;
+          final incomingBreakdown = BillBreakdown.fromJsonString(rawNotes);
+          final incomingPhone = (data['customer_phone'] as String?) ??
+              incomingBreakdown?.customerPhone;
+          final incomingTakenBy = (data['taken_by'] as String?) ??
+              incomingBreakdown?.takenBy ??
+              'Store';
+
+          int localCustId = data['customer_id'] as int? ?? 1;
+          final custName =
+              data['customer_name_snapshot'] as String? ?? 'Customer';
+          if (incomingPhone != null && incomingPhone.isNotEmpty) {
+            final existingCust = await db.query('customers',
+                where: 'phone = ?', whereArgs: [incomingPhone]);
+            if (existingCust.isNotEmpty) {
+              localCustId = existingCust.first['id'] as int;
+            } else {
+              localCustId = await db.insert('customers', {
+                'name': custName,
+                'phone': incomingPhone,
+                'created_at': DateTime.now().toIso8601String(),
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            }
+          } else {
+            final existingCust = await db.query('customers',
+                where: 'LOWER(TRIM(name)) = ?',
+                whereArgs: [custName.trim().toLowerCase()]);
+            if (existingCust.isNotEmpty) {
+              localCustId = existingCust.first['id'] as int;
+            }
+          }
+
           await db.insert('orders', {
             'id': orderId,
-            'customer_id': data['customer_id'],
-            'customer_name_snapshot': data['customer_name_snapshot'],
+            'customer_id': localCustId,
+            'customer_name_snapshot': custName,
+            'customer_phone': incomingPhone,
+            'taken_by': incomingTakenBy,
             'created_at': data['created_at'],
             'status': data['status'],
             'notes': data['notes'],
@@ -686,6 +911,223 @@ class ShopSyncService extends ChangeNotifier {
       _lastSyncTime = DateTime.now();
       notifyListeners();
     });
+
+    // 4. Device permissions live stream (for staff devices)
+    if (_currentShop?.isOwner == false && _deviceId != null) {
+      _deviceSub = firestore
+          .collection('shops')
+          .doc(shopCode)
+          .collection('devices')
+          .doc(_deviceId!)
+          .snapshots()
+          .listen((snap) async {
+        if (snap.exists && snap.data() != null) {
+          final data = snap.data()!;
+          _myDevicePermissions = StaffDevice.fromMap(data);
+          final devStatus = (data['status'] as String? ?? 'approved').toLowerCase();
+          if (devStatus == 'rejected') {
+            _status = SyncStatus.error;
+            _statusMessage = 'Access revoked by shop owner.';
+            await leaveShop();
+          }
+          notifyListeners();
+        }
+      });
+    }
+  }
+
+  void _listenForStaffApproval(String shopCode) {
+    if (_deviceId == null || !_isFirebaseAvailable) return;
+    _deviceSub?.cancel();
+    _deviceSub = FirebaseFirestore.instance
+        .collection('shops')
+        .doc(shopCode)
+        .collection('devices')
+        .doc(_deviceId!)
+        .snapshots()
+        .listen((snap) async {
+      if (!snap.exists || snap.data() == null) return;
+      final data = snap.data()!;
+      _myDevicePermissions = StaffDevice.fromMap(data);
+      final devStatus = (data['status'] as String? ?? 'pending').toLowerCase();
+      if (devStatus == 'approved') {
+        if (_currentShop != null && _currentShop!.isPending) {
+          _currentShop = _currentShop!.copyWith(status: 'approved');
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_prefKeyShopProfile, _currentShop!.toJson());
+          _status = SyncStatus.connected;
+          _statusMessage = 'Approved! Synced with ${_currentShop!.shopName}';
+          await downloadCloudDataToLocal();
+          _startRealtimeListeners();
+          notifyListeners();
+        }
+      } else if (devStatus == 'rejected') {
+        _status = SyncStatus.error;
+        _statusMessage = 'Join request was declined by the shop owner.';
+        await leaveShop();
+        notifyListeners();
+      }
+    });
+  }
+
+  Future<void> _registerCurrentDevice() async {
+    if (_currentShop == null || !_isFirebaseAvailable || _deviceId == null) return;
+    try {
+      final docRef = FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .collection('devices')
+          .doc(_deviceId!);
+
+      final existing = await docRef.get();
+      final isOwner = _currentShop!.isOwner;
+      final effectiveName = isOwner
+          ? (_currentShop!.ownerName.isNotEmpty ? _currentShop!.ownerName : 'Srikar')
+          : (_currentShop!.staffName.isNotEmpty ? _currentShop!.staffName : 'Staff');
+
+      if (!existing.exists) {
+        await docRef.set({
+          'deviceId': _deviceId,
+          'staffName': effectiveName,
+          'role': _currentShop!.role,
+          'status': isOwner ? 'approved' : _currentShop!.status,
+          'canChangePrice': isOwner,
+          'canManageProducts': isOwner,
+          'canCloseOrders': true,
+          'canChangeShortcuts': isOwner,
+          'canViewBillTotals': true,
+          'lastActive': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } else {
+        await docRef.set({
+          'deviceId': _deviceId,
+          'staffName': effectiveName,
+          'role': _currentShop!.role,
+          if (isOwner) 'status': 'approved',
+          'lastActive': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint('Error registering device: $e');
+    }
+  }
+
+  Stream<List<StaffDevice>> streamConnectedDevices() {
+    if (_currentShop == null || !_isFirebaseAvailable) {
+      return Stream.value([]);
+    }
+    return FirebaseFirestore.instance
+        .collection('shops')
+        .doc(_currentShop!.shopCode)
+        .collection('devices')
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              try {
+                final map = Map<String, dynamic>.from(d.data());
+                map['deviceId'] = d.id;
+                return StaffDevice.fromMap(map);
+              } catch (e) {
+                debugPrint('Error parsing StaffDevice ${d.id}: $e');
+                return StaffDevice(
+                  deviceId: d.id,
+                  staffName: (d.data()['staffName'] as String?) ?? 'Staff Device',
+                  role: (d.data()['role'] as String?) ?? 'staff',
+                  status: (d.data()['status'] as String?) ?? 'approved',
+                );
+              }
+            }).toList());
+  }
+
+  Future<void> approveStaffDevice(String targetDeviceId) async {
+    if (_currentShop == null || !_isFirebaseAvailable) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .collection('devices')
+          .doc(targetDeviceId)
+          .set({
+        'status': 'approved',
+        'approvedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error approving device: $e');
+    }
+  }
+
+  Future<void> rejectStaffDevice(String targetDeviceId) async {
+    if (_currentShop == null || !_isFirebaseAvailable) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .collection('devices')
+          .doc(targetDeviceId)
+          .delete();
+    } catch (e) {
+      debugPrint('Error rejecting device: $e');
+    }
+  }
+
+  Future<void> revokeStaffDevice(String targetDeviceId) async {
+    if (_currentShop == null || !_isFirebaseAvailable) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .collection('devices')
+          .doc(targetDeviceId)
+          .set({
+        'status': 'rejected',
+        'revokedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error revoking device: $e');
+    }
+  }
+
+  Future<void> updateDevicePermission({
+    required String targetDeviceId,
+    required String permissionKey,
+    required bool value,
+  }) async {
+    if (_currentShop == null || !_isFirebaseAvailable) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .collection('devices')
+          .doc(targetDeviceId)
+          .set({
+        permissionKey: value,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error updating device permission: $e');
+    }
+  }
+
+  Future<void> updateShopName(String newName) async {
+    if (_currentShop == null) return;
+    _currentShop = _currentShop!.copyWith(shopName: newName.trim());
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKeyShopProfile, _currentShop!.toJson());
+    if (_isFirebaseAvailable) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('shops')
+            .doc(_currentShop!.shopCode)
+            .set({
+          'shopName': _currentShop!.shopName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Error updating shop name online: $e');
+      }
+    }
+    notifyListeners();
   }
 
   void _stopRealtimeListeners() {
@@ -695,6 +1137,8 @@ class ShopSyncService extends ChangeNotifier {
     _productsSub = null;
     _customersSub?.cancel();
     _customersSub = null;
+    _deviceSub?.cancel();
+    _deviceSub = null;
   }
 
   @override
@@ -703,4 +1147,5 @@ class ShopSyncService extends ChangeNotifier {
     super.dispose();
   }
 }
+
 
