@@ -90,6 +90,9 @@ class DatabaseHelper {
           await db.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid'");
         } catch (_) {}
         try {
+          await db.execute("ALTER TABLE customers ADD COLUMN credit_limit REAL NOT NULL DEFAULT 0.0");
+        } catch (_) {}
+        try {
           await db.execute('''
             CREATE TABLE IF NOT EXISTS customer_payments (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,6 +138,7 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         phone TEXT,
         address TEXT,
+        credit_limit REAL NOT NULL DEFAULT 0.0,
         created_at TEXT NOT NULL
       )
     ''');
@@ -525,6 +529,7 @@ class DatabaseHelper {
         c.id as customer_id,
         c.name as customer_name,
         c.phone as customer_phone,
+        COALESCE(c.credit_limit, 0.0) as credit_limit,
         COALESCE(SUM(o.estimate_total), 0) as total_billed,
         COALESCE(SUM(o.paid_amount), 0) as total_paid,
         (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due,
@@ -534,7 +539,7 @@ class DatabaseHelper {
       FROM customers c
       LEFT JOIN orders o ON c.id = o.customer_id
       GROUP BY c.id
-      HAVING balance_due > 0.01 OR total_billed > 0
+      HAVING balance_due > 0.01 OR total_billed > 0 OR credit_limit > 0
       ORDER BY balance_due DESC, c.name ASC
     ''';
     final rows = await db.rawQuery(query);
@@ -552,8 +557,61 @@ class DatabaseHelper {
         }
       }
       map['days_overdue'] = daysOverdue;
+
+      final limit = (map['credit_limit'] as num?)?.toDouble() ?? 0.0;
+      final due = (map['balance_due'] as num?)?.toDouble() ?? 0.0;
+      map['credit_limit'] = limit;
+      map['is_over_limit'] = limit > 0 && due > limit;
+      map['available_credit'] = limit > 0 ? (limit - due) : 0.0;
       return map;
     }).toList();
+  }
+
+  /// Updates a customer's maximum credit limit (Khata limit)
+  Future<void> updateCustomerCreditLimit(int customerId, double creditLimit) async {
+    final db = await database;
+    await db.update(
+      'customers',
+      {'credit_limit': creditLimit},
+      where: 'id = ?',
+      whereArgs: [customerId],
+    );
+  }
+
+  /// Checks credit limit vs current balance for an order
+  Future<Map<String, dynamic>> getCustomerCreditStatus(int customerId) async {
+    final db = await database;
+    final res = await db.rawQuery('''
+      SELECT 
+        c.id,
+        c.name,
+        COALESCE(c.credit_limit, 0.0) as credit_limit,
+        (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due
+      FROM customers c
+      LEFT JOIN orders o ON c.id = o.customer_id
+      WHERE c.id = ?
+      GROUP BY c.id
+    ''', [customerId]);
+
+    if (res.isEmpty) {
+      return {
+        'credit_limit': 0.0,
+        'balance_due': 0.0,
+        'is_over_limit': false,
+        'available_credit': 0.0,
+      };
+    }
+    final row = res.first;
+    final limit = (row['credit_limit'] as num?)?.toDouble() ?? 0.0;
+    final due = (row['balance_due'] as num?)?.toDouble() ?? 0.0;
+    final isOver = limit > 0 && due > limit;
+    final available = limit > 0 ? (limit - due) : 0.0;
+    return {
+      'credit_limit': limit,
+      'balance_due': due,
+      'is_over_limit': isOver,
+      'available_credit': available,
+    };
   }
 
   /// Retrieves a chronological combined ledger of all debit (bills/orders)
@@ -677,16 +735,22 @@ class DatabaseHelper {
     double overdue30Days = 0;
     int dueCustomersCount = 0;
     int settledCustomersCount = 0;
+    int overLimitCustomersCount = 0;
 
     for (final item in list) {
       final due = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
       final billed = (item['total_billed'] as num?)?.toDouble() ?? 0.0;
       final paid = (item['total_paid'] as num?)?.toDouble() ?? 0.0;
       final days = (item['days_overdue'] as num?)?.toInt() ?? 0;
+      final isOver = item['is_over_limit'] as bool? ?? false;
 
       totalDue += due;
       totalBilled += billed;
       totalPaid += paid;
+
+      if (isOver) {
+        overLimitCustomersCount++;
+      }
 
       if (due > 0.01) {
         dueCustomersCount++;
@@ -722,6 +786,7 @@ class DatabaseHelper {
       'overdue30Days': overdue30Days,
       'dueCustomersCount': dueCustomersCount,
       'settledCustomersCount': settledCustomersCount,
+      'overLimitCustomersCount': overLimitCustomersCount,
       'collectedToday': collectedToday,
       'totalCustomers': list.length,
     };

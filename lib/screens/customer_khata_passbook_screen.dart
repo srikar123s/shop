@@ -40,6 +40,7 @@ class _CustomerKhataPassbookScreenState
   double _totalBilled = 0.0;
   double _totalPaid = 0.0;
   double _totalDue = 0.0;
+  double _creditLimit = 0.0;
   String _filterType = 'all'; // 'all', 'debit', 'credit'
   bool _newestFirst = true;
 
@@ -53,6 +54,8 @@ class _CustomerKhataPassbookScreenState
     setState(() => _loading = true);
     final entries =
         await DatabaseHelper.instance.getCustomerKhataLedger(widget.customerId);
+    final status =
+        await DatabaseHelper.instance.getCustomerCreditStatus(widget.customerId);
 
     double billed = 0.0;
     double paid = 0.0;
@@ -67,6 +70,7 @@ class _CustomerKhataPassbookScreenState
       _totalBilled = billed;
       _totalPaid = paid;
       _totalDue = (billed - paid) > 0.01 ? (billed - paid) : 0.0;
+      _creditLimit = (status['credit_limit'] as num?)?.toDouble() ?? 0.0;
       _loading = false;
     });
   }
@@ -526,6 +530,83 @@ class _CustomerKhataPassbookScreenState
     }
   }
 
+  Future<void> _showEditCreditLimitDialog() async {
+    final limitCtrl = TextEditingController(
+      text: _creditLimit > 0 ? _creditLimit.toStringAsFixed(0) : '',
+    );
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.shield_outlined, color: Color(0xFF0F766E)),
+            SizedBox(width: 8),
+            Text('Set Credit Limit',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Set maximum allowable credit for "${widget.customerName}". The app alerts you whenever a bill or balance exceeds this threshold.',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: limitCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Credit Limit (₹)',
+                hintText: 'e.g. 25000 (0 for no limit)',
+                border: OutlineInputBorder(),
+                prefixText: '₹ ',
+                isDense: true,
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style:
+                FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save Limit'),
+          ),
+        ],
+      ),
+    );
+
+    if (updated == true && mounted) {
+      final newLimit = double.tryParse(limitCtrl.text.trim()) ?? 0.0;
+      await DatabaseHelper.instance.updateCustomerCreditLimit(
+        widget.customerId,
+        newLimit,
+      );
+      await _loadLedger();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newLimit > 0
+                ? 'Credit limit updated to ₹ ${newLimit.toStringAsFixed(0)}'
+                : 'Credit limit removed (Unlimited credit)',
+          ),
+          backgroundColor: const Color(0xFF0F766E),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final currency = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ');
@@ -709,6 +790,102 @@ class _CustomerKhataPassbookScreenState
                     ],
                   ),
                 ),
+                if (_creditLimit > 0) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _totalDue > _creditLimit
+                          ? Colors.red.shade900.withValues(alpha: 0.35)
+                          : Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _totalDue > _creditLimit
+                            ? Colors.redAccent
+                            : Colors.white24,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  _totalDue > _creditLimit
+                                      ? Icons.warning_amber_rounded
+                                      : Icons.shield_outlined,
+                                  size: 15,
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _totalDue > _creditLimit
+                                      ? '⚠️ EXCEEDED BY ₹ ${(_totalDue - _creditLimit).toStringAsFixed(0)}'
+                                      : 'Credit Limit: ₹ ${_creditLimit.toStringAsFixed(0)}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            InkWell(
+                              onTap: _showEditCreditLimitDialog,
+                              child: const Padding(
+                                padding: EdgeInsets.all(2),
+                                child: Text(
+                                  'Edit Limit',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        LinearProgressIndicator(
+                          value: (_totalDue / _creditLimit).clamp(0.0, 1.0),
+                          backgroundColor: Colors.white24,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            _totalDue > _creditLimit
+                                ? Colors.amberAccent
+                                : Colors.greenAccent,
+                          ),
+                          minHeight: 4,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: _showEditCreditLimitDialog,
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.shield_outlined,
+                            size: 14, color: Colors.white70),
+                        SizedBox(width: 4),
+                        Text(
+                          'Set Credit Limit (Optional)',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

@@ -62,6 +62,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final addressCtrl = TextEditingController();
+    final creditLimitCtrl = TextEditingController();
 
     final result = await showDialog<Customer>(
       context: context,
@@ -88,6 +89,16 @@ class _CustomerScreenState extends State<CustomerScreen> {
                 TextField(
                   controller: addressCtrl,
                   decoration: InputDecoration(labelText: s.t('address')),
+                ),
+                TextField(
+                  controller: creditLimitCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Credit Limit (Khata Max ₹)',
+                    hintText: 'e.g. 25000 (0 for no limit)',
+                    prefixText: '₹ ',
+                  ),
                 ),
               ],
             ),
@@ -116,10 +127,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   );
                   return;
                 }
+                final creditLimit =
+                    double.tryParse(creditLimitCtrl.text.trim()) ?? 0.0;
                 final customer = await widget.customerRepository.createCustomer(
                   name: name,
                   phone: phone,
                   address: addressCtrl.text,
+                  creditLimit: creditLimit,
                 );
                 if (context.mounted) {
                   Navigator.pop(context, customer);
@@ -143,6 +157,11 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final nameCtrl = TextEditingController(text: customer.name);
     final phoneCtrl = TextEditingController(text: customer.phone ?? '');
     final addressCtrl = TextEditingController(text: customer.address ?? '');
+    final creditLimitCtrl = TextEditingController(
+      text: customer.creditLimit > 0
+          ? customer.creditLimit.toStringAsFixed(0)
+          : '',
+    );
 
     final updated = await showDialog<bool>(
       context: context,
@@ -166,6 +185,16 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   controller: addressCtrl,
                   decoration: InputDecoration(labelText: s.t('address')),
                 ),
+                TextField(
+                  controller: creditLimitCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Credit Limit (Khata Max ₹)',
+                    hintText: 'e.g. 25000 (0 for no limit)',
+                    prefixText: '₹ ',
+                  ),
+                ),
               ],
             ),
           ),
@@ -179,11 +208,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
                 if (nameCtrl.text.trim().isEmpty || customer.id == null) {
                   return;
                 }
+                final creditLimit =
+                    double.tryParse(creditLimitCtrl.text.trim()) ?? 0.0;
                 await widget.customerRepository.updateCustomer(
                   id: customer.id!,
                   name: nameCtrl.text,
                   phone: phoneCtrl.text,
                   address: addressCtrl.text,
+                  creditLimit: creditLimit,
                 );
                 if (context.mounted) {
                   Navigator.pop(context, true);
@@ -711,24 +743,40 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold),
                                 ),
-                                subtitle: Row(
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.phone_outlined,
-                                        size: 13,
-                                        color: Colors.grey.shade500),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        customer.phone?.isNotEmpty == true
-                                            ? customer.phone!
-                                            : s.t('phoneNotAdded'),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                            fontSize: 12),
-                                      ),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.phone_outlined,
+                                            size: 13,
+                                            color: Colors.grey.shade500),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            customer.phone?.isNotEmpty == true
+                                                ? customer.phone!
+                                                : s.t('phoneNotAdded'),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                                color: Colors.grey.shade600,
+                                                fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
                                     ),
+                                    if (customer.creditLimit > 0) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Credit Limit: ₹ ${customer.creditLimit.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.teal.shade800,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                                 trailing: Row(

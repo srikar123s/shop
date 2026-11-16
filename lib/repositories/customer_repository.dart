@@ -51,6 +51,7 @@ class CustomerRepository {
     required String name,
     String? phone,
     String? address,
+    double creditLimit = 0.0,
   }) async {
     final cleanPhone = phone?.trim().isEmpty == true ? null : phone?.trim();
     final existing = await findByNameAndPhone(name, cleanPhone);
@@ -58,12 +59,14 @@ class CustomerRepository {
       if ((cleanPhone != null && cleanPhone != existing.phone) ||
           (address != null &&
               address.trim().isNotEmpty &&
-              address != existing.address)) {
+              address != existing.address) ||
+          (creditLimit > 0 && creditLimit != existing.creditLimit)) {
         await updateCustomer(
           id: existing.id!,
           name: name.trim().isNotEmpty ? name.trim() : existing.name,
           phone: cleanPhone ?? existing.phone,
           address: address ?? existing.address,
+          creditLimit: creditLimit > 0 ? creditLimit : existing.creditLimit,
         );
         return (await getCustomerById(existing.id!))!;
       }
@@ -75,6 +78,7 @@ class CustomerRepository {
       name: name.trim(),
       phone: cleanPhone,
       address: address?.trim().isEmpty == true ? null : address?.trim(),
+      creditLimit: creditLimit,
       createdAt: DateTime.now(),
     );
 
@@ -89,15 +93,21 @@ class CustomerRepository {
     required String name,
     String? phone,
     String? address,
+    double? creditLimit,
   }) async {
     final db = await _databaseHelper.database;
+    final updates = <String, Object?>{
+      'name': name.trim(),
+      'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+      'address': address?.trim().isEmpty == true ? null : address?.trim(),
+    };
+    if (creditLimit != null) {
+      updates['credit_limit'] = creditLimit;
+    }
+
     await db.update(
       'customers',
-      {
-        'name': name.trim(),
-        'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-        'address': address?.trim().isEmpty == true ? null : address?.trim(),
-      },
+      updates,
       where: 'id = ?',
       whereArgs: [id],
     );

@@ -69,6 +69,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
 
       if (_filter == 'due' && due <= 0.01) return false;
       if (_filter == 'overdue30' && (due <= 0.01 || days < 30)) return false;
+      if (_filter == 'over_limit' && item['is_over_limit'] != true) return false;
       if (_filter == 'settled' && due > 0.01) return false;
 
       final name = (item['customer_name'] as String?)?.toLowerCase() ?? '';
@@ -543,6 +544,8 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     final dueCount = (_metrics['dueCustomersCount'] as num?)?.toInt() ?? 0;
     final settledCount =
         (_metrics['settledCustomersCount'] as num?)?.toInt() ?? 0;
+    final overLimitCount =
+        (_metrics['overLimitCustomersCount'] as num?)?.toInt() ?? 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -632,13 +635,13 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                // 3 Quick Analytics Stat Badges
+                // Quick Analytics Stat Badges
                 Row(
                   children: [
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
+                            horizontal: 6, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(8),
@@ -647,9 +650,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              '⚠️ Overdue >30d',
+                              '⚠️ >30d Due',
                               style: TextStyle(
-                                  color: Color(0xFFFCA5A5), fontSize: 10),
+                                  color: Color(0xFFFCA5A5), fontSize: 9),
                             ),
                             Text(
                               currency.format(overdue30),
@@ -663,25 +666,33 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
+                            horizontal: 6, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.2),
+                          color: overLimitCount > 0
+                              ? Colors.red.shade900.withValues(alpha: 0.5)
+                              : Colors.black.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(8),
+                          border: overLimitCount > 0
+                              ? Border.all(color: Colors.redAccent, width: 0.8)
+                              : null,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              '🟢 Today\'s Recovery',
+                            Text(
+                              '🛑 Over Limit',
                               style: TextStyle(
-                                  color: Color(0xFF86EFAC), fontSize: 10),
+                                  color: overLimitCount > 0
+                                      ? Colors.amberAccent
+                                      : const Color(0xFFFCA5A5),
+                                  fontSize: 9),
                             ),
                             Text(
-                              currency.format(collectedToday),
+                              '$overLimitCount Accounts',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -692,11 +703,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
+                            horizontal: 6, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(8),
@@ -705,12 +716,12 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              '✅ Settled (₹0)',
+                              '🟢 Recovery',
                               style: TextStyle(
-                                  color: Color(0xFFE2E8F0), fontSize: 10),
+                                  color: Color(0xFF86EFAC), fontSize: 9),
                             ),
                             Text(
-                              '$settledCount Accounts',
+                              currency.format(collectedToday),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -831,6 +842,21 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                     },
                     visualDensity: VisualDensity.compact,
                   ),
+                  if (overLimitCount > 0) ...[
+                    const SizedBox(width: 6),
+                    ChoiceChip(
+                      label: Text('🛑 Over Limit ($overLimitCount)'),
+                      selected: _filter == 'over_limit',
+                      selectedColor: Colors.red.shade200,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() => _filter = 'over_limit');
+                          _applyFilterAndSort();
+                        }
+                      },
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
                   const SizedBox(width: 6),
                   ChoiceChip(
                     label: const Text('⚠️ Overdue >30d'),
@@ -1067,6 +1093,36 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                                   color: Colors.grey.shade600,
                                                 ),
                                               ),
+                                              if ((item['credit_limit'] as num?)?.toDouble() != null &&
+                                                  (item['credit_limit'] as num)!.toDouble() > 0) ...[
+                                                const SizedBox(height: 3),
+                                                Row(
+                                                  children: [
+                                                    Icon(
+                                                      item['is_over_limit'] == true
+                                                          ? Icons.warning_amber_rounded
+                                                          : Icons.shield_outlined,
+                                                      size: 13,
+                                                      color: item['is_over_limit'] == true
+                                                          ? Colors.red.shade800
+                                                          : Colors.teal.shade700,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      item['is_over_limit'] == true
+                                                          ? '⚠️ Over Limit by ₹ ${(balanceDue - (item['credit_limit'] as num).toDouble()).toStringAsFixed(0)} (Limit ₹ ${(item['credit_limit'] as num).toDouble().toStringAsFixed(0)})'
+                                                          : 'Credit Limit: ₹ ${(item['credit_limit'] as num).toDouble().toStringAsFixed(0)}',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: item['is_over_limit'] == true
+                                                            ? Colors.red.shade800
+                                                            : Colors.teal.shade800,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
                                             ],
                                           ),
                                         ),

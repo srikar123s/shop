@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shop/database/database_helper.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/services/draft_order_service.dart';
 import 'package:shop/services/share_service.dart';
+import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/top_notification_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
@@ -32,6 +34,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   bool _applyDiscount = false;
   String _discountType = 'flat'; // 'flat' or 'percent'
   double _discountValue = 0.0;
+  double _currentCustomerDue = 0.0;
 
   late final TextEditingController _estimateController;
   late final TextEditingController _discountController;
@@ -40,6 +43,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   @override
   void initState() {
     super.initState();
+    _loadCustomerCredit();
     _applyGst = widget.draftOrder.applyGst;
     _gstRate = widget.draftOrder.gstRate > 0 ? widget.draftOrder.gstRate : 18.0;
     _otherCharges.addAll(widget.draftOrder.otherCharges);
@@ -327,6 +331,20 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     );
   }
 
+  Future<void> _loadCustomerCredit() async {
+    final customerId = widget.draftOrder.customer.id;
+    if (customerId != null) {
+      final status =
+          await DatabaseHelper.instance.getCustomerCreditStatus(customerId);
+      if (mounted) {
+        setState(() {
+          _currentCustomerDue =
+              (status['balance_due'] as num?)?.toDouble() ?? 0.0;
+        });
+      }
+    }
+  }
+
   void _removeOtherCharge(int index) {
     setState(() {
       _otherCharges.removeAt(index);
@@ -335,9 +353,138 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   }
 
   Future<void> _saveOrder() async {
-    setState(() => _saving = true);
     final breakdown = _getBillBreakdown();
     final estimate = breakdown.grandTotal;
+
+    // Credit limit check for wholesale mode
+    final isWholesale = !ShopCustomizationService.instance.isPureOfflineMode &&
+        !const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false);
+    final customer = widget.draftOrder.customer;
+    final limit = customer.creditLimit;
+
+    if (isWholesale && limit > 0 && customer.id != null) {
+      final projected = _currentCustomerDue + estimate;
+      if (projected > limit) {
+        final exceededBy = projected - limit;
+        final allow = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    color: Colors.amber, size: 28),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Credit Limit Exceeded!',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Customer "${customer.name}" has a set credit limit of ₹ ${limit.toStringAsFixed(0)}.',
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Current Balance Due:',
+                              style: TextStyle(fontSize: 12)),
+                          Text('₹ ${_currentCustomerDue.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('This Bill Amount:',
+                              style: TextStyle(fontSize: 12)),
+                          Text('+ ₹ ${estimate.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: Colors.blue)),
+                        ],
+                      ),
+                      const Divider(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Projected Balance:',
+                              style: TextStyle(
+                                  fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text('₹ ${projected.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Colors.red.shade900)),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Exceeds Limit By:',
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.red)),
+                          Text('₹ ${exceededBy.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Colors.red.shade900)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Would you like to authorize this wholesale dispatch, or review/collect payment first?',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Back / Review Bill'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: Colors.amber.shade900),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Authorize & Proceed'),
+              ),
+            ],
+          ),
+        );
+        if (allow != true) {
+          return;
+        }
+      }
+    }
+
+    setState(() => _saving = true);
 
     final updatedDraft = widget.draftOrder.copyWith(
       applyGst: _applyGst,
@@ -481,6 +628,83 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                 ],
               ),
             ),
+            if (!ShopCustomizationService.instance.isPureOfflineMode &&
+                !const bool.fromEnvironment('STANDALONE_LOCAL',
+                    defaultValue: false) &&
+                widget.draftOrder.customer.creditLimit > 0) ...[
+              const SizedBox(height: 8),
+              Builder(
+                builder: (context) {
+                  final limit = widget.draftOrder.customer.creditLimit;
+                  final breakdown = _getBillBreakdown();
+                  final estimate = breakdown.grandTotal;
+                  final projected = _currentCustomerDue + estimate;
+                  final isOver = projected > limit;
+                  final diff =
+                      isOver ? (projected - limit) : (limit - projected);
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color:
+                          isOver ? Colors.red.shade50 : const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isOver
+                            ? Colors.red.shade300
+                            : const Color(0xFFBBF7D0),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isOver
+                              ? Icons.warning_amber_rounded
+                              : Icons.shield_outlined,
+                          size: 20,
+                          color: isOver
+                              ? Colors.red.shade800
+                              : const Color(0xFF15803D),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isOver
+                                    ? '⚠️ CREDIT LIMIT EXCEEDED BY ₹ ${diff.toStringAsFixed(2)}'
+                                    : '🛡️ Credit Limit: ₹ ${limit.toStringAsFixed(0)} (Safe)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: isOver
+                                      ? Colors.red.shade900
+                                      : const Color(0xFF166534),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                isOver
+                                    ? 'Due: ₹${_currentCustomerDue.toStringAsFixed(0)} + Bill: ₹${estimate.toStringAsFixed(0)} = New: ₹${projected.toStringAsFixed(0)} (Limit ₹${limit.toStringAsFixed(0)})'
+                                    : 'Current: ₹${_currentCustomerDue.toStringAsFixed(0)} • Remaining after bill: ₹${diff.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isOver
+                                      ? Colors.red.shade800
+                                      : const Color(0xFF15803D),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
             const SizedBox(height: 12),
             Expanded(
               child: ListView(
