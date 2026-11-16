@@ -634,131 +634,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 size: 200,
               ),
             ),
-            const SizedBox(height: 10),
-
-            // Payment & Khata Status Card
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: order.isFullyPaid
-                    ? Colors.teal.shade50
-                    : (order.paidAmount > 0
-                        ? Colors.amber.shade50
-                        : Colors.red.shade50),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: order.isFullyPaid
-                      ? Colors.teal.shade200
-                      : (order.paidAmount > 0
-                          ? Colors.amber.shade300
-                          : Colors.red.shade200),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            order.isFullyPaid
-                                ? Icons.check_circle
-                                : (order.paidAmount > 0
-                                    ? Icons.timelapse
-                                    : Icons.error_outline),
-                            size: 18,
-                            color: order.isFullyPaid
-                                ? Colors.teal.shade800
-                                : (order.paidAmount > 0
-                                    ? Colors.amber.shade900
-                                    : Colors.red.shade800),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            order.isFullyPaid
-                                ? 'PAID (${order.paymentMode.toUpperCase()})'
-                                : (order.paidAmount > 0
-                                    ? 'PARTIAL (${order.paymentMode.toUpperCase()})'
-                                    : 'UNPAID / UDHAAR (KHATA)'),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              color: order.isFullyPaid
-                                  ? Colors.teal.shade900
-                                  : (order.paidAmount > 0
-                                      ? Colors.amber.shade900
-                                      : Colors.red.shade900),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                  if (order.dueAmount > 0.01) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Balance Due (Udhaar):',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.red.shade800,
-                              fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          '₹ ${order.dueAmount.toStringAsFixed(2)}',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red.shade800),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                          ),
-                          icon: const Icon(Icons.qr_code_2, size: 16),
-                          label: const Text('UPI QR',
-                              style: TextStyle(fontSize: 12)),
-                          onPressed: _showUpiQrDialog,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton.tonalIcon(
-                          style: FilledButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                          ),
-                          icon: const Icon(Icons.payments_outlined, size: 16),
-                          label: const Text('Pay / Khata',
-                              style: TextStyle(fontSize: 12)),
-                          onPressed: _showRecordPaymentDialog,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 12),
             Text(
               'Supports Google Pay, PhonePe, Paytm, BHIM',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
           ],
         ),
@@ -788,13 +667,19 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final total = order.estimateTotal;
     final currentPaid = order.paidAmount;
     final due = order.dueAmount;
+    final isRetail = ShopCustomizationService.instance.isPureOfflineMode ||
+        const bool.fromEnvironment('STANDALONE_LOCAL');
+    final availableModes =
+        isRetail ? ['Cash', 'UPI'] : ['Cash', 'UPI', 'Khata / Credit'];
 
     final amountController = TextEditingController(
       text: due > 0
           ? (due % 1 == 0 ? due.toInt().toString() : due.toStringAsFixed(2))
           : '',
     );
-    String selectedMode = 'UPI';
+    String selectedMode = order.paymentMode.isNotEmpty && availableModes.contains(order.paymentMode)
+        ? order.paymentMode
+        : (isRetail ? 'Cash' : 'UPI');
 
     showDialog<void>(
       context: context,
@@ -802,13 +687,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         builder: (ctx, setDialogState) => AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.account_balance_wallet_outlined,
+              const Icon(Icons.account_balance_wallet_outlined,
                   color: Color(0xFF0F766E)),
-              SizedBox(width: 8),
-              Text('Record Payment',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(width: 8),
+              Text(isRetail ? 'Record Payment' : 'Record Payment / Khata',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
             ],
           ),
           content: Column(
@@ -846,7 +731,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
-                children: ['Cash', 'UPI', 'Khata / Credit'].map((mode) {
+                children: availableModes.map((mode) {
                   final isSelected = selectedMode == mode;
                   return ChoiceChip(
                     label: Text(mode),
@@ -1622,123 +1507,132 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             const SizedBox(height: 10),
 
             // Payment & Khata Status Card
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: order.isFullyPaid
-                    ? Colors.teal.shade50
-                    : (order.paidAmount > 0
-                        ? Colors.amber.shade50
-                        : Colors.red.shade50),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: order.isFullyPaid
-                      ? Colors.teal.shade200
-                      : (order.paidAmount > 0
-                          ? Colors.amber.shade300
-                          : Colors.red.shade200),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Builder(
+              builder: (context) {
+                final isRetail = ShopCustomizationService.instance.isPureOfflineMode ||
+                    const bool.fromEnvironment('STANDALONE_LOCAL');
+                return Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: order.isFullyPaid
+                        ? Colors.teal.shade50
+                        : (order.paidAmount > 0
+                            ? Colors.amber.shade50
+                            : Colors.red.shade50),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: order.isFullyPaid
+                          ? Colors.teal.shade200
+                          : (order.paidAmount > 0
+                              ? Colors.amber.shade300
+                              : Colors.red.shade200),
+                    ),
+                  ),
+                  child: Column(
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Icon(
-                            order.isFullyPaid
-                                ? Icons.check_circle
-                                : (order.paidAmount > 0
-                                    ? Icons.timelapse
-                                    : Icons.error_outline),
-                            size: 18,
-                            color: order.isFullyPaid
-                                ? Colors.teal.shade800
-                                : (order.paidAmount > 0
-                                    ? Colors.amber.shade900
-                                    : Colors.red.shade800),
+                          Row(
+                            children: [
+                              Icon(
+                                order.isFullyPaid
+                                    ? Icons.check_circle
+                                    : (order.paidAmount > 0
+                                        ? Icons.timelapse
+                                        : Icons.error_outline),
+                                size: 18,
+                                color: order.isFullyPaid
+                                    ? Colors.teal.shade800
+                                    : (order.paidAmount > 0
+                                        ? Colors.amber.shade900
+                                        : Colors.red.shade800),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                order.isFullyPaid
+                                    ? 'PAID (${order.paymentMode.toUpperCase()})'
+                                    : (order.paidAmount > 0
+                                        ? 'PARTIAL (${order.paymentMode.toUpperCase()})'
+                                        : (isRetail
+                                            ? 'UNPAID (COUNTER)'
+                                            : 'UNPAID / UDHAAR (KHATA)')),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: order.isFullyPaid
+                                      ? Colors.teal.shade900
+                                      : (order.paidAmount > 0
+                                          ? Colors.amber.shade900
+                                          : Colors.red.shade900),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                      if (order.dueAmount > 0.01) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              isRetail ? 'Balance Due:' : 'Balance Due (Udhaar):',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red.shade800,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '₹ ${order.dueAmount.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red.shade800),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                              ),
+                              icon: const Icon(Icons.qr_code_2, size: 16),
+                              label: const Text('UPI QR',
+                                  style: TextStyle(fontSize: 12)),
+                              onPressed: _showUpiQrDialog,
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            order.isFullyPaid
-                                ? 'PAID (${order.paymentMode.toUpperCase()})'
-                                : (order.paidAmount > 0
-                                    ? 'PARTIAL (${order.paymentMode.toUpperCase()})'
-                                    : 'UNPAID / UDHAAR (KHATA)'),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                              color: order.isFullyPaid
-                                  ? Colors.teal.shade900
-                                  : (order.paidAmount > 0
-                                      ? Colors.amber.shade900
-                                      : Colors.red.shade900),
+                          Expanded(
+                            child: FilledButton.tonalIcon(
+                              style: FilledButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                              ),
+                              icon: const Icon(Icons.payments_outlined, size: 16),
+                              label: Text(
+                                  isRetail ? 'Record Payment' : 'Pay / Khata',
+                                  style: const TextStyle(fontSize: 12)),
+                              onPressed: _showRecordPaymentDialog,
                             ),
                           ),
                         ],
                       ),
-                      Text(
-                        'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13),
-                      ),
                     ],
                   ),
-                  if (order.dueAmount > 0.01) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Balance Due (Udhaar):',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.red.shade800,
-                              fontWeight: FontWeight.w600),
-                        ),
-                        Text(
-                          '₹ ${order.dueAmount.toStringAsFixed(2)}',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red.shade800),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                          ),
-                          icon: const Icon(Icons.qr_code_2, size: 16),
-                          label: const Text('UPI QR',
-                              style: TextStyle(fontSize: 12)),
-                          onPressed: _showUpiQrDialog,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton.tonalIcon(
-                          style: FilledButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                          ),
-                          icon: const Icon(Icons.payments_outlined, size: 16),
-                          label: const Text('Pay / Khata',
-                              style: TextStyle(fontSize: 12)),
-                          onPressed: _showRecordPaymentDialog,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                );
+              },
             ),
             const SizedBox(height: 12),
             Row(

@@ -42,9 +42,9 @@ val customAppId = if (project.hasProperty("appId")) {
 val customAppName = if (project.hasProperty("appName")) {
     project.property("appName") as String
 } else if (isLocalMode) {
-    "Shop (Local)"
+    "Shop Retail"
 } else {
-    "Shop (Cloud)"
+    "Shop Wholesale"
 }
 
 if (file("google-services.json").exists()) {

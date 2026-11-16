@@ -97,6 +97,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final s = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final now = DateTime.now();
+    final isOffline = ShopCustomizationService.instance.isPureOfflineMode ||
+        const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -318,186 +320,296 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
               const SizedBox(height: 16),
 
-              // Hero: Create Order & Khata Book Side-by-Side
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF0F766E).withValues(alpha: 0.25),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+              // Hero Cards: Create Order (Full-Width in Retail, Side-by-Side with Khata in Wholesale)
+              if (isOffline) ...[
+                // Retail Mode: Full Width Fast Counter Hero Card
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFD97706), Color(0xFFF59E0B)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFD97706).withValues(alpha: 0.25),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(18),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => CustomerScreen(
-                                  customerRepository: widget.customerRepository,
-                                  productRepository: widget.productRepository,
-                                  orderRepository: widget.orderRepository,
-                                ),
-                              ),
-                            );
-                            setState(() {});
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => CustomerScreen(
+                              customerRepository: widget.customerRepository,
+                              productRepository: widget.productRepository,
+                              orderRepository: widget.orderRepository,
+                            ),
+                          ),
+                        );
+                        setState(() {});
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: const Icon(
-                                        Icons.add_shopping_cart,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
-                                    ),
-                                    const Icon(Icons.arrow_forward_ios,
-                                        size: 11, color: Colors.white70),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  s.t('createOrder'),
-                                  style: const TextStyle(
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(
+                                    Icons.point_of_sale_rounded,
                                     color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.3,
+                                    size: 26,
                                   ),
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'New Bill / Cart',
-                                  style: TextStyle(
-                                    color: Colors.teal.shade50,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Instant Checkout',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                      SizedBox(width: 4),
+                                      Icon(Icons.arrow_forward_ios,
+                                          size: 10, color: Colors.white),
+                                    ],
                                   ),
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'FAST COUNTER BILLING',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Quick walk-in retail sales • Cash & Dynamic UPI QR',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else ...[
+                // Wholesale Mode: Side-by-Side Create Order & Khata Book
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => CustomerScreen(
+                                    customerRepository: widget.customerRepository,
+                                    productRepository: widget.productRepository,
+                                    orderRepository: widget.orderRepository,
+                                  ),
+                                ),
+                              );
+                              setState(() {});
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(
+                                          Icons.add_shopping_cart,
+                                          color: Colors.white,
+                                          size: 22,
+                                        ),
+                                      ),
+                                      const Icon(Icons.arrow_forward_ios,
+                                          size: 11, color: Colors.white70),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    s.t('createOrder'),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Wholesale Bill / Cart',
+                                    style: TextStyle(
+                                      color: Colors.teal.shade50,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF312E81), Color(0xFF4F46E5)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF4F46E5).withValues(alpha: 0.25),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF312E81), Color(0xFF4F46E5)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                        ],
-                      ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
                           borderRadius: BorderRadius.circular(18),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => KhataBookScreen(
-                                  customerRepository: widget.customerRepository,
-                                  orderRepository: widget.orderRepository,
-                                  productRepository: widget.productRepository,
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF4F46E5).withValues(alpha: 0.25),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => KhataBookScreen(
+                                    customerRepository: widget.customerRepository,
+                                    orderRepository: widget.orderRepository,
+                                    productRepository: widget.productRepository,
+                                  ),
                                 ),
-                              ),
-                            );
-                            setState(() {});
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(10),
+                              );
+                              setState(() {});
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Icon(
+                                          Icons.menu_book_rounded,
+                                          color: Colors.white,
+                                          size: 22,
+                                        ),
                                       ),
-                                      child: const Icon(
-                                        Icons.menu_book_rounded,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
+                                      const Icon(Icons.arrow_forward_ios,
+                                          size: 11, color: Colors.white70),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'KHATA BOOK',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.3,
                                     ),
-                                    const Icon(Icons.arrow_forward_ios,
-                                        size: 11, color: Colors.white70),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'KHATA BOOK',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.3,
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Credit & Udhaar Ledger',
-                                  style: TextStyle(
-                                    color: Colors.indigo.shade50,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Contractor Ledgers',
+                                    style: TextStyle(
+                                      color: Colors.indigo.shade50,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
 
               // Secondary Quick Action Row
@@ -1003,7 +1115,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSideDrawer(BuildContext context, ThemeData theme, AppLocalizations s) {
     final shopName = ShopCustomizationService.instance.shopName;
-    final isOffline = ShopCustomizationService.instance.isPureOfflineMode;
+    final isOffline = ShopCustomizationService.instance.isPureOfflineMode ||
+        const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false);
     final sync = ShopSyncService.instance;
 
     return Drawer(
@@ -1171,29 +1284,31 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.menu_book_rounded,
-                        color: Color(0xFF0F766E)),
-                    title: const Text('Khata Book (Udhaar)',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text(
-                        'Customer balances & payment reminders',
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => KhataBookScreen(
-                            customerRepository: widget.customerRepository,
-                            orderRepository: widget.orderRepository,
-                            productRepository: widget.productRepository,
+                  if (!isOffline) ...[
+                    ListTile(
+                      leading: const Icon(Icons.menu_book_rounded,
+                          color: Color(0xFF0F766E)),
+                      title: const Text('Khata Book (Udhaar)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14)),
+                      subtitle: const Text(
+                          'Customer balances & payment reminders',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => KhataBookScreen(
+                              customerRepository: widget.customerRepository,
+                              orderRepository: widget.orderRepository,
+                              productRepository: widget.productRepository,
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    ),
+                  ],
                   ListTile(
                     leading: const Icon(Icons.nightlight_round,
                         color: Color(0xFF0F766E)),

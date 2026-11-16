@@ -69,7 +69,7 @@ class _ShopAppState extends State<ShopApp> {
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: rootMessengerKey,
 
-      title: kPureOfflineMode ? 'Shop (Local)' : 'Shop (Cloud)',
+      title: kPureOfflineMode ? 'Shop Retail' : 'Shop Wholesale',
       debugShowCheckedModeBanner: false,
       locale: _locale,
       supportedLocales: AppLocalizations.supportedLocales,
@@ -81,8 +81,12 @@ class _ShopAppState extends State<ShopApp> {
       ],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0F766E),
-          primary: const Color(0xFF0F766E),
+          seedColor: kPureOfflineMode
+              ? const Color(0xFFD97706) // Bright Amber / Retail Counter Theme
+              : const Color(0xFF0F766E), // Deep Emerald / Wholesale Theme
+          primary: kPureOfflineMode
+              ? const Color(0xFFD97706)
+              : const Color(0xFF0F766E),
           surface: Colors.white,
           surfaceContainerLowest: Colors.white,
           surfaceContainerLow: const Color(0xFFF8FAFC),

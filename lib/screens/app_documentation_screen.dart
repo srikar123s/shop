@@ -443,17 +443,50 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
 
       // Section 6: Payments, Khata (Udhaar) & Dynamic UPI QR
       _DocSection(
-        title: '6. Payments, Khata (Udhaar) & UPI QR',
-        subtitle: 'Cash, UPI, Udhaar balances, auto-allocation & reminders',
+        title: '6. Upgraded Khata Book, Passbook & UPI QR',
+        subtitle: 'Complete Udhaar ledger, debt ageing, passbook, PDF statements & WhatsApp reminders',
         icon: Icons.account_balance_wallet_outlined,
         color: const Color(0xFFD97706),
         items: [
           _DocItem(
-            topic: 'Payment Mode Tracking & Partial Payments',
-            tag: 'LEDGER',
+            topic: 'Customer Khata Passbook (Dual-Tone Ledger)',
+            tag: 'PASSBOOK',
             details:
-                'Bills track exact payment status: PAID, PARTIAL, or UNPAID / UDHAAR.\n'
-                'Supports partial payment recording (e.g. Bill is ₹5,882 → Customer paid ₹3,000 via UPI now, balance ₹2,882 remains due in their Khata).',
+                'Tap on any customer in Khata to open their dedicated Passbook:\n'
+                '• 🔴 YOU GAVE: Debit entries for bills & credit given with item count & bill amounts.\n'
+                '• 🟢 YOU GOT: Credit entries for cash/UPI/cheque payments received with notes.\n'
+                '• Running Balance calculated automatically after every single transaction.\n'
+                '• Sticky bottom action bar with "+ YOU GAVE" (manual debit/old balance) and "+ YOU GOT" (quick receive).',
+          ),
+          _DocItem(
+            topic: 'Debt Ageing & Overdue Tracking (> 30 Days)',
+            tag: 'AGEING ALERT',
+            details:
+                'The Khata Book tracks how long debts have been pending:\n'
+                '• Smart Badges show exact pending days (e.g. ⚠️ 45 days overdue).\n'
+                '• Dashboard displays Total Market Udhaar and Overdue >30 Days metrics.\n'
+                '• 1-tap filter for "Overdue >30d" lets you target customers needing urgent recovery.',
+          ),
+          _DocItem(
+            topic: '3 Smart WhatsApp Reminder Templates',
+            tag: 'WHATSAPP',
+            details:
+                'Tap "Remind" on any customer card to choose from 3 tailored templates:\n'
+                '1. Friendly / Gentle Reminder: Polite request with your UPI ID.\n'
+                '2. Formal Due Notice: Formal account statement with days overdue.\n'
+                '3. Instant 1-Tap UPI Pay Link: Pre-filled deep link that opens Google Pay or PhonePe with the exact amount ready to pay.',
+          ),
+          _DocItem(
+            topic: 'Download & Share Customer Statement PDF',
+            tag: 'PDF STATEMENT',
+            details:
+                'Tap "Statement PDF" to generate a professional A4 statement of account for any customer. Includes Shop Header, GSTIN, complete transaction ledger table with running balances, summary box, and an embedded Dynamic UPI QR code for direct scan-and-pay.',
+          ),
+          _DocItem(
+            topic: 'Market Udhaar Summary Report (PDF)',
+            tag: 'OWNER REPORT',
+            details:
+                'Tap the PDF icon on the Khata Book top bar to download or WhatsApp a complete 1-page Market Credit Summary report showing total market outstanding, active debtor count, and table of every customer with their phone and pending balance.',
           ),
           _DocItem(
             topic: 'Instant Dynamic UPI QR Code',
@@ -462,16 +495,6 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
                 'Tap the "UPI QR" button on any bill. The app generates an official NPCI QR code containing your shop UPI ID and the exact due amount. The customer scans with Google Pay, PhonePe, Paytm, or BHIM to pay instantly without typing numbers.',
             tip:
                 'Be sure to set your shop UPI ID in Shop Settings → INVOICE, UPI & DIGITAL STAMP.',
-          ),
-          _DocItem(
-            topic: 'Khata Book Screen & Total Market Outstanding',
-            tag: 'CREDIT CONTROL',
-            details:
-                'The Khata Book screen gives you a bird-eye view of your entire business credit:\n'
-                '• Total Market Udhaar (sum of all customer dues across the store)\n'
-                '• Customer cards sorted by largest balance due\n'
-                '• 1-Click WhatsApp Payment Reminder button pre-composed with customer balance and bill summary\n'
-                '• "Receive Payment" dialog to record lumpsum settlements.',
           ),
           _DocItem(
             topic: 'Oldest-First Payment Allocation',

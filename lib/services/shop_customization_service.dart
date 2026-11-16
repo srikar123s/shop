@@ -18,14 +18,19 @@ class ShopCustomizationService extends ChangeNotifier {
   static const String _prefKeyGstin = 'custom_shop_gstin';
   static const String _prefKeyDigitalStamp = 'custom_shop_digital_stamp';
 
-  String _shopName = 'Hardware Shop';
+  String _shopName = const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
+      ? 'Shop Retail'
+      : 'Shop Wholesale';
   String _cashierName = '';
   String _upiId = '';
   String _shopPhone = '';
   String _shopAddress = '';
   String _gstin = '';
   String _digitalStamp = '';
-  List<double> _globalShortcuts = <double>[5.0, 6.0, 10.0, 12.0];
+  List<double> _globalShortcuts =
+      const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
+          ? <double>[1.0, 2.0, 5.0, 10.0]
+          : <double>[5.0, 10.0, 20.0, 50.0];
   final Map<int, List<double>> _productShortcuts = <int, List<double>>{};
   bool _pureOfflineMode = false;
   bool _isInitialized = false;
@@ -33,7 +38,10 @@ class ShopCustomizationService extends ChangeNotifier {
   String get cashierName => _cashierName;
 
   String get shopName {
-    if (_shopName.trim().isNotEmpty && _shopName != 'Hardware Shop') {
+    if (_shopName.trim().isNotEmpty &&
+        _shopName != 'Hardware Shop' &&
+        _shopName != 'Shop Retail' &&
+        _shopName != 'Shop Wholesale') {
       return _shopName;
     }
     final cloudShopName = ShopSyncService.instance.currentShop?.shopName;
@@ -55,7 +63,7 @@ class ShopCustomizationService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _shopName = prefs.getString(_prefKeyShopName) ??
           ShopSyncService.instance.currentShop?.shopName ??
-          'Hardware Shop';
+          (isPureOfflineMode ? 'Shop Retail' : 'Shop Wholesale');
 
       final globalStr = prefs.getString(_prefKeyGlobalShortcuts);
       if (globalStr != null && globalStr.isNotEmpty) {

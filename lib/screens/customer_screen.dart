@@ -568,11 +568,36 @@ class _CustomerScreenState extends State<CustomerScreen> {
                           horizontal: 10, vertical: 10),
                       visualDensity: VisualDensity.compact,
                     ),
-                    onPressed: _contactsLoading ? null : _enableContacts,
-                    icon: const Icon(Icons.contacts_outlined, size: 16),
+                    onPressed: () async {
+                      // Fast 1-tap Walk-in Counter Customer
+                      var walkIn = _customers.cast<Customer?>().firstWhere(
+                            (c) => c?.name.toLowerCase() == 'walk-in customer',
+                            orElse: () => null,
+                          );
+                      walkIn ??= await widget.customerRepository.createCustomer(
+                        name: 'Walk-in Customer',
+                        phone: 'Counter Sale',
+                      );
+                      if (!mounted) return;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => ProductSelectionScreen(
+                            customer: walkIn!,
+                            productRepository: widget.productRepository,
+                            orderRepository: widget.orderRepository,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.flash_on_rounded,
+                        size: 16, color: Color(0xFFD97706)),
                     label: const Text(
-                      'Phone Contacts',
-                      style: TextStyle(fontSize: 12),
+                      'Walk-in Counter',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFD97706)),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

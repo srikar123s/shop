@@ -55,8 +55,15 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
           : '',
     );
 
+    final initialTotal =
+        const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
+            ? _calculateGrandTotal().roundToDouble()
+            : _calculateGrandTotal();
+
     _estimateController = TextEditingController(
-      text: _calculateGrandTotal().toStringAsFixed(2),
+      text: initialTotal % 1 == 0
+          ? initialTotal.toInt().toString()
+          : initialTotal.toStringAsFixed(2),
     );
     _priceControllers = widget.draftOrder.items.map((item) {
       final p = item.unitPrice ?? 0;
@@ -99,7 +106,14 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   }
 
   void _recalculateEstimate() {
-    _estimateController.text = _calculateGrandTotal().toStringAsFixed(2);
+    var total = _calculateGrandTotal();
+    // In Retail Mode: automatic price rounding for rapid cash change (e.g. ₹49.50 -> ₹50)
+    if (const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)) {
+      total = total.roundToDouble();
+    }
+    _estimateController.text = total % 1 == 0
+        ? total.toInt().toString()
+        : total.toStringAsFixed(2);
   }
 
   BillBreakdown _getBillBreakdown([double? totalOverride]) {

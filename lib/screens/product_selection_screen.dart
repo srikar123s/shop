@@ -173,7 +173,10 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     final detailsCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     double qty = 1;
-    String unit = 'Piece';
+    String unit =
+        const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
+            ? 'Piece'
+            : 'Box';
 
     final result = await showModalBottomSheet<DraftOrderItem>(
       context: context,
@@ -215,16 +218,29 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                       onSelected: (v) => setModalState(() => qty = v),
                     ),
                     DropdownButtonFormField<String>(
-                      initialValue: unit,
+                      initialValue: const bool.fromEnvironment('STANDALONE_LOCAL',
+                              defaultValue: false)
+                          ? 'Piece'
+                          : 'Box',
                       decoration: InputDecoration(labelText: s.t('unit')),
-                      items: const <String>[
-                        'Piece',
-                        'Box',
-                        'Kg',
-                        'Litre',
-                        'Feet',
-                        'Packet'
-                      ]
+                      items: (const bool.fromEnvironment('STANDALONE_LOCAL',
+                                  defaultValue: false)
+                              ? const <String>[
+                                  'Piece',
+                                  'Meter',
+                                  'Litre',
+                                  'Kg',
+                                  'Packet',
+                                  'Box'
+                                ]
+                              : const <String>[
+                                  'Box',
+                                  'Carton',
+                                  'Bundle',
+                                  'Bag',
+                                  'Piece',
+                                  'Kg'
+                                ])
                           .map((e) => DropdownMenuItem<String>(
                               value: e, child: Text(e)))
                           .toList(),

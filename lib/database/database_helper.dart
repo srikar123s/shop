@@ -528,14 +528,203 @@ class DatabaseHelper {
         COALESCE(SUM(o.estimate_total), 0) as total_billed,
         COALESCE(SUM(o.paid_amount), 0) as total_paid,
         (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due,
-        COUNT(DISTINCT o.id) as order_count
+        COUNT(DISTINCT o.id) as order_count,
+        MAX(o.created_at) as last_order_date,
+        MIN(CASE WHEN o.estimate_total > (o.paid_amount + 0.01) THEN o.created_at ELSE NULL END) as oldest_unpaid_date
       FROM customers c
       LEFT JOIN orders o ON c.id = o.customer_id
       GROUP BY c.id
       HAVING balance_due > 0.01 OR total_billed > 0
       ORDER BY balance_due DESC, c.name ASC
     ''';
-    return await db.rawQuery(query);
+    final rows = await db.rawQuery(query);
+    final now = DateTime.now();
+
+    return rows.map((r) {
+      final map = Map<String, dynamic>.from(r);
+      final oldestDateStr = map['oldest_unpaid_date'] as String?;
+      int daysOverdue = 0;
+      if (oldestDateStr != null && oldestDateStr.isNotEmpty) {
+        final dt = DateTime.tryParse(oldestDateStr);
+        if (dt != null) {
+          daysOverdue = now.difference(dt).inDays;
+          if (daysOverdue < 0) daysOverdue = 0;
+        }
+      }
+      map['days_overdue'] = daysOverdue;
+      return map;
+    }).toList();
+  }
+
+  /// Retrieves a chronological combined ledger of all debit (bills/orders)
+  /// and credit (payments) for a customer with computed running balances.
+  Future<List<Map<String, dynamic>>> getCustomerKhataLedger(int customerId) async {
+    final db = await database;
+
+    // 1. Fetch all orders for customer
+    final orderRows = await db.rawQuery('''
+      SELECT 
+        o.id,
+        o.estimate_total,
+        o.paid_amount,
+        o.created_at,
+        o.payment_mode,
+        o.payment_status,
+        o.notes,
+        (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
+      FROM orders o
+      WHERE o.customer_id = ?
+      ORDER BY o.created_at ASC
+    ''', [customerId]);
+
+    // 2. Fetch all direct payments
+    final paymentRows = await db.query(
+      'customer_payments',
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at ASC',
+    );
+
+    // 3. Combine into chronological ledger entries
+    final entries = <Map<String, dynamic>>[];
+
+    for (final o in orderRows) {
+      final total = (o['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final itemCount = (o['item_count'] as num?)?.toInt() ?? 0;
+      final notes = (o['notes'] as String?) ?? '';
+      String subtitle = '$itemCount item(s) • ${o['payment_mode'] ?? 'Khata'}';
+      if (notes.isNotEmpty && notes.contains('khata_debit')) {
+        try {
+          final decoded = jsonDecode(notes);
+          if (decoded is Map && decoded['description'] != null) {
+            subtitle = decoded['description'] as String;
+          }
+        } catch (_) {}
+      }
+
+      entries.add({
+        'type': 'debit', // You Gave (Bill)
+        'id': o['id'],
+        'title': 'Bill #${o['id']}',
+        'subtitle': subtitle,
+        'date': DateTime.tryParse(o['created_at'] as String? ?? '') ?? DateTime.now(),
+        'amount': total,
+        'debit': total,
+        'credit': 0.0,
+        'payment_mode': o['payment_mode'],
+        'notes': notes,
+      });
+    }
+
+    for (final p in paymentRows) {
+      final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
+      final mode = (p['payment_mode'] as String?)?.toUpperCase() ?? 'PAYMENT';
+      final notes = (p['notes'] as String?) ?? '';
+      entries.add({
+        'type': 'credit', // You Got (Payment)
+        'id': p['id'],
+        'title': 'Payment Received ($mode)',
+        'subtitle': notes.isNotEmpty ? notes : 'Direct Payment (Khata)',
+        'date': DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now(),
+        'amount': amt,
+        'debit': 0.0,
+        'credit': amt,
+        'payment_mode': p['payment_mode'],
+        'notes': notes,
+      });
+    }
+
+    // Sort chronologically ascending
+    entries.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+
+    // Compute running balance
+    double running = 0.0;
+    for (final entry in entries) {
+      running += (entry['debit'] as double) - (entry['credit'] as double);
+      entry['running_balance'] = running;
+    }
+
+    return entries;
+  }
+
+  /// Records a manual Udhaar / Debit entry (e.g. Previous balance or cash lent)
+  Future<int> recordManualKhataDebit({
+    required int customerId,
+    required double amount,
+    required String description,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    return await db.insert('orders', {
+      'customer_id': customerId,
+      'status': 'Completed',
+      'created_at': now,
+      'notes': jsonEncode({'type': 'khata_debit', 'description': description}),
+      'taken_by': 'Srikar',
+      'estimate_total': amount,
+      'paid_amount': 0.0,
+      'payment_mode': 'Khata',
+      'payment_status': 'unpaid',
+    });
+  }
+
+  /// Calculates aggregated Khata metrics for the business dashboard
+  Future<Map<String, dynamic>> getKhataSummaryMetrics() async {
+    final list = await getCustomerKhataList();
+    double totalDue = 0;
+    double totalBilled = 0;
+    double totalPaid = 0;
+    double overdue30Days = 0;
+    int dueCustomersCount = 0;
+    int settledCustomersCount = 0;
+
+    for (final item in list) {
+      final due = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
+      final billed = (item['total_billed'] as num?)?.toDouble() ?? 0.0;
+      final paid = (item['total_paid'] as num?)?.toDouble() ?? 0.0;
+      final days = (item['days_overdue'] as num?)?.toInt() ?? 0;
+
+      totalDue += due;
+      totalBilled += billed;
+      totalPaid += paid;
+
+      if (due > 0.01) {
+        dueCustomersCount++;
+        if (days >= 30) {
+          overdue30Days += due;
+        }
+      } else {
+        settledCustomersCount++;
+      }
+    }
+
+    // Today's collections
+    final db = await database;
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
+    final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
+
+    final paymentsToday = await db.query(
+      'customer_payments',
+      where: 'created_at >= ? AND created_at <= ?',
+      whereArgs: [startOfDay, endOfDay],
+    );
+
+    double collectedToday = 0;
+    for (final p in paymentsToday) {
+      collectedToday += (p['amount'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    return {
+      'totalMarketDue': totalDue,
+      'totalBilled': totalBilled,
+      'totalPaid': totalPaid,
+      'overdue30Days': overdue30Days,
+      'dueCustomersCount': dueCustomersCount,
+      'settledCustomersCount': settledCustomersCount,
+      'collectedToday': collectedToday,
+      'totalCustomers': list.length,
+    };
   }
 
   Future<Map<String, dynamic>> getEveningClosingReport(DateTime date) async {
