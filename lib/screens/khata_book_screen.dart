@@ -124,6 +124,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not dial $phone')),
       );
@@ -267,7 +268,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     );
     final notesCtrl = TextEditingController();
     String paymentMode = 'Cash';
-    bool sendWhatsAppReceipt = true;
+    bool sendWhatsAppReceipt = false;
 
     final received = await showDialog<bool>(
       context: context,
@@ -571,7 +572,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF7F1D1D), Color(0xFFB91C1C)],
+                colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -588,7 +589,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                         const Text(
                           'TOTAL MARKET UDHAAR (OUTSTANDING)',
                           style: TextStyle(
-                            color: Color(0xFFFEE2E2),
+                            color: Color(0xFFCBD5E1),
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.5,
@@ -1087,14 +1088,14 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                                 ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                '$orderCount orders • Billed: ₹ ${totalBilled.toStringAsFixed(0)} • Paid: ₹ ${totalPaid.toStringAsFixed(0)}',
+                                                '$orderCount closed bills • Billed: ₹ ${totalBilled.toStringAsFixed(0)} • Collected: ₹ ${totalPaid.toStringAsFixed(0)}',
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   color: Colors.grey.shade600,
                                                 ),
                                               ),
                                               if ((item['credit_limit'] as num?)?.toDouble() != null &&
-                                                  (item['credit_limit'] as num)!.toDouble() > 0) ...[
+                                                  ((item['credit_limit'] as num?)?.toDouble() ?? 0) > 0) ...[
                                                 const SizedBox(height: 3),
                                                 Row(
                                                   children: [

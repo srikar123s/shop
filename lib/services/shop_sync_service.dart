@@ -585,7 +585,14 @@ class ShopSyncService extends ChangeNotifier {
         'estimate_total': data['estimate_total'],
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
-      // Re-populate order items
+      // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
+      final existingItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [orderId]);
+      for (final ei in existingItems) {
+        final eid = ei['id'] as int;
+        await db.delete('order_item_options', where: 'order_item_id = ?', whereArgs: [eid]);
+      }
+      await db.delete('order_items', where: 'order_id = ?', whereArgs: [orderId]);
+
       final rawItems = data['items'] as List<dynamic>? ?? [];
       for (final rawItem in rawItems) {
         final item = rawItem as Map<String, dynamic>;
@@ -816,6 +823,14 @@ class ShopSyncService extends ChangeNotifier {
             'notes': data['notes'],
             'estimate_total': data['estimate_total'],
           }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+          // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
+          final existingStreamItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [orderId]);
+          for (final ei in existingStreamItems) {
+            final eid = ei['id'] as int;
+            await db.delete('order_item_options', where: 'order_item_id = ?', whereArgs: [eid]);
+          }
+          await db.delete('order_items', where: 'order_id = ?', whereArgs: [orderId]);
 
           final rawItems = data['items'] as List<dynamic>? ?? [];
           for (final rawItem in rawItems) {

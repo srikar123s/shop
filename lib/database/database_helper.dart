@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shop/models/top_product_stat.dart';
 import 'package:sqflite/sqflite.dart';
@@ -109,6 +110,24 @@ class DatabaseHelper {
           await db.execute(
             "UPDATE orders SET taken_by = 'Srikar' WHERE taken_by IS NULL OR taken_by = '' OR taken_by = 'Store'",
           );
+        } catch (_) {}
+        try {
+          // Deduplicate order_item_options
+          await db.execute('''
+            DELETE FROM order_item_options
+            WHERE id NOT IN (
+              SELECT MIN(id)
+              FROM order_item_options
+              GROUP BY order_item_id, LOWER(option_name), LOWER(option_value)
+            )
+          ''');
+        } catch (_) {}
+        try {
+          // Clean up orphan options
+          await db.execute('''
+            DELETE FROM order_item_options
+            WHERE order_item_id NOT IN (SELECT id FROM order_items)
+          ''');
         } catch (_) {}
         await _seedInitialProducts(db);
       },
@@ -419,26 +438,83 @@ class DatabaseHelper {
 
     final whereClause = since != null ? 'WHERE o.created_at >= ?' : '';
     final whereArgs = since != null ? [since.toIso8601String()] : <String>[];
-    final sortField = sortBy == 'revenue' ? 'total_revenue' : 'total_quantity';
 
     final query = '''
       SELECT 
         oi.item_name,
         oi.product_id,
         oi.unit,
-        SUM(COALESCE(oi.quantity_given, oi.quantity_ordered, 0)) as total_quantity,
-        SUM(COALESCE(oi.quantity_given, oi.quantity_ordered, 0) * COALESCE(oi.unit_price, 0)) as total_revenue,
-        COUNT(DISTINCT oi.order_id) as order_count
+        oi.quantity_given,
+        oi.quantity_ordered,
+        oi.product_snapshot,
+        oi.order_id
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       $whereClause
-      GROUP BY oi.item_name
-      ORDER BY $sortField DESC
-      LIMIT $limit
     ''';
 
     final results = await db.rawQuery(query, whereArgs);
-    return results.map((row) => TopProductStat.fromMap(row)).toList();
+    final statsMap = <String, Map<String, dynamic>>{};
+
+    for (final row in results) {
+      final name = (row['item_name'] as String?)?.trim() ?? 'Unknown Item';
+      final qtyGiven = (row['quantity_given'] as num?)?.toDouble() ?? 0.0;
+      final qtyOrdered = (row['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
+      final qty = qtyGiven > 0 ? qtyGiven : qtyOrdered;
+      final unit = (row['unit'] as String?) ?? 'Piece';
+      final orderId = row['order_id'] as int?;
+      final prodId = row['product_id'] as int?;
+
+      double unitPrice = 0.0;
+      final snapRaw = row['product_snapshot'] as String?;
+      if (snapRaw != null && snapRaw.isNotEmpty) {
+        try {
+          final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+          unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+        } catch (_) {}
+      }
+      final revenue = qty * unitPrice;
+
+      if (!statsMap.containsKey(name)) {
+        statsMap[name] = {
+          'itemName': name,
+          'productId': prodId,
+          'unit': unit,
+          'totalQuantity': 0.0,
+          'totalRevenue': 0.0,
+          'orderIds': <int>{},
+        };
+      }
+
+      final entry = statsMap[name]!;
+      entry['totalQuantity'] = (entry['totalQuantity'] as double) + qty;
+      entry['totalRevenue'] = (entry['totalRevenue'] as double) + revenue;
+      if (orderId != null) {
+        (entry['orderIds'] as Set<int>).add(orderId);
+      }
+    }
+
+    final statList = statsMap.values.map((e) {
+      return TopProductStat(
+        itemName: e['itemName'] as String,
+        productId: e['productId'] as int?,
+        unit: e['unit'] as String,
+        totalQuantity: e['totalQuantity'] as double,
+        totalRevenue: e['totalRevenue'] as double,
+        orderCount: (e['orderIds'] as Set<int>).length,
+      );
+    }).toList();
+
+    if (sortBy == 'revenue') {
+      statList.sort((a, b) => b.totalRevenue.compareTo(a.totalRevenue));
+    } else {
+      statList.sort((a, b) => b.totalQuantity.compareTo(a.totalQuantity));
+    }
+
+    if (statList.length > limit) {
+      return statList.sublist(0, limit);
+    }
+    return statList;
   }
 
   Future<void> recordOrderPayment({
@@ -530,23 +606,89 @@ class DatabaseHelper {
         c.name as customer_name,
         c.phone as customer_phone,
         COALESCE(c.credit_limit, 0.0) as credit_limit,
-        COALESCE(SUM(o.estimate_total), 0) as total_billed,
-        COALESCE(SUM(o.paid_amount), 0) as total_paid,
-        (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due,
-        COUNT(DISTINCT o.id) as order_count,
-        MAX(o.created_at) as last_order_date,
-        MIN(CASE WHEN o.estimate_total > (o.paid_amount + 0.01) THEN o.created_at ELSE NULL END) as oldest_unpaid_date
+        COALESCE((
+          SELECT SUM(o.estimate_total) 
+          FROM orders o 
+          WHERE o.customer_id = c.id 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ), 0.0) as total_billed,
+        COALESCE((
+          SELECT SUM(p.amount) 
+          FROM customer_payments p 
+          WHERE p.customer_id = c.id
+        ), 0.0) as total_paid,
+        (
+          SELECT COUNT(o.id) 
+          FROM orders o 
+          WHERE o.customer_id = c.id 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ) as order_count,
+        (
+          SELECT MAX(o.created_at) 
+          FROM orders o 
+          WHERE o.customer_id = c.id 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ) as last_order_date,
+        (
+          SELECT MAX(p.created_at) 
+          FROM customer_payments p 
+          WHERE p.customer_id = c.id
+        ) as last_payment_date,
+        (
+          SELECT p.payment_mode 
+          FROM customer_payments p 
+          WHERE p.customer_id = c.id 
+          ORDER BY p.created_at DESC 
+          LIMIT 1
+        ) as last_payment_mode,
+        MIN(CASE WHEN o.estimate_total > (o.paid_amount + 0.01) AND (LOWER(o.status) IN ('completed', 'closed')) THEN o.created_at ELSE NULL END) as oldest_unpaid_date
       FROM customers c
       LEFT JOIN orders o ON c.id = o.customer_id
       GROUP BY c.id
-      HAVING balance_due > 0.01 OR total_billed > 0 OR credit_limit > 0
-      ORDER BY balance_due DESC, c.name ASC
+      HAVING (
+        COALESCE((
+          SELECT SUM(o.estimate_total) 
+          FROM orders o 
+          WHERE o.customer_id = c.id 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ), 0.0) - 
+        COALESCE((
+          SELECT SUM(p.amount) 
+          FROM customer_payments p 
+          WHERE p.customer_id = c.id
+        ), 0.0)
+      ) > 0.01 
+      OR (
+        SELECT SUM(o.estimate_total) 
+        FROM orders o 
+        WHERE o.customer_id = c.id 
+          AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+      ) > 0 
+      OR credit_limit > 0
+      ORDER BY (
+        COALESCE((
+          SELECT SUM(o.estimate_total) 
+          FROM orders o 
+          WHERE o.customer_id = c.id 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ), 0.0) - 
+        COALESCE((
+          SELECT SUM(p.amount) 
+          FROM customer_payments p 
+          WHERE p.customer_id = c.id
+        ), 0.0)
+      ) DESC, c.name ASC
     ''';
     final rows = await db.rawQuery(query);
     final now = DateTime.now();
 
     return rows.map((r) {
       final map = Map<String, dynamic>.from(r);
+      final billed = (map['total_billed'] as num?)?.toDouble() ?? 0.0;
+      final paid = (map['total_paid'] as num?)?.toDouble() ?? 0.0;
+      final due = (billed - paid) > 0.01 ? (billed - paid) : 0.0;
+      map['balance_due'] = due;
+
       final oldestDateStr = map['oldest_unpaid_date'] as String?;
       int daysOverdue = 0;
       if (oldestDateStr != null && oldestDateStr.isNotEmpty) {
@@ -559,7 +701,6 @@ class DatabaseHelper {
       map['days_overdue'] = daysOverdue;
 
       final limit = (map['credit_limit'] as num?)?.toDouble() ?? 0.0;
-      final due = (map['balance_due'] as num?)?.toDouble() ?? 0.0;
       map['credit_limit'] = limit;
       map['is_over_limit'] = limit > 0 && due > limit;
       map['available_credit'] = limit > 0 ? (limit - due) : 0.0;
@@ -586,11 +727,21 @@ class DatabaseHelper {
         c.id,
         c.name,
         COALESCE(c.credit_limit, 0.0) as credit_limit,
-        (COALESCE(SUM(o.estimate_total), 0) - COALESCE(SUM(o.paid_amount), 0)) as balance_due
+        (
+          COALESCE((
+            SELECT SUM(o.estimate_total) 
+            FROM orders o 
+            WHERE o.customer_id = c.id 
+              AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+          ), 0.0) - 
+          COALESCE((
+            SELECT SUM(p.amount) 
+            FROM customer_payments p 
+            WHERE p.customer_id = c.id
+          ), 0.0)
+        ) as balance_due
       FROM customers c
-      LEFT JOIN orders o ON c.id = o.customer_id
       WHERE c.id = ?
-      GROUP BY c.id
     ''', [customerId]);
 
     if (res.isEmpty) {
@@ -604,11 +755,12 @@ class DatabaseHelper {
     final row = res.first;
     final limit = (row['credit_limit'] as num?)?.toDouble() ?? 0.0;
     final due = (row['balance_due'] as num?)?.toDouble() ?? 0.0;
-    final isOver = limit > 0 && due > limit;
-    final available = limit > 0 ? (limit - due) : 0.0;
+    final finalDue = due > 0.01 ? due : 0.0;
+    final isOver = limit > 0 && finalDue > limit;
+    final available = limit > 0 ? (limit - finalDue) : 0.0;
     return {
       'credit_limit': limit,
-      'balance_due': due,
+      'balance_due': finalDue,
       'is_over_limit': isOver,
       'available_credit': available,
     };
@@ -619,7 +771,7 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getCustomerKhataLedger(int customerId) async {
     final db = await database;
 
-    // 1. Fetch all orders for customer
+    // 1. Fetch only closed orders / manual khata debits for customer
     final orderRows = await db.rawQuery('''
       SELECT 
         o.id,
@@ -628,10 +780,12 @@ class DatabaseHelper {
         o.created_at,
         o.payment_mode,
         o.payment_status,
+        o.status,
         o.notes,
         (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
       FROM orders o
-      WHERE o.customer_id = ?
+      WHERE o.customer_id = ? 
+        AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
       ORDER BY o.created_at ASC
     ''', [customerId]);
 
@@ -648,46 +802,62 @@ class DatabaseHelper {
 
     for (final o in orderRows) {
       final total = (o['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final paidAmt = (o['paid_amount'] as num?)?.toDouble() ?? 0.0;
       final itemCount = (o['item_count'] as num?)?.toInt() ?? 0;
       final notes = (o['notes'] as String?) ?? '';
-      String subtitle = '$itemCount item(s) • ${o['payment_mode'] ?? 'Khata'}';
+      final mode = (o['payment_mode'] as String?) ?? 'Khata';
+
+      String subtitle;
       if (notes.isNotEmpty && notes.contains('khata_debit')) {
+        String desc = 'Manual Udhaar Entry';
         try {
           final decoded = jsonDecode(notes);
           if (decoded is Map && decoded['description'] != null) {
-            subtitle = decoded['description'] as String;
+            desc = decoded['description'] as String;
           }
         } catch (_) {}
+        subtitle = 'Manual Udhaar • $desc';
+      } else if (paidAmt > 0) {
+        final bal = (total - paidAmt) > 0 ? (total - paidAmt) : 0.0;
+        subtitle = '$itemCount item(s) • Paid: ₹${paidAmt.toStringAsFixed(0)} ($mode) • Udhaar: ₹${bal.toStringAsFixed(2)}';
+      } else {
+        subtitle = '$itemCount item(s) • 100% Udhaar (Unpaid)';
       }
 
       entries.add({
         'type': 'debit', // You Gave (Bill)
         'id': o['id'],
+        'order_id': o['id'],
         'title': 'Bill #${o['id']}',
         'subtitle': subtitle,
         'date': DateTime.tryParse(o['created_at'] as String? ?? '') ?? DateTime.now(),
         'amount': total,
         'debit': total,
         'credit': 0.0,
-        'payment_mode': o['payment_mode'],
+        'payment_mode': mode,
+        'paid_amount': paidAmt,
+        'status': o['status'],
         'notes': notes,
       });
     }
 
     for (final p in paymentRows) {
       final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
-      final mode = (p['payment_mode'] as String?)?.toUpperCase() ?? 'PAYMENT';
+      final rawMode = (p['payment_mode'] as String?) ?? 'Cash';
+      final mode = rawMode.toUpperCase();
       final notes = (p['notes'] as String?) ?? '';
+      final sub = notes.isNotEmpty ? notes : 'Direct Khata Payment';
+
       entries.add({
         'type': 'credit', // You Got (Payment)
         'id': p['id'],
-        'title': 'Payment Received ($mode)',
-        'subtitle': notes.isNotEmpty ? notes : 'Direct Payment (Khata)',
+        'title': 'Payment Received',
+        'subtitle': 'Collected via $mode • $sub',
         'date': DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now(),
         'amount': amt,
         'debit': 0.0,
         'credit': amt,
-        'payment_mode': p['payment_mode'],
+        'payment_mode': rawMode,
         'notes': notes,
       });
     }
@@ -793,82 +963,107 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>> getEveningClosingReport(DateTime date) async {
-    final db = await database;
-    final startOfDay =
-        DateTime(date.year, date.month, date.day).toIso8601String();
-    final endOfDay =
-        DateTime(date.year, date.month, date.day, 23, 59, 59).toIso8601String();
+    try {
+      final db = await database;
+      final startOfDay =
+          DateTime(date.year, date.month, date.day).toIso8601String();
+      final endOfDay =
+          DateTime(date.year, date.month, date.day, 23, 59, 59).toIso8601String();
 
-    final orderRows = await db.query(
-      'orders',
-      where: 'created_at >= ? AND created_at <= ?',
-      whereArgs: [startOfDay, endOfDay],
-    );
+      final orderRows = await db.query(
+        'orders',
+        where: 'created_at >= ? AND created_at <= ?',
+        whereArgs: [startOfDay, endOfDay],
+      );
 
-    double totalSales = 0;
-    double cashSales = 0;
-    double upiSales = 0;
-    double creditSales = 0;
-    int completedCount = 0;
-    int pendingCount = 0;
+      double totalSales = 0;
+      double cashSales = 0;
+      double upiSales = 0;
+      double creditSales = 0;
+      int completedCount = 0;
+      int pendingCount = 0;
 
-    for (final row in orderRows) {
-      final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
-      final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
-      final mode = (row['payment_mode'] as String?)?.toLowerCase() ?? 'unpaid';
-      final status = (row['status'] as String?) ?? '';
+      for (final row in orderRows) {
+        final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
+        final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
+        final mode = (row['payment_mode'] as String?)?.toLowerCase() ?? 'unpaid';
+        final status = (row['status'] as String?) ?? '';
 
-      totalSales += total;
-      if (status == 'Completed' || status == 'Closed') {
-        completedCount++;
-      } else {
-        pendingCount++;
+        totalSales += total;
+        if (status == 'Completed' || status == 'Closed') {
+          completedCount++;
+        } else {
+          pendingCount++;
+        }
+
+        if (mode == 'cash') {
+          cashSales += paid;
+        } else if (mode == 'upi') {
+          upiSales += paid;
+        }
+        final due = total - paid;
+        if (due > 0) {
+          creditSales += due;
+        }
       }
 
-      if (mode == 'cash') {
-        cashSales += paid;
-      } else if (mode == 'upi') {
-        upiSales += paid;
+      // Direct Khata payments received today
+      final paymentRows = await db.query(
+        'customer_payments',
+        where: 'created_at >= ? AND created_at <= ?',
+        whereArgs: [startOfDay, endOfDay],
+      );
+
+      double directPayments = 0;
+      for (final p in paymentRows) {
+        final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
+        final mode = (p['payment_mode'] as String?)?.toLowerCase() ?? '';
+        directPayments += amt;
+        if (mode == 'cash') cashSales += amt;
+        if (mode == 'upi') upiSales += amt;
       }
-      final due = total - paid;
-      if (due > 0) {
-        creditSales += due;
+
+      TopProductStat? topItem;
+      try {
+        final topItems =
+            await getTopSellingProducts(timeRange: 'today', limit: 1);
+        if (topItems.isNotEmpty) {
+          topItem = topItems.first;
+        }
+      } catch (e) {
+        debugPrint('Top product calculation error in evening report: $e');
       }
+
+      return {
+        'date': date,
+        'totalOrders': orderRows.length,
+        'completedOrders': completedCount,
+        'pendingOrders': pendingCount,
+        'totalSales': totalSales,
+        'cashSales': cashSales,
+        'upiSales': upiSales,
+        'creditSales': creditSales,
+        'directPayments': directPayments,
+        'topItemName': topItem?.itemName ?? 'None',
+        'topItemQty': topItem?.totalQuantity ?? 0,
+        'topItemUnit': topItem?.unit ?? '',
+      };
+    } catch (e) {
+      debugPrint('Error getting evening closing report: $e');
+      return {
+        'date': date,
+        'totalOrders': 0,
+        'completedOrders': 0,
+        'pendingOrders': 0,
+        'totalSales': 0.0,
+        'cashSales': 0.0,
+        'upiSales': 0.0,
+        'creditSales': 0.0,
+        'directPayments': 0.0,
+        'topItemName': 'None',
+        'topItemQty': 0,
+        'topItemUnit': '',
+      };
     }
-
-    // Direct Khata payments received today
-    final paymentRows = await db.query(
-      'customer_payments',
-      where: 'created_at >= ? AND created_at <= ?',
-      whereArgs: [startOfDay, endOfDay],
-    );
-
-    double directPayments = 0;
-    for (final p in paymentRows) {
-      final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
-      final mode = (p['payment_mode'] as String?)?.toLowerCase() ?? '';
-      directPayments += amt;
-      if (mode == 'cash') cashSales += amt;
-      if (mode == 'upi') upiSales += amt;
-    }
-
-    final topItems =
-        await getTopSellingProducts(timeRange: 'today', limit: 1);
-    final topItem = topItems.isNotEmpty ? topItems.first : null;
-
-    return {
-      'date': date,
-      'totalOrders': orderRows.length,
-      'completedOrders': completedCount,
-      'pendingOrders': pendingCount,
-      'totalSales': totalSales,
-      'cashSales': cashSales,
-      'upiSales': upiSales,
-      'creditSales': creditSales,
-      'directPayments': directPayments,
-      'topItemName': topItem?.itemName ?? 'None',
-      'topItemQty': topItem?.totalQuantity ?? 0,
-      'topItemUnit': topItem?.unit ?? '',
-    };
   }
 }

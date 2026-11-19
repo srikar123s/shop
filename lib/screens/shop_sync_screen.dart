@@ -329,7 +329,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
         bg = const Color(0xFFFEF3C7);
         textColor = const Color(0xFF92400E);
         icon = Icons.hourglass_top_rounded;
-        text = 'Join Request Pending: Waiting for Shop Owner to accept...';
+        text = 'Join Request Pending: Waiting for Master Device to approve...';
         break;
       case SyncStatus.syncing:
         bg = const Color(0xFFEFF6FF);
@@ -353,7 +353,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
         bg = const Color(0xFFF1F5F9);
         textColor = const Color(0xFF475569);
         icon = Icons.info_outline_rounded;
-        text = 'Setup cloud sync to share products and live orders with your staff.';
+        text = 'Setup cloud sync to share products and live orders with partner devices.';
     }
 
     return Container(
@@ -422,7 +422,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      shop.isOwner ? '👑 Owner / Master Device' : '👤 Staff / Cashier Device',
+                      shop.isOwner ? '👑 Master Device (Primary Phone)' : '🤝 Partner Device (Family Member)',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -450,7 +450,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
             ],
           ),
           const Divider(height: 28, color: Color(0xFFF1F5F9)),
-          _buildInfoRow('Owner Phone', shop.ownerPhone.isNotEmpty ? shop.ownerPhone : 'Not provided'),
+          _buildInfoRow('Contact Phone', shop.ownerPhone.isNotEmpty ? shop.ownerPhone : 'Not provided'),
           if (shop.address.isNotEmpty) _buildInfoRow('Address', shop.address),
           if (shop.gstin.isNotEmpty) _buildInfoRow('GSTIN', shop.gstin),
           _buildInfoRow('Last Synced', lastSync),
@@ -498,12 +498,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
       child: Column(
         children: [
           const Text(
-            'Share Shop Access with Staff',
+            'Pair Family & Partner Devices',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
           ),
           const SizedBox(height: 6),
           const Text(
-            'Staff members can scan this QR or enter the code to join this shop and get all products, prices & live orders.',
+            'Family members and partners can scan this QR or enter the code to join this shop and get all products, prices & live orders.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
           ),
@@ -582,8 +582,8 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
   Widget _buildDeviceRoleCard(dynamic shop) {
     final isOwner = shop.isOwner;
     final displayName = isOwner
-        ? (shop.ownerName.isNotEmpty ? shop.ownerName : 'Srikar')
-        : (shop.staffName.isNotEmpty ? shop.staffName : 'Staff');
+        ? (shop.ownerName.isNotEmpty ? shop.ownerName : 'Master Device')
+        : (shop.staffName.isNotEmpty ? shop.staffName : 'Partner Device');
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -609,7 +609,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Connected as: $displayName (${isOwner ? "Owner / Master" : "Staff"})',
+                  'Connected as: $displayName (${isOwner ? "Master Device" : "Partner Device"})',
                   style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
@@ -668,7 +668,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Waiting for the shop owner (${shop.ownerName.isNotEmpty ? shop.ownerName : "Master Device"}) to accept your join request.',
+            'Waiting for the Master Device (${shop.ownerName.isNotEmpty ? shop.ownerName : "Primary Phone"}) to approve your join request.',
             textAlign: TextAlign.center,
             style: TextStyle(
                 fontSize: 13, color: Colors.grey.shade700, height: 1.4),
@@ -685,11 +685,11 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               children: [
                 _buildPendingInfoRow('Shop Name', shop.shopName),
                 const Divider(height: 16),
-                _buildPendingInfoRow('Your Staff Name', shop.staffName),
+                _buildPendingInfoRow('Your Member Name', shop.staffName),
                 const Divider(height: 16),
                 _buildPendingInfoRow('Device ID', _syncService.deviceId),
                 const Divider(height: 16),
-                _buildPendingInfoRow('Status', '⏳ PENDING OWNER APPROVAL',
+                _buildPendingInfoRow('Status', '⏳ PENDING MASTER APPROVAL',
                     color: const Color(0xFFD97706)),
               ],
             ),
@@ -705,7 +705,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'This screen will automatically update when the owner approves your device.',
+            'This screen will automatically update when the Master Device approves your device.',
             textAlign: TextAlign.center,
             style: TextStyle(
                 fontSize: 12,
@@ -805,7 +805,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                                     color: Color(0xFF92400E)),
                               ),
                               const Text(
-                                'Staff devices waiting for your approval to connect to this shop.',
+                                'Partner devices waiting for your approval to connect to this shop.',
                                 style: TextStyle(
                                     fontSize: 12, color: Color(0xFF78350F)),
                               ),
@@ -822,7 +822,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               ),
             ],
 
-            // CONNECTED STAFF & DEVICES CARD
+            // CONNECTED PARTNER DEVICES CARD
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
@@ -857,7 +857,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                           ),
                           const SizedBox(width: 10),
                           const Text(
-                            'Connected Staff & Devices',
+                            'Connected Partner Devices',
                             style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
@@ -887,7 +887,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Text(
-                        'No other devices connected yet. Staff can scan the QR code above or enter code "${shop.shopCode}" to send a join request.',
+                        'No other devices connected yet. Partners can scan the QR code above or enter code "${shop.shopCode}" to send a join request.',
                         style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey.shade600,
@@ -1250,7 +1250,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               ),
               const SizedBox(width: 10),
               const Text(
-                'Your Staff Permissions',
+                'Your Partner Device Permissions',
                 style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -1378,12 +1378,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'I am the Shop Owner',
+                        '👑 Master Device (Primary Phone)',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
                       ),
                       SizedBox(height: 4),
                       Text(
-                        'Create a new shop, generate a Shop Code, and share with your team.',
+                        'Create a new shop database, generate a Shop Code, and pair partner devices.',
                         style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                       ),
                     ],
@@ -1396,7 +1396,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
         ),
         const SizedBox(height: 14),
 
-        // Option 2: Staff Member
+        // Option 2: Partner Member
         InkWell(
           onTap: () => setState(() => _activeView = 2),
           borderRadius: BorderRadius.circular(16),
@@ -1426,7 +1426,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'I am Staff / Worker',
+                        '🤝 Partner Device (Family Member)',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
                       ),
                       SizedBox(height: 4),
@@ -1585,14 +1585,14 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                 ),
                 const SizedBox(width: 4),
                 const Text(
-                  'Join Existing Shop (Staff)',
+                  'Join Existing Shop (Partner Device)',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             const Text(
-              'Enter the 6-character Shop Code shared by your shop owner (e.g. SH-8492).',
+              'Enter the 6-character Shop Code shared by your Master Device (e.g. SH-8492).',
               style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
             ),
             const SizedBox(height: 16),
@@ -1619,7 +1619,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               controller: _staffNameController,
               decoration: const InputDecoration(
                 labelText: 'Your Name or Counter *',
-                hintText: 'e.g. Counter 1, Raju, Warehouse',
+                hintText: 'e.g. Sridevi, Srikar, Counter 1',
                 prefixIcon: Icon(Icons.person_pin_rounded),
                 border: OutlineInputBorder(),
               ),

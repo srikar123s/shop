@@ -626,3 +626,39 @@ class OrderDetails {
   final OrderEntity order;
   final List<OrderItemEntity> items;
 }
+
+class ProcurementItem {
+  const ProcurementItem({
+    required this.itemId,
+    required this.orderId,
+    required this.customerName,
+    this.customerPhone,
+    required this.takenBy,
+    required this.createdAt,
+    required this.itemName,
+    required this.unit,
+    required this.quantityOrdered,
+    required this.quantityGiven,
+    required this.unitPrice,
+    this.options = const [],
+    this.productSnapshot = '',
+  });
+
+  final int itemId;
+  final int orderId;
+  final String customerName;
+  final String? customerPhone;
+  final String takenBy;
+  final DateTime createdAt;
+  final String itemName;
+  final String unit;
+  final double quantityOrdered;
+  final double quantityGiven;
+  final double unitPrice;
+  final List<String> options;
+  final String productSnapshot;
+
+  double get quantityPending =>
+      (quantityOrdered - quantityGiven).clamp(0.0, double.infinity);
+  String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
+}

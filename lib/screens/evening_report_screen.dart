@@ -24,13 +24,21 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
 
   Future<void> _loadReport() async {
     setState(() => _loading = true);
-    final report =
-        await DatabaseHelper.instance.getEveningClosingReport(_selectedDate);
-    if (!mounted) return;
-    setState(() {
-      _report = report;
-      _loading = false;
-    });
+    try {
+      final report =
+          await DatabaseHelper.instance.getEveningClosingReport(_selectedDate);
+      if (!mounted) return;
+      setState(() {
+        _report = report;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading evening closing report: $e');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _pickDate() async {

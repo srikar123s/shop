@@ -10,6 +10,7 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/home_screen.dart';
+import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
@@ -21,6 +22,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DatabaseHelper.instance.database;
   await ShopCustomizationService.instance.initialize();
+  unawaited(AppNotificationService.instance.initialize());
   if (kPureOfflineMode) {
     await ShopCustomizationService.instance.setPureOfflineMode(true);
   } else {

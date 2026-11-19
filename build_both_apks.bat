@@ -1,4 +1,12 @@
 @echo off
+setlocal
+rem Ensure Flutter SDK is on PATH if not already present
+where flutter >nul 2>&1
+if errorlevel 1 (
+    if exist "C:\Users\srikar\Downloads\flutter\bin" (
+        set "PATH=C:\Users\srikar\Downloads\flutter\bin;%PATH%"
+    )
+)
 echo ================================================================
 echo   Building Both APKs: Shop Wholesale (Cloud) and Shop Retail (Local)
 echo ================================================================
@@ -17,8 +25,8 @@ if errorlevel 1 (
     echo [ERROR] Failed to build Shop Wholesale APK.
     exit /b %errorlevel%
 )
-copy /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-wholesale-cloud-release.apk" >nul
-copy /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-cloud-sync-release.apk" >nul
+move /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-wholesale-cloud-release.apk" >nul
+if exist "build\app\outputs\flutter-apk\app-release.apk.sha1" del /f /q "build\app\outputs\flutter-apk\app-release.apk.sha1" >nul 2>&1
 echo [SUCCESS] Saved app-wholesale-cloud-release.apk (Shop Wholesale)
 
 rem Clean intermediate jar before second build to avoid cross-flavor R8 lock
@@ -31,9 +39,13 @@ if errorlevel 1 (
     echo [ERROR] Failed to build Shop Retail APK.
     exit /b %errorlevel%
 )
-copy /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-retail-local-release.apk" >nul
-copy /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-local-offline-release.apk" >nul
+move /Y "build\app\outputs\flutter-apk\app-release.apk" "build\app\outputs\flutter-apk\app-retail-local-release.apk" >nul
+if exist "build\app\outputs\flutter-apk\app-release.apk.sha1" del /f /q "build\app\outputs\flutter-apk\app-release.apk.sha1" >nul 2>&1
 echo [SUCCESS] Saved app-retail-local-release.apk (Shop Retail)
+
+rem Clean up any legacy or duplicate APK copies if present
+if exist "build\app\outputs\flutter-apk\app-cloud-sync-release.apk" del /f /q "build\app\outputs\flutter-apk\app-cloud-sync-release.apk" >nul 2>&1
+if exist "build\app\outputs\flutter-apk\app-local-offline-release.apk" del /f /q "build\app\outputs\flutter-apk\app-local-offline-release.apk" >nul 2>&1
 
 echo.
 echo ================================================================

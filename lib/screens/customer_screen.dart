@@ -610,7 +610,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                         name: 'Walk-in Customer',
                         phone: 'Counter Sale',
                       );
-                      if (!mounted) return;
+                      if (!context.mounted) return;
                       Navigator.push(
                         context,
                         MaterialPageRoute<void>(

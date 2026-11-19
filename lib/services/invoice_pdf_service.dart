@@ -934,7 +934,7 @@ class InvoicePdfService {
     );
     final tempDir = await getTemporaryDirectory();
     final cleanName = customerName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-    final file = File('${tempDir.path}/Khata_Statement_${cleanName}.pdf');
+    final file = File('${tempDir.path}/Khata_Statement_$cleanName.pdf');
     await file.writeAsBytes(bytes);
 
     await Share.shareXFiles(

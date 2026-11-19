@@ -68,7 +68,15 @@ class ShareService {
     double calculatedTotal = 0;
 
     final itemsData = details.items.map((item) {
-      final opts = item.options.map((e) => '${e.optionName}: ${e.optionValue}').join(', ');
+      final seenOpts = <String>{};
+      final distinctOpts = <String>[];
+      for (final e in item.options) {
+        final k = '${e.optionName.trim().toLowerCase()}:${e.optionValue.trim().toLowerCase()}';
+        if (e.optionName.trim().isNotEmpty && seenOpts.add(k)) {
+          distinctOpts.add('${e.optionName}: ${e.optionValue}');
+        }
+      }
+      final opts = distinctOpts.join(', ');
       final qtyStr = item.quantityOrdered % 1 == 0 ? item.quantityOrdered.toInt().toString() : item.quantityOrdered.toString();
       
       double price = 0;
@@ -462,9 +470,15 @@ class ShareService {
     buffer.writeln('--------------------------------');
     for (int i = 0; i < details.items.length; i++) {
       final item = details.items[i];
-      final opts = item.options
-          .map((e) => '${e.optionName}: ${e.optionValue}')
-          .join(', ');
+      final seenOpts = <String>{};
+      final distinctOpts = <String>[];
+      for (final e in item.options) {
+        final k = '${e.optionName.trim().toLowerCase()}:${e.optionValue.trim().toLowerCase()}';
+        if (e.optionName.trim().isNotEmpty && seenOpts.add(k)) {
+          distinctOpts.add('${e.optionName}: ${e.optionValue}');
+        }
+      }
+      final opts = distinctOpts.join(', ');
       final optsStr = opts.isNotEmpty ? ' ($opts)' : '';
       final orderedStr = item.quantityOrdered % 1 == 0
           ? item.quantityOrdered.toInt().toString()

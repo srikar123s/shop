@@ -6,6 +6,7 @@ import 'package:shop/screens/app_documentation_screen.dart';
 import 'package:shop/screens/quantity_shortcuts_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
+import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
@@ -27,11 +28,26 @@ class ShopSettingsScreen extends StatefulWidget {
 
 class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   final _customService = ShopCustomizationService.instance;
+  bool _remindersEnabled = true;
+  NotificationScheduleMode _scheduleMode =
+      NotificationScheduleMode.threeTimesDaily;
 
   @override
   void initState() {
     super.initState();
     _customService.addListener(_onServiceUpdate);
+    _loadNotificationPref();
+  }
+
+  Future<void> _loadNotificationPref() async {
+    final enabled = await AppNotificationService.instance.isEnabled();
+    final mode = await AppNotificationService.instance.getScheduleMode();
+    if (mounted) {
+      setState(() {
+        _remindersEnabled = enabled;
+        _scheduleMode = mode;
+      });
+    }
   }
 
   @override
@@ -496,7 +512,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                          'Permission Denied: Only shop owner can modify quantity shortcuts.'),
+                          'Permission Denied: Only Master Device can modify quantity shortcuts.'),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -568,6 +584,159 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Order & Procurement Reminders
+          Text(
+            'ORDER & PROCUREMENT NOTIFICATIONS',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: Colors.grey.shade700,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  secondary: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.notifications_active_outlined,
+                        color: Colors.teal.shade700),
+                  ),
+                  title: const Text(
+                    'Pending Orders & Procurement Alerts',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: const Text(
+                    'Sends alert for unclosed orders and items to procure.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  value: _remindersEnabled,
+                  onChanged: (val) async {
+                    await AppNotificationService.instance.setEnabled(val);
+                    setState(() => _remindersEnabled = val);
+                  },
+                ),
+                if (_remindersEnabled) ...[
+                  const Divider(height: 1),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Notification Frequency:',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF0F766E)),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Text('3 Times Daily (Smart)'),
+                                selected: _scheduleMode ==
+                                    NotificationScheduleMode.threeTimesDaily,
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setScheduleMode(
+                                            NotificationScheduleMode
+                                                .threeTimesDaily);
+                                    setState(() => _scheduleMode =
+                                        NotificationScheduleMode
+                                            .threeTimesDaily);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Text('Hourly (7 AM - 9 PM)'),
+                                selected: _scheduleMode ==
+                                    NotificationScheduleMode.hourly,
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setScheduleMode(
+                                            NotificationScheduleMode.hourly);
+                                    setState(() => _scheduleMode =
+                                        NotificationScheduleMode.hourly);
+                                  }
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            _scheduleMode ==
+                                    NotificationScheduleMode.threeTimesDaily
+                                ? '• 8:00 AM (Morning Godown) • 2:00 PM (Midday Check) • 8:30 PM (Closing Siren)'
+                                : '• Fires every 1 hour between 7:00 AM and 9:00 PM',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child:
+                        Icon(Icons.send_rounded, color: Colors.blue.shade700),
+                  ),
+                  title: const Text('Send Test Notification Now',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  subtitle: const Text(
+                    'Triggers the pending orders / procurement notification immediately',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  trailing: TextButton.icon(
+                    icon: const Icon(Icons.notifications, size: 16),
+                    label: const Text('Test'),
+                    onPressed: () async {
+                      await AppNotificationService.instance
+                          .checkAndNotify(force: true);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Test reminder notification sent! Check your notification bar.'),
+                            backgroundColor: Colors.teal,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),
@@ -645,12 +814,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   child: Icon(Icons.cloud_sync_rounded,
                       color: Colors.indigo.shade700),
                 ),
-                title: const Text('Shop Sync & Staff Sharing',
+                title: const Text('Shop Sync & Partner Devices',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(
                   ShopSyncService.instance.hasShop
                       ? 'Connected to ${ShopSyncService.instance.currentShop?.shopName} (${ShopSyncService.instance.currentShop?.shopCode})'
-                      : 'Share shop code/QR with staff for instant real-time sync',
+                      : 'Pair & sync products and live orders with family / partner devices',
                   style: const TextStyle(fontSize: 12),
                 ),
                 trailing: const Icon(Icons.chevron_right, color: Colors.grey),
@@ -667,7 +836,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
             const SizedBox(height: 20),
           ],
 
-          // Data Management & Clear (Owner / Local Only)
+          // Data Management & Clear (Master Device / Local Only)
           if (const bool.fromEnvironment('STANDALONE_LOCAL',
                   defaultValue: false) ||
               _customService.isPureOfflineMode ||

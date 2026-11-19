@@ -6,7 +6,7 @@ import 'package:shop/database/database_helper.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
-import 'package:shop/screens/order_details_screen.dart';
+import 'package:shop/screens/order_receipt_screen.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 
@@ -92,6 +92,7 @@ class _CustomerKhataPassbookScreenState
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } catch (_) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not dial $phone')),
       );
@@ -228,7 +229,7 @@ class _CustomerKhataPassbookScreenState
     );
     final notesCtrl = TextEditingController();
     String paymentMode = 'Cash';
-    bool sendReceiptOnWhatsApp = true;
+    bool sendReceiptOnWhatsApp = false;
 
     final received = await showDialog<bool>(
       context: context,
@@ -694,8 +695,8 @@ class _CustomerKhataPassbookScreenState
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: hasDue
-                    ? [const Color(0xFF7F1D1D), const Color(0xFFB91C1C)]
-                    : [const Color(0xFF065F46), const Color(0xFF047857)],
+                    ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
+                    : [const Color(0xFF064E3B), const Color(0xFF0F766E)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -732,7 +733,7 @@ class _CustomerKhataPassbookScreenState
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFFB91C1C),
+                          foregroundColor: const Color(0xFFE11D48),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           visualDensity: VisualDensity.compact,
@@ -986,6 +987,14 @@ class _CustomerKhataPassbookScreenState
                               (item['running_balance'] as num?)?.toDouble() ??
                                   0.0;
                           final orderId = item['id'] as int?;
+                          final rawMode = (item['payment_mode'] as String?)?.toUpperCase() ?? '';
+                          final modeLabel = rawMode.contains('UPI')
+                              ? '📱 UPI'
+                              : (rawMode.contains('CASH')
+                                  ? '💵 CASH'
+                                  : (rawMode.contains('CHEQUE')
+                                      ? '🧾 CHEQUE'
+                                      : (rawMode.isNotEmpty ? '🏦 $rawMode' : '')));
 
                           return Card(
                             elevation: 0.5,
@@ -999,25 +1008,167 @@ class _CustomerKhataPassbookScreenState
                             ),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(12),
-                              onTap: isDebit && orderId != null
-                                  ? () async {
-                                      await Navigator.push(
-                                        context,
-                                        MaterialPageRoute<void>(
-                                          builder: (_) => OrderDetailsScreen(
-                                            orderId: orderId,
-                                            orderRepository:
-                                                widget.orderRepository,
-                                            customerRepository:
-                                                widget.customerRepository,
-                                            productRepository:
-                                                widget.productRepository,
-                                          ),
+                              onTap: () async {
+                                if (isDebit) {
+                                  if (orderId != null &&
+                                      !subtitle.contains('Manual Udhaar')) {
+                                    await Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => OrderReceiptScreen(
+                                          orderId: orderId,
+                                          orderRepository:
+                                              widget.orderRepository,
+                                          customerRepository:
+                                              widget.customerRepository,
+                                          productRepository:
+                                              widget.productRepository,
                                         ),
-                                      );
-                                      _loadLedger();
-                                    }
-                                  : null,
+                                      ),
+                                    );
+                                    _loadLedger();
+                                  } else {
+                                    showDialog<void>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(16)),
+                                        title: const Row(
+                                          children: [
+                                            Icon(Icons.edit_note_rounded,
+                                                color: Color(0xFFBE123C)),
+                                            SizedBox(width: 8),
+                                            Text('Manual Khata Udhaar',
+                                                style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 16)),
+                                          ],
+                                        ),
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                                'Customer: ${widget.customerName}',
+                                                style: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.w600)),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              currency.format(amount),
+                                              style: const TextStyle(
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: Color(0xFFBE123C)),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text('Details: $subtitle',
+                                                style: TextStyle(
+                                                    fontSize: 13,
+                                                    color:
+                                                        Colors.grey.shade700)),
+                                            const SizedBox(height: 4),
+                                            Text('Date: $dateStr',
+                                                style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey)),
+                                          ],
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx),
+                                            child: const Text('Close'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  final pMode = (item['payment_mode'] as String?)?.toUpperCase() ?? 'PAYMENT';
+                                  final pNotes = item['notes'] as String? ?? '';
+                                  showDialog<void>(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(16)),
+                                      title: const Row(
+                                        children: [
+                                          Icon(Icons.verified_rounded,
+                                              color: Color(0xFF0F766E)),
+                                          SizedBox(width: 8),
+                                          Text('Payment Receipt',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 16)),
+                                        ],
+                                      ),
+                                      content: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Customer: ${widget.customerName}',
+                                              style: const TextStyle(
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            currency.format(amount),
+                                            style: const TextStyle(
+                                                fontSize: 22,
+                                                fontWeight: FontWeight.w900,
+                                                color: Color(0xFF059669)),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text('Collected via: $pMode',
+                                              style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold)),
+                                          const SizedBox(height: 4),
+                                          Text('Timestamp: $dateStr',
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey)),
+                                          if (pNotes.isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text('Reference: $pNotes',
+                                                style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey)),
+                                          ],
+                                        ],
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx),
+                                          child: const Text('Close'),
+                                        ),
+                                        FilledButton.icon(
+                                          style: FilledButton.styleFrom(
+                                              backgroundColor:
+                                                  const Color(0xFF25D366)),
+                                          icon: const Icon(Icons.chat_outlined,
+                                              size: 16),
+                                          label: const Text('Share WhatsApp'),
+                                          onPressed: () async {
+                                            Navigator.pop(ctx);
+                                            final shopName =
+                                                ShopCustomizationService
+                                                    .instance.shopName;
+                                            final msg =
+                                                '🙏 *Payment Confirmation - $shopName*\nCustomer: *${widget.customerName}*\nAmount Received: *${currency.format(amount)}*\nMode: *$pMode*\nDate: *$dateStr*${pNotes.isNotEmpty ? "\nNote: $pNotes" : ""}\nThank you! - *$shopName*';
+                                            await _sendWhatsAppMessage(msg);
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              },
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Column(
@@ -1027,43 +1178,91 @@ class _CustomerKhataPassbookScreenState
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 3),
-                                              decoration: BoxDecoration(
-                                                color: isDebit
-                                                    ? Colors.red.shade50
-                                                    : Colors.green.shade50,
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(
-                                                isDebit
-                                                    ? '🔴 YOU GAVE'
-                                                    : '🟢 YOU GOT',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w900,
-                                                  fontSize: 10,
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3),
+                                                decoration: BoxDecoration(
                                                   color: isDebit
-                                                      ? Colors.red.shade800
-                                                      : Colors.green.shade800,
+                                                      ? const Color(0xFFFFE4E6)
+                                                      : const Color(0xFFD1FAE5),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: Text(
+                                                  isDebit
+                                                      ? '🔴 YOU GAVE'
+                                                      : '🟢 YOU GOT',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                    fontSize: 10,
+                                                    color: isDebit
+                                                        ? const Color(0xFFBE123C)
+                                                        : const Color(0xFF065F46),
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              title,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 14,
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Row(
+                                                  children: [
+                                                    Flexible(
+                                                      child: Text(
+                                                        title,
+                                                        maxLines: 1,
+                                                        overflow:
+                                                            TextOverflow.ellipsis,
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          fontSize: 13,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    if (modeLabel.isNotEmpty &&
+                                                        !isDebit) ...[
+                                                      const SizedBox(width: 6),
+                                                      Container(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .symmetric(
+                                                                horizontal: 6,
+                                                                vertical: 2),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: Colors
+                                                              .teal.shade50,
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(4),
+                                                          border: Border.all(
+                                                              color: Colors.teal
+                                                                  .shade200,
+                                                              width: 0.8),
+                                                        ),
+                                                        child: Text(
+                                                          modeLabel,
+                                                          style: TextStyle(
+                                                            fontSize: 9,
+                                                            fontWeight:
+                                                                FontWeight.w800,
+                                                            color: Colors
+                                                                .teal.shade800,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
+                                        const SizedBox(width: 8),
                                         Text(
                                           (isDebit ? '+ ' : '- ') +
                                               currency.format(amount),
@@ -1071,8 +1270,8 @@ class _CustomerKhataPassbookScreenState
                                             fontWeight: FontWeight.w900,
                                             fontSize: 15,
                                             color: isDebit
-                                                ? Colors.red.shade800
-                                                : Colors.green.shade800,
+                                                ? const Color(0xFFBE123C)
+                                                : const Color(0xFF059669),
                                           ),
                                         ),
                                       ],
@@ -1082,7 +1281,8 @@ class _CustomerKhataPassbookScreenState
                                       subtitle,
                                       style: TextStyle(
                                           fontSize: 12,
-                                          color: Colors.grey.shade700),
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.grey.shade800),
                                     ),
                                     const SizedBox(height: 6),
                                     Row(
@@ -1090,20 +1290,49 @@ class _CustomerKhataPassbookScreenState
                                           MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
-                                          dateStr,
+                                          '📅 $dateStr',
                                           style: TextStyle(
                                               fontSize: 11,
-                                              color: Colors.grey.shade500),
+                                              color: Colors.grey.shade600),
                                         ),
-                                        Text(
-                                          'Balance: ${currency.format(runningBal)}',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
-                                            color: runningBal > 0
-                                                ? Colors.red.shade900
-                                                : Colors.green.shade800,
-                                          ),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              'Balance: ${currency.format(runningBal)}',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 12,
+                                                color: runningBal > 0
+                                                    ? Colors.red.shade900
+                                                    : Colors.green.shade800,
+                                              ),
+                                            ),
+                                            if (isDebit &&
+                                                orderId != null &&
+                                                !subtitle
+                                                    .contains('Manual Udhaar')) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.teal.shade50,
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                ),
+                                                child: const Text(
+                                                  'View Bill ➔',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Color(0xFF0F766E),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
                                         ),
                                       ],
                                     ),

@@ -538,6 +538,24 @@ class OrderRepository {
         orderBy: 'id ASC',
       );
 
+      final seenOptionKeys = <String>{};
+      final distinctOptions = <OrderItemOptionEntity>[];
+      for (final e in optionRows) {
+        final optName = (e['option_name'] as String?)?.trim() ?? '';
+        final optVal = (e['option_value'] as String?)?.trim() ?? '';
+        final key = '${optName.toLowerCase()}:${optVal.toLowerCase()}';
+        if (optName.isNotEmpty && seenOptionKeys.add(key)) {
+          distinctOptions.add(
+            OrderItemOptionEntity(
+              id: e['id'] as int,
+              orderItemId: itemId,
+              optionName: optName,
+              optionValue: optVal,
+            ),
+          );
+        }
+      }
+
       items.add(
         OrderItemEntity(
           id: itemId,
@@ -554,16 +572,7 @@ class OrderRepository {
           productSnapshot: itemRow['product_snapshot'] as String,
           description: itemRow['details'] as String?,
           notes: itemRow['notes'] as String?,
-          options: optionRows
-              .map(
-                (e) => OrderItemOptionEntity(
-                  id: e['id'] as int,
-                  orderItemId: itemId,
-                  optionName: e['option_name'] as String,
-                  optionValue: e['option_value'] as String,
-                ),
-              )
-              .toList(),
+          options: distinctOptions,
         ),
       );
     }
@@ -707,6 +716,183 @@ class OrderRepository {
     unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
+
+  Future<List<ProcurementItem>> getProcurementItems({String query = ''}) async {
+    final db = await _databaseHelper.database;
+    final allOrders = await db.query(
+      'orders',
+      where: "status NOT IN ('Completed', 'Closed')",
+      orderBy: 'created_at ASC',
+    );
+    if (allOrders.isEmpty) return [];
+
+    final result = <ProcurementItem>[];
+    for (final orderRow in allOrders) {
+      final orderId = orderRow['id'] as int;
+      final customerName = orderRow['customer_name_snapshot'] as String;
+      final notes = orderRow['notes'] as String?;
+      final breakdown = BillBreakdown.fromJsonString(notes);
+      final customerPhone =
+          (orderRow['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final rawTakenBy =
+          (orderRow['taken_by'] as String?) ?? breakdown?.takenBy;
+      final takenBy = (rawTakenBy != null &&
+              rawTakenBy.trim().isNotEmpty &&
+              rawTakenBy.trim() != 'Store')
+          ? rawTakenBy.trim()
+          : ShopSyncService.instance.currentUserOrDeviceName;
+      final createdAt =
+          DateTime.tryParse(orderRow['created_at'] as String? ?? '') ??
+              DateTime.now();
+
+      final itemRows = await db.query(
+        'order_items',
+        where: 'order_id = ? AND (quantity_ordered - quantity_given) > 0',
+        whereArgs: [orderId],
+      );
+
+      for (final itemRow in itemRows) {
+        final optRows = await db.query(
+          'order_item_options',
+          where: 'order_item_id = ?',
+          whereArgs: [itemRow['id']],
+        );
+        final options = optRows
+            .map((o) => '${o['option_name']}: ${o['option_value']}')
+            .toList();
+
+        result.add(
+          ProcurementItem(
+            itemId: itemRow['id'] as int,
+            orderId: orderId,
+            customerName: customerName,
+            customerPhone: customerPhone,
+            takenBy: takenBy,
+            createdAt: createdAt,
+            itemName: itemRow['item_name'] as String,
+            unit: itemRow['unit'] as String,
+            quantityOrdered: (itemRow['quantity_ordered'] as num).toDouble(),
+            quantityGiven: (itemRow['quantity_given'] as num).toDouble(),
+            unitPrice: (itemRow['unit_price'] as num).toDouble(),
+            options: options,
+            productSnapshot: itemRow['product_snapshot'] as String? ?? '',
+          ),
+        );
+      }
+    }
+
+    if (query.trim().isNotEmpty) {
+      final q = query.trim().toLowerCase();
+      return result.where((i) =>
+        i.itemName.toLowerCase().contains(q) ||
+        i.customerName.toLowerCase().contains(q) ||
+        i.formattedOrderId.toLowerCase().contains(q)
+      ).toList();
+    }
+
+    return result;
+  }
+
+  Future<({int pendingCount, int oldPendingCount, int toProcureCount})>
+      getPendingAndProcurementStats() async {
+    final db = await _databaseHelper.database;
+    final openOrders = await db.query(
+      'orders',
+      where: "status NOT IN ('Completed', 'Closed')",
+    );
+
+    int pendingCount = openOrders.length;
+    int oldPendingCount = 0;
+    final threeDaysAgo = DateTime.now().subtract(const Duration(days: 3));
+
+    for (final row in openOrders) {
+      final dt = DateTime.tryParse(row['created_at'] as String? ?? '');
+      if (dt != null && dt.isBefore(threeDaysAgo)) {
+        oldPendingCount++;
+      }
+    }
+
+    final procureRows = await db.rawQuery('''
+      SELECT COUNT(oi.id) as count
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status NOT IN ('Completed', 'Closed')
+        AND (oi.quantity_ordered - oi.quantity_given) > 0
+    ''');
+    int toProcureCount = 0;
+    if (procureRows.isNotEmpty && procureRows.first['count'] != null) {
+      toProcureCount = (procureRows.first['count'] as num).toInt();
+    }
+
+    return (
+      pendingCount: pendingCount,
+      oldPendingCount: oldPendingCount,
+      toProcureCount: toProcureCount,
+    );
+  }
+
+  /// Marks a specific order item as procured and delivered (quantityGiven = quantityOrdered).
+  /// Automatically updates order status to Completed if all items are now fulfilled.
+  Future<void> markItemAsProcured({
+    required int itemId,
+    required int orderId,
+    double? customQuantityGiven,
+  }) async {
+    final db = await _databaseHelper.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'order_items',
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      if (rows.isEmpty) return;
+
+      final ordered = (rows.first['quantity_ordered'] as num).toDouble();
+      final targetGiven = customQuantityGiven ?? ordered;
+      final status = _statusFromGiven(ordered, targetGiven);
+      final procurement = targetGiven >= ordered
+          ? ProcurementStatus.notRequired
+          : ProcurementStatus.toProcure;
+
+      await txn.update(
+        'order_items',
+        {
+          'quantity_given': targetGiven,
+          'status': itemStatusLabel(status),
+          'procurement_status': procurement.name,
+        },
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+
+      // Recalculate overall order status
+      final allItems = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
+      );
+      final statuses = allItems
+          .map((e) => _itemStatusFromLabel(e['status'] as String))
+          .toList();
+      final newOrderStatus = _calculateOrderStatus(statuses);
+
+      await txn.update(
+        'orders',
+        {'status': orderStatusLabel(newOrderStatus)},
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+    });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
+  }
+
+  /// Marks ALL currently pending items across all open orders as procured and delivered.
+  Future<void> markAllItemsAsProcured() async {
+    final items = await getProcurementItems();
+    for (final item in items) {
+      await markItemAsProcured(itemId: item.itemId, orderId: item.orderId);
+    }
+  }
 
   ItemStatus _statusFromGiven(double ordered, double given) {
     if (given <= 0) {

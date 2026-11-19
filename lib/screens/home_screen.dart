@@ -17,6 +17,7 @@ import 'package:shop/screens/khata_book_screen.dart';
 import 'package:shop/screens/evening_report_screen.dart';
 import 'package:shop/screens/app_documentation_screen.dart';
 
+import 'package:shop/screens/procurement_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
 import 'package:shop/services/backup_service.dart';
@@ -240,84 +241,251 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              if (!ShopCustomizationService.instance.isPureOfflineMode) ...[
-                const SizedBox(height: 8),
-                // Shop Cloud Sync Banner
-                Builder(
-                  builder: (context) {
-                    final sync = ShopSyncService.instance;
-                    final hasShop = sync.hasShop;
-                    final shop = sync.currentShop;
+              const SizedBox(height: 12),
+              // Dashboard Metrics: Pending Orders & Procurement Needed
+              FutureBuilder<({int pendingCount, int oldPendingCount, int toProcureCount})>(
+                future: widget.orderRepository.getPendingAndProcurementStats(),
+                builder: (context, snapshot) {
+                  final stats = snapshot.data;
+                  final pendingCount = stats?.pendingCount ?? 0;
+                  final oldPendingCount = stats?.oldPendingCount ?? 0;
+                  final toProcureCount = stats?.toProcureCount ?? 0;
 
-                    return Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => const ShopSyncScreen(),
-                            ),
-                          );
-                          setState(() {});
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: hasShop
-                                ? const Color(0xFFF0FDF4)
-                                : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: hasShop
-                                  ? const Color(0xFFBBF7D0)
-                                  : const Color(0xFFE2E8F0),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                hasShop
-                                    ? Icons.storefront_rounded
-                                    : Icons.cloud_queue_rounded,
-                                size: 16,
-                                color: hasShop
-                                    ? const Color(0xFF15803D)
-                                    : const Color(0xFF64748B),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  hasShop
-                                      ? '${shop!.shopName} (${shop.shopCode}) • ${shop.isOwner ? "Owner" : shop.staffName}'
-                                      : 'Share shop data with other staff (Cloud Sync)',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: hasShop
-                                        ? const Color(0xFF166534)
-                                        : const Color(0xFF475569),
+                  return Row(
+                    children: [
+                      // Pending Orders Card
+                      Expanded(
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => HistoryScreen(
+                                    customerRepository:
+                                        widget.customerRepository,
+                                    orderRepository: widget.orderRepository,
+                                    productRepository: widget.productRepository,
+                                    backupService: widget.backupService,
+                                    initialFilter: HistoryFilter.pending,
                                   ),
-                                  overflow: TextOverflow.ellipsis,
                                 ),
+                              );
+                              setState(() {});
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: pendingCount > 0
+                                    ? const Color(0xFFFFF7ED)
+                                    : const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: pendingCount > 0
+                                      ? (oldPendingCount > 0
+                                          ? Colors.red.shade400
+                                          : const Color(0xFFFDBA74))
+                                      : const Color(0xFFE2E8F0),
+                                  width: oldPendingCount > 0 ? 1.5 : 1,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.02),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
                               ),
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                size: 18,
-                                color: hasShop
-                                    ? const Color(0xFF15803D)
-                                    : const Color(0xFF94A3B8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: pendingCount > 0
+                                              ? const Color(0xFFFFEDD5)
+                                              : Colors.grey.shade200,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          Icons.pending_actions_rounded,
+                                          size: 18,
+                                          color: pendingCount > 0
+                                              ? const Color(0xFFC2410C)
+                                              : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      if (oldPendingCount > 0)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.shade100,
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            '>3 days ⚠️',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.red.shade900,
+                                            ),
+                                          ),
+                                        )
+                                      else
+                                        Icon(Icons.arrow_forward_ios_rounded,
+                                            size: 12,
+                                            color: Colors.grey.shade400),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '$pendingCount Pending',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: pendingCount > 0
+                                          ? const Color(0xFF9A3412)
+                                          : const Color(0xFF334155),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    oldPendingCount > 0
+                                        ? '$oldPendingCount need immediate close'
+                                        : (pendingCount == 0
+                                            ? 'All orders closed'
+                                            : 'Unclosed bills'),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: oldPendingCount > 0
+                                          ? Colors.red.shade800
+                                          : Colors.grey.shade600,
+                                      fontWeight: oldPendingCount > 0
+                                          ? FontWeight.w700
+                                          : FontWeight.normal,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
-                    );
-                  },
-                ),
-              ],
+                      const SizedBox(width: 10),
+
+                      // Procurement Card
+                      Expanded(
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ProcurementScreen(
+                                    orderRepository: widget.orderRepository,
+                                    customerRepository:
+                                        widget.customerRepository,
+                                    productRepository: widget.productRepository,
+                                  ),
+                                ),
+                              );
+                              setState(() {});
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: toProcureCount > 0
+                                    ? const Color(0xFFFFF1F2)
+                                    : const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: toProcureCount > 0
+                                      ? const Color(0xFFFDA4AF)
+                                      : const Color(0xFFE2E8F0),
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.02),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: toProcureCount > 0
+                                              ? const Color(0xFFFFE4E6)
+                                              : Colors.grey.shade200,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          Icons.inventory_2_outlined,
+                                          size: 18,
+                                          color: toProcureCount > 0
+                                              ? const Color(0xFFBE123C)
+                                              : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                      Icon(Icons.arrow_forward_ios_rounded,
+                                          size: 12,
+                                          color: Colors.grey.shade400),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    '$toProcureCount to Procure',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: toProcureCount > 0
+                                          ? const Color(0xFF9F1239)
+                                          : const Color(0xFF334155),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    toProcureCount == 0
+                                        ? 'All items in stock'
+                                        : 'Items not given',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
               const SizedBox(height: 16),
 
               // Hero Cards: Create Order (Full-Width in Retail, Side-by-Side with Khata in Wholesale)

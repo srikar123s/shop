@@ -79,12 +79,14 @@ class HistoryScreen extends StatefulWidget {
     required this.backupService,
     required this.customerRepository,
     required this.productRepository,
+    this.initialFilter = HistoryFilter.all,
   });
 
   final OrderRepository orderRepository;
   final BackupService backupService;
   final CustomerRepository customerRepository;
   final ProductRepository productRepository;
+  final HistoryFilter initialFilter;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -94,7 +96,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<OrderSummary> _orders = <OrderSummary>[];
   bool _loading = true;
-  HistoryFilter _filter = HistoryFilter.all;
+  late HistoryFilter _filter;
   DateTime? _selectedDate;
   HistoryViewMode _viewMode = HistoryViewMode.byCustomer;
   String? _selectedTakenBy;
@@ -102,6 +104,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
+    _filter = widget.initialFilter;
     _load();
   }
 
@@ -345,8 +348,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   if (!isLocalMode)
                     const ButtonSegment(
                       value: HistoryViewMode.byStaff,
-                      label: Text('By Staff', style: TextStyle(fontSize: 12)),
-                      icon: Icon(Icons.badge_outlined, size: 16),
+                      label: Text('By Member', style: TextStyle(fontSize: 12)),
+                      icon: Icon(Icons.person_pin_outlined, size: 16),
                     ),
                   const ButtonSegment(
                     value: HistoryViewMode.timeline,
@@ -559,7 +562,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   _viewMode == HistoryViewMode.byCustomer
                       ? 'Grouped by Customer'
                       : _viewMode == HistoryViewMode.byStaff
-                          ? 'Grouped by Staff Member'
+                          ? 'Grouped by Member / Counter'
                           : 'Individual Orders View',
                   style: TextStyle(
                       fontSize: 12,
