@@ -98,6 +98,16 @@ The project compiles into two distinct production applications, designed to run 
 * **Locked Read-Only Bills**:
   * Closed orders posted to Khata Book are permanently immutable.
   * Tapping a bill from Khata Book opens a read-only receipt view (matching the WhatsApp receipt layout) clearly displaying items, rates, taxes, and collected amounts (Cash or UPI outside) with exact timestamps.
+* **Price Validation & Discount Safeguards**:
+  * Mandatory price enforcement: prevents closing orders or sharing receipts if any line item has zero or missing prices.
+  * Strict discount clamping: non-negative values only, capped at the bill subtotal, with 0-100% boundary check for percentages to prevent negative totals.
+* **Advance Payment Detection & Settlement**:
+  * Prevents taking excess payments without clear accounting consent.
+  * When a customer pays more than their outstanding balance, the app displays a prominent amber banner showing the current due and surplus amount.
+  * Gives the merchant two explicit options: **Cap Payment at Due** or **Accept Surplus as Advance Credit** (which auto-settles against future bills and annotates the WhatsApp receipt).
+* **Excel Customer Import with Multi-Phone Support**:
+  * Import customer databases directly from Excel `.xlsx` / `.xls` spreadsheets.
+  * Automatically parses and links multiple phone numbers per customer (comma, slash, or space-separated) and initial debit/credit balances.
 * **Dual-Tone Ledger (Passbook)**:
   * 🔴 **YOU GAVE**: Debit entries for credit bills and manual loans.
   * 🟢 **YOU GOT**: Credit entries for cash/UPI/cheque collections.
@@ -114,13 +124,13 @@ The project compiles into two distinct production applications, designed to run 
 
 ---
 
-### 7. Background Notifications & Configurable Timers
-* **Automated Daily Alerts**:
-  * Scheduled reminders across the business day (Morning 7:00 AM, Afternoon 1:00 PM, Evening 9:00 PM).
-  * Pending order alerts, stale order alerts (>3 days old), and procurement alerts.
-* **Configurable Settings**:
-  * Customize notification hours and alert types in **Shop Settings → Notifications & Reminders**.
-  * Configurable stale order threshold and price caution days.
+### 7. Background Notifications & Granular Multi-Slot Timers
+* **Granular Category-Specific Timing in Shop Settings**:
+  * **Pending Orders**: Merchants can set custom alert times per day (e.g. 10:00 AM, 02:00 PM, 07:00 PM) with 1-tap `[+ Add Time]` chips and time pickers, or switch to automated interval mode (`Every 1 Hour` or `Every 2 Hours` during active shop hours).
+  * **Procurement List**: Configure arbitrary custom alert times per day (e.g. 09:30 AM, 05:30 PM) for godown stock replenishment reminders.
+  * **Daily Business Closing Report**: Schedule exact day-end closing notification time (e.g. 09:00 PM) summarizing today's turnover, completed bills, and cash/UPI collections.
+  * **Market Price Caution**: Customizable threshold (15, 30, 45, 60, 90 days) alerting when product rates have not been reviewed against market condition changes.
+  * **Instant Test Notification**: One-tap test button sends immediate test notifications to verify local channel delivery.
 
 ---
 
