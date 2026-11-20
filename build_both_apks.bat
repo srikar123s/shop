@@ -46,6 +46,8 @@ echo [SUCCESS] Saved app-retail-local-release.apk (Shop Retail)
 rem Clean up any legacy or duplicate APK copies if present
 if exist "build\app\outputs\flutter-apk\app-cloud-sync-release.apk" del /f /q "build\app\outputs\flutter-apk\app-cloud-sync-release.apk" >nul 2>&1
 if exist "build\app\outputs\flutter-apk\app-local-offline-release.apk" del /f /q "build\app\outputs\flutter-apk\app-local-offline-release.apk" >nul 2>&1
+if exist "build\app\outputs\flutter-apk\app-release.apk" del /f /q "build\app\outputs\flutter-apk\app-release.apk" >nul 2>&1
+if exist "build\app\outputs\flutter-apk\*.sha1" del /f /q "build\app\outputs\flutter-apk\*.sha1" >nul 2>&1
 
 echo.
 echo ================================================================

@@ -7,9 +7,16 @@ import 'package:shop/services/excel_product_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
 class SimpleProductAdminScreen extends StatefulWidget {
-  const SimpleProductAdminScreen({super.key, required this.productRepository});
+  const SimpleProductAdminScreen({
+    super.key,
+    required this.productRepository,
+    this.initialOnlyStalePrices = false,
+    this.staleThresholdDays = 30,
+  });
 
   final ProductRepository productRepository;
+  final bool initialOnlyStalePrices;
+  final int staleThresholdDays;
 
   @override
   State<SimpleProductAdminScreen> createState() =>
@@ -36,10 +43,13 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
   final TextEditingController _search = TextEditingController();
   List<Product> _products = <Product>[];
   bool _loading = true;
+  bool _onlyNeedsReview = false;
+  bool _onlyStalePrices = false;
 
   @override
   void initState() {
     super.initState();
+    _onlyStalePrices = widget.initialOnlyStalePrices;
     _load();
   }
 
@@ -1540,6 +1550,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                 ? categoryCtrl.text.trim()
                                 : 'General',
                             isActive: product?.isActive ?? true,
+                            needsReview: false,
                             configuration: ProductConfiguration(
                                 steps: steps,
                                 defaultUnit: unit ??
@@ -1573,10 +1584,23 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
   @override
   Widget build(BuildContext context) {
     final filter = _search.text.trim().toLowerCase();
-    final products = _products
-        .where((product) =>
-            filter.isEmpty || product.name.toLowerCase().contains(filter))
-        .toList();
+    final reviewCount = _products.where((p) => p.needsReview).length;
+    final cutoff = DateTime.now().subtract(Duration(days: widget.staleThresholdDays));
+    final staleCount = _products.where((p) {
+      final lastDate = p.priceUpdatedAt ?? p.createdAt;
+      if (lastDate == null) return true;
+      return lastDate.isBefore(cutoff);
+    }).length;
+
+    final products = _products.where((product) {
+      if (_onlyNeedsReview && !product.needsReview) return false;
+      if (_onlyStalePrices) {
+        final lastDate = product.priceUpdatedAt ?? product.createdAt;
+        if (lastDate != null && !lastDate.isBefore(cutoff)) return false;
+      }
+      return filter.isEmpty || product.name.toLowerCase().contains(filter);
+    }).toList();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage products'),
@@ -1617,6 +1641,70 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                 hintText: 'Search products',
                 leading: const Icon(Icons.search),
                 onChanged: (_) => setState(() {}))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  label: Text('All (${_products.length})'),
+                  selected: !_onlyNeedsReview && !_onlyStalePrices,
+                  onSelected: (_) => setState(() {
+                    _onlyNeedsReview = false;
+                    _onlyStalePrices = false;
+                  }),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  avatar: reviewCount > 0
+                      ? const Icon(Icons.warning_amber_rounded,
+                          size: 14, color: Color(0xFFB45309))
+                      : null,
+                  label: Text(
+                    'Needs Review ($reviewCount)',
+                    style: TextStyle(
+                      color: reviewCount > 0 && _onlyNeedsReview
+                          ? const Color(0xFFB45309)
+                          : null,
+                      fontWeight: reviewCount > 0 ? FontWeight.bold : null,
+                    ),
+                  ),
+                  backgroundColor:
+                      reviewCount > 0 ? const Color(0xFFFEF3C7) : null,
+                  selected: _onlyNeedsReview,
+                  onSelected: (_) => setState(() {
+                    _onlyNeedsReview = true;
+                    _onlyStalePrices = false;
+                  }),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  avatar: staleCount > 0
+                      ? const Icon(Icons.price_change_outlined,
+                          size: 14, color: Color(0xFFB45309))
+                      : null,
+                  label: Text(
+                    'Old Rates >${widget.staleThresholdDays}d ($staleCount)',
+                    style: TextStyle(
+                      color: staleCount > 0 && _onlyStalePrices
+                          ? const Color(0xFFB45309)
+                          : null,
+                      fontWeight: staleCount > 0 ? FontWeight.bold : null,
+                    ),
+                  ),
+                  backgroundColor:
+                      staleCount > 0 ? const Color(0xFFFFFBEB) : null,
+                  selected: _onlyStalePrices,
+                  onSelected: (_) => setState(() {
+                    _onlyStalePrices = true;
+                    _onlyNeedsReview = false;
+                  }),
+                ),
+              ],
+            ),
+          ),
+        ),
         Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -1626,13 +1714,68 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final product = products[index];
+                      final lastDate = product.priceUpdatedAt ?? product.createdAt;
+                      final isStale = lastDate == null || lastDate.isBefore(cutoff);
+                      final daysOld = lastDate != null
+                          ? DateTime.now().difference(lastDate).inDays
+                          : widget.staleThresholdDays;
+
                       return Card(
                           child: ListTile(
-                        title: Text(
-                          product.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                product.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            if (product.needsReview) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: const Color(0xFFF59E0B)),
+                                ),
+                                child: const Text(
+                                  'Needs Review',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF92400E),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (isStale) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFFBEB),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: const Color(0xFFFCD34D)),
+                                ),
+                                child: Text(
+                                  'Rate >$daysOld d',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         subtitle: Text(
                           product.configuration.steps.isEmpty
@@ -1646,6 +1789,42 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (isStale)
+                              IconButton(
+                                icon: const Icon(Icons.price_check,
+                                    color: Color(0xFF0F766E), size: 20),
+                                tooltip: 'Confirm price is current & correct',
+                                onPressed: () async {
+                                  if (product.id != null) {
+                                    await widget.productRepository
+                                        .confirmProductPrice(product.id!);
+                                    await _load();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                              'Price verified for "${product.name}". Stale alert cleared.'),
+                                          backgroundColor: const Color(0xFF0F766E),
+                                          duration: const Duration(seconds: 2),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                              ),
+                            if (product.needsReview)
+                              IconButton(
+                                icon: const Icon(Icons.done_all,
+                                    color: Color(0xFF0F766E), size: 20),
+                                tooltip: 'Mark as Reviewed',
+                                onPressed: () async {
+                                  if (product.id != null) {
+                                    await widget.productRepository
+                                        .markProductReviewed(product.id!);
+                                    await _load();
+                                  }
+                                },
+                              ),
                             Switch(
                                 value: product.isActive,
                                 onChanged: (value) async {
@@ -1654,7 +1833,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                   await _load();
                                 }),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red),
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.red),
                               tooltip: 'Delete Product',
                               onPressed: () => _confirmDeleteProduct(product),
                             ),

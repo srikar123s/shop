@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/repositories/product_repository.dart';
@@ -31,6 +32,11 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   bool _remindersEnabled = true;
   NotificationScheduleMode _scheduleMode =
       NotificationScheduleMode.threeTimesDaily;
+  TimeOfDay _morningTime = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _middayTime = const TimeOfDay(hour: 14, minute: 0);
+  TimeOfDay _eveningTime = const TimeOfDay(hour: 20, minute: 30);
+  int _priceCautionDays = 30;
+  bool _priceCautionEnabled = true;
 
   @override
   void initState() {
@@ -42,10 +48,22 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   Future<void> _loadNotificationPref() async {
     final enabled = await AppNotificationService.instance.isEnabled();
     final mode = await AppNotificationService.instance.getScheduleMode();
+    final morning = await AppNotificationService.instance.getMorningTime();
+    final midday = await AppNotificationService.instance.getMiddayTime();
+    final evening = await AppNotificationService.instance.getEveningTime();
+    final cautionDays =
+        await AppNotificationService.instance.getPriceCautionDays();
+    final cautionEnabled =
+        await AppNotificationService.instance.isPriceCautionEnabled();
     if (mounted) {
       setState(() {
         _remindersEnabled = enabled;
         _scheduleMode = mode;
+        _morningTime = morning;
+        _middayTime = midday;
+        _eveningTime = evening;
+        _priceCautionDays = cautionDays;
+        _priceCautionEnabled = cautionEnabled;
       });
     }
   }
@@ -58,6 +76,88 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
 
   void _onServiceUpdate() {
     if (mounted) setState(() {});
+  }
+
+  String _formatTimeOfDay(TimeOfDay time) {
+    final now = DateTime.now();
+    final dt = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    return DateFormat('hh:mm a').format(dt);
+  }
+
+  Future<void> _pickTime({
+    required TimeOfDay current,
+    required ValueChanged<TimeOfDay> onSaved,
+  }) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current,
+    );
+    if (picked != null) {
+      onSaved(picked);
+      setState(() {});
+    }
+  }
+
+  Widget _buildMilestoneTimeTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required TimeOfDay time,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _formatTimeOfDay(time),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.edit, size: 12, color: color),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _editShopNameDialog() async {
@@ -688,15 +788,174 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                           child: Text(
                             _scheduleMode ==
                                     NotificationScheduleMode.threeTimesDaily
-                                ? '• 8:00 AM (Morning Godown) • 2:00 PM (Midday Check) • 8:30 PM (Closing Siren)'
+                                ? '• Customizable times for morning, midday, and closing below'
                                 : '• Fires every 1 hour between 7:00 AM and 9:00 PM',
                             style: TextStyle(
                                 fontSize: 11, color: Colors.grey.shade600),
                           ),
                         ),
+                        if (_scheduleMode ==
+                            NotificationScheduleMode.threeTimesDaily) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border:
+                                  Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Tap any milestone to customize timing:',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey),
+                                ),
+                                const SizedBox(height: 8),
+                                _buildMilestoneTimeTile(
+                                  icon: Icons.wb_sunny_outlined,
+                                  color: const Color(0xFFD97706),
+                                  title: 'Morning Godown & Procurement',
+                                  time: _morningTime,
+                                  onTap: () => _pickTime(
+                                    current: _morningTime,
+                                    onSaved: (t) async {
+                                      _morningTime = t;
+                                      await AppNotificationService.instance
+                                          .setMorningTime(t);
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                _buildMilestoneTimeTile(
+                                  icon: Icons.access_time_filled_rounded,
+                                  color: const Color(0xFF0F766E),
+                                  title: 'Midday Counter Orders Check',
+                                  time: _middayTime,
+                                  onTap: () => _pickTime(
+                                    current: _middayTime,
+                                    onSaved: (t) async {
+                                      _middayTime = t;
+                                      await AppNotificationService.instance
+                                          .setMiddayTime(t);
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                _buildMilestoneTimeTile(
+                                  icon: Icons.nights_stay_outlined,
+                                  color: const Color(0xFF4338CA),
+                                  title: 'Evening Day-End Closing Siren',
+                                  time: _eveningTime,
+                                  onTap: () => _pickTime(
+                                    current: _eveningTime,
+                                    onSaved: (t) async {
+                                      _eveningTime = t;
+                                      await AppNotificationService.instance
+                                          .setEveningTime(t);
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
+                  const Divider(height: 1),
+                  ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.price_change_outlined,
+                          color: Colors.amber.shade900, size: 22),
+                    ),
+                    title: const Text(
+                      'Market Price Caution Alert',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    subtitle: const Text(
+                      'Warns when product rates haven\'t been updated for market price changes',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    trailing: Switch(
+                      value: _priceCautionEnabled,
+                      onChanged: (val) async {
+                        await AppNotificationService.instance
+                            .setPriceCautionEnabled(val);
+                        setState(() => _priceCautionEnabled = val);
+                      },
+                    ),
+                  ),
+                  if (_priceCautionEnabled) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Caution alert if price not updated for:',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF92400E)),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border:
+                                      Border.all(color: const Color(0xFFF59E0B)),
+                                ),
+                                child: Text(
+                                  '$_priceCautionDays Days',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                      color: Color(0xFFB45309)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [15, 30, 45, 60, 90].map((d) {
+                              return ChoiceChip(
+                                label: Text(
+                                    '$d Days${d == 30 ? ' (Default)' : ''}'),
+                                selected: _priceCautionDays == d,
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setPriceCautionDays(d);
+                                    setState(() => _priceCautionDays = d);
+                                  }
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
                 const Divider(height: 1),
                 ListTile(

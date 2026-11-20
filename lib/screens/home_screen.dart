@@ -20,6 +20,7 @@ import 'package:shop/screens/app_documentation_screen.dart';
 import 'package:shop/screens/procurement_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
+import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
@@ -49,6 +50,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _isTopSellingExpanded = false;
+  bool _priceCautionBannerDismissed = false;
   @override
   void initState() {
     super.initState();
@@ -211,6 +213,9 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // In-App Price Caution Notification Banner
+              _buildPriceCautionBanner(),
+
               // Top Expandable Bar: Top Selling Products
               _buildTopSellingExpandableBar(theme),
               const SizedBox(height: 8),
@@ -856,14 +861,58 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.amber.shade50,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(Icons.inventory_2_outlined,
-                                    color: Colors.amber.shade900, size: 22),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.shade50,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(Icons.inventory_2_outlined,
+                                        color: Colors.amber.shade900, size: 22),
+                                  ),
+                                  FutureBuilder<int>(
+                                    future: widget.productRepository
+                                        .getNeedsReviewCount(),
+                                    builder: (context, snap) {
+                                      final count = snap.data ?? 0;
+                                      if (count <= 0) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFEF3C7),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          border: Border.all(
+                                              color: const Color(0xFFF59E0B)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.warning_amber_rounded,
+                                                size: 12,
+                                                color: Color(0xFFB45309)),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              '$count to review',
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF92400E),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 12),
                               Text(
@@ -1134,6 +1183,137 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPriceCautionBanner() {
+    if (_priceCautionBannerDismissed) return const SizedBox.shrink();
+
+    return FutureBuilder<({bool enabled, int days, int count})>(
+      future: () async {
+        final enabled =
+            await AppNotificationService.instance.isPriceCautionEnabled();
+        if (!enabled) return (enabled: false, days: 30, count: 0);
+        final days =
+            await AppNotificationService.instance.getPriceCautionDays();
+        final count = await widget.productRepository
+            .getStalePriceCount(thresholdDays: days);
+        return (enabled: true, days: days, count: count);
+      }(),
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (data == null || !data.enabled || data.count <= 0) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFCD34D)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.amber.withValues(alpha: 0.08),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.price_change_outlined,
+                    color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => SimpleProductAdminScreen(
+                          productRepository: widget.productRepository,
+                          initialOnlyStalePrices: true,
+                          staleThresholdDays: data.days,
+                        ),
+                      ),
+                    );
+                    setState(() {});
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${data.count} Rates Not Updated',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Color(0xFF92400E),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFDE68A),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '>${data.days} days',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF78350F),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Market prices may have changed. Tap to review items.',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFFB45309),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon:
+                    const Icon(Icons.close, size: 16, color: Color(0xFF92400E)),
+                tooltip: 'Dismiss alert',
+                onPressed: () {
+                  setState(() => _priceCautionBannerDismissed = true);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

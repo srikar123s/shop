@@ -266,123 +266,136 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
       // Section 1: Dual Variants & Architecture
       _DocSection(
         title: '1. App Architecture & Dual APKs',
-        subtitle: 'Cloud Sync vs Pure Offline, Owner vs Staff pairing',
+        subtitle: 'Shop Wholesale (Cloud) vs Shop Retail (Local), Master & Partner devices',
         icon: Icons.hub_outlined,
         color: const Color(0xFF0F766E),
         initiallyExpanded: true,
         items: [
           _DocItem(
-            topic: 'Two Distinct APK Variants',
+            topic: 'Two Distinct Production APKs',
             tag: 'CORE ARCHITECTURE',
             details:
-                'The system builds into two independent application packages:\n'
-                '• Shop Cloud (app-cloud-sync-release.apk): Features live multi-device synchronization, staff pairing, role permissions, and cloud backup.\n'
-                '• Shop Local (app-local-offline-release.apk): Pure standalone offline version. Has ZERO cloud, zero sync UI, and zero owner/staff setup for 100% offline usage on a single phone.',
+                'The system builds into two independent, production-ready applications:\n'
+                '• Shop Wholesale (app-wholesale-cloud-release.apk): Features live multi-device synchronization, family Master/Partner pairing, Khata Book, wholesale cart, procurement tracking, and cloud backup.\n'
+                '• Shop Retail (app-retail-local-release.apk): Pure standalone offline version. Built with zero cloud overhead, zero sync UI, and maximum counter checkout speed for 100% offline usage on a single phone.',
             tip:
-                'Both APKs have distinct package IDs and app names so you can install and test both side-by-side on the same phone without conflict.',
+                'Both APKs have distinct package IDs and app names so you can install and run both side-by-side on the same phone without conflict.',
           ),
           _DocItem(
-            topic: 'Owner vs Staff Roles & Secure Pairing',
-            tag: 'SECURITY',
+            topic: 'Family Device Roles: Master Device & Partner Member',
+            tag: 'SECURITY & FAMILY',
             details:
-                'In Cloud mode, the first device to create the shop is the Master / Owner Device (👑).\n'
-                'Staff connect by entering the 6-character Shop Code (e.g. SH-MG27) or scanning the QR code.\n'
-                'SECURITY SAFEGUARD: Staff devices cannot join automatically. When a staff device requests to join, the Owner receives an approval prompt and must explicitly accept the request.',
+                'Designed for family-operated shops without rigid corporate hierarchy:\n'
+                '• Master Device (👑): The primary shop phone that sets up the store and configures settings.\n'
+                '• Partner Device / Family Member (👥): Family members (e.g. Srikar, Sridevi, Amma) connect via the 6-character Shop Code (e.g. SH-MG27) or QR code.\n'
+                'SECURITY SAFEGUARD: Partner devices cannot join silently. When a family member requests to join, the Master Device receives an approval prompt and must explicitly accept.',
           ),
           _DocItem(
-            topic: 'Role-Based Permissions Safeguards',
+            topic: 'Collaborative Role Permissions',
             tag: 'PERMISSIONS',
             details:
-                'The Owner can configure permissions for connected staff devices:\n'
-                '• Allow Staff to Change Unit Prices (toggle on/off)\n'
-                '• Allow Staff to Close Orders (toggle on/off)\n'
-                '• Allow Staff to Edit Quantity Step Shortcuts (toggle on/off)\n'
-                '• Allow Staff to View Grand Totals (toggle on/off)\n'
-                'Staff devices have the QR code and shop code sharing permanently hidden to prevent unauthorized sharing.',
+                'The Master Device can tailor access for connected partner devices:\n'
+                '• Allow Changing Unit Prices (toggle on/off)\n'
+                '• Allow Closing Counter Orders (toggle on/off)\n'
+                '• Allow Editing Quantity Step Shortcuts (toggle on/off)\n'
+                '• Allow Viewing Grand Totals (toggle on/off)\n'
+                'Partner devices have shop code sharing controls hidden to prevent unauthorized distribution.',
           ),
           _DocItem(
             topic: 'Offline-First SQLite Reliability',
             tag: 'DATABASE',
             details:
-                'All customer records, products, categories, bills, and payments are stored in a fast local SQLite database on your phone. Even if your internet disconnects, the app works 100% smoothly without lag. When internet reconnects, all updates automatically sync in the background.',
+                'All customer records, products, categories, bills, and payments are stored in a fast local SQLite database on your device. Counter billing works 100% smoothly with zero lag even with no internet connection. When network is restored, all data automatically synchronizes in the background.',
           ),
         ],
       ),
 
-      // Section 2: Home Screen & Quick Navigation
+      // Section 2: Home Screen & Live Dashboard Metrics
       _DocSection(
-        title: '2. Home Screen & Quick Actions',
-        subtitle: 'Side-by-side hero cards, quick price list & drawer',
+        title: '2. Home Screen & Live Dashboard Cards',
+        subtitle: 'Pending bills card, procurement counter, stale price alerts & drawer',
         icon: Icons.dashboard_customize_outlined,
         color: const Color(0xFF14B8A6),
         items: [
           _DocItem(
+            topic: 'Live Dashboard Metrics: Pending Orders & Procurement Cards',
+            tag: 'DASHBOARD CARDS',
+            details:
+                'Prominently positioned under the date header for instant counter visibility:\n'
+                '• 📋 Pending Orders Card: Shows live count of open counter bills. Displays an amber/red ">3 days ⚠️" badge with "X need immediate close" if orders are stale. Tapping it opens History filtered directly to Pending/Open bills.\n'
+                '• 📦 Procurement Card: Shows live count of items needing warehouse pickup or external purchase ("X to Procure" or "All fulfilled 🎉"). Tapping it opens the Procurement List directly.',
+          ),
+          _DocItem(
+            topic: 'Market Price Stale Caution Banner',
+            tag: 'PRICE CAUTION',
+            details:
+                'Hardware prices fluctuate frequently in current market conditions. If product prices have not been reviewed for more than X days (configurable in Settings, default 30 days), an attention banner appears directly beneath the top header: "⚠️ Some product prices have not been updated in over 30 days. Tap to review." Tapping it navigates straight to Manage Products.',
+          ),
+          _DocItem(
             topic: 'Side-by-Side Hero Cards: Create Order & Khata Book',
-            tag: 'HOME LAYOUT',
+            tag: 'QUICK ACTIONS',
             details:
-                'At the top of the Home Screen, two primary action cards are placed side-by-side:\n'
-                '• CREATE ORDER (Emerald Card): 1-tap to start a new order, pick a customer, add items, and calculate bills.\n'
-                '• KHATA BOOK (Indigo Card): 1-tap direct access to customer udhaar balances, payment collections, and WhatsApp reminders.',
+                'Large dual-color buttons for rapid counter operation:\n'
+                '• CREATE ORDER (Emerald Card): 1-tap to start a new wholesale bill, choose customer, and add items.\n'
+                '• KHATA BOOK (Indigo Card): 1-tap direct access to customer udhaar ledgers, payment collections, and WhatsApp reminders.',
           ),
           _DocItem(
-            topic: 'Quick Price List Icon (Top Bar & Sidebar)',
-            tag: 'COUNTER UTILITY',
+            topic: 'Catalog Review Indicator on Manage Products',
+            tag: 'REVIEW BADGE',
             details:
-                'When a customer walks in asking: "How much is 4-inch cutoff wheel?" or "What is the price of 25mm PVC elbow?", staff do not need to create an order.\n'
-                'Simply tap the Price Tag icon beside the sync icon (or open it from the sidebar) to instantly search prices and share quotes via WhatsApp.',
+                'When non-catalog items are added on-the-fly during order creation, the Manage Products card on the Home Screen displays an amber review indicator alerting family members to check and configure pricing.',
           ),
           _DocItem(
-            topic: 'Staff Attribution ("Taken by: [Name]")',
-            tag: 'ACCOUNTABILITY',
+            topic: 'Family Member Attribution ("Taken by: [Name]")',
+            tag: 'ATTRIBUTION',
             details:
-                'Every bill records the specific staff member or cashier who created it. The staff name is prominently shown directly under the customer name on both Recent Orders and the History screen.',
+                'Every bill records the specific family member who took the order (e.g. "Taken by: sridevi" or "Taken by: Srikar"). The member name is shown on Recent Orders, Order Details, and History.',
           ),
         ],
       ),
 
-      // Section 3: Ordering, Voice Search & Smart Cart
+      // Section 3: Ordering, Smart Search & Auto-Cataloging
       _DocSection(
-        title: '3. Order Creation & Smart Cart',
-        subtitle: 'Voice search, option matrix, quantity chips & draft auto-save',
+        title: '3. Order Creation, Search & Auto-Cataloging',
+        subtitle: 'Case-insensitive search, inline catalog addition, voice AI & draft recovery',
         icon: Icons.shopping_cart_checkout_outlined,
         color: const Color(0xFF3B82F6),
         items: [
           _DocItem(
+            topic: 'Case-Insensitive Search with Inline Auto-Cataloging',
+            tag: 'SMART SEARCH',
+            details:
+                'Search treats uppercase and lowercase identically (e.g. "paint", "Paint", "PAINT" match the same items).\n'
+                'AUTO-CATALOGING: When a customer asks for an unlisted product, typing the name in the search bar immediately displays an inline "Add [Item Name] to Cart & Catalog" button. The item is added to the cart AND automatically saved into your product catalog with a "Needs Review" flag for later pricing setup.',
+          ),
+          _DocItem(
             topic: 'Voice Search for Products, Customers & History',
             tag: 'VOICE AI',
             details:
-                'Tap the microphone icon on any search bar (Products, Customers, Price List, History). Speak in Hindi, Telugu, or English (e.g. "cutting wheel", "1 inch elbow", "Suresh"). The app listens with an animated waveform and automatically searches upon silence.',
-            tip:
-                'Ensure microphone permission is granted in Android settings when prompted.',
+                'Tap the microphone icon on any search bar. Speak in Telugu, Hindi, or English (e.g. "10 piece cut off wheel", "Red Paint 1L", "Kamal Sai"). The app animates an audio waveform and auto-searches upon silence — perfect when hands have dust or paint.',
           ),
           _DocItem(
             topic: 'Multi-Step Product Options & Pricing Matrix',
-            tag: 'CATALOG',
+            tag: 'CATALOG MATRIX',
             details:
-                'Products can have multiple step options (e.g., Size → Color → Brand). The app computes exact prices based on combinations (e.g. Asian Paints Royale 1L vs 4L, or 1/2" brass valve vs 1" brass valve).',
+                'Supports hierarchical product configurations (e.g., Size → Colour → Brand). The app computes exact prices based on the selected matrix (e.g. Paints: Red 1L vs Red 10L, or Cut-off Wheels: 4" Steel vs 14" Steel).',
           ),
           _DocItem(
-            topic: 'Quantity Quick-Add Chips (+5, +6, +10, +12)',
+            topic: 'Quantity Quick-Add Chips (+1, +5, +6, +10, +12, +50)',
             tag: 'SPEED CHECKOUT',
             details:
-                'Instead of manually typing numbers, tap quick-step chips (+1, +5, +6, +10, +12, +50, +100). Essential for hardware shops where customers buy items in standard pack sizes.',
-          ),
-          _DocItem(
-            topic: 'Handling Non-Catalog / "Other Items"',
-            tag: 'PROCUREMENT',
-            details:
-                'Need to bill an item not currently in your catalog? Tap "+ Other Item", enter the item name, required quantity, unit, and price. The item is automatically flagged with "Needs Procurement" so your helpers know it must be brought from the warehouse or outside.',
+                'Tap quick-step buttons instead of opening the keyboard. Essential for hardware items sold in standard cartons, dozens, or bundles.',
           ),
           _DocItem(
             topic: 'Draft Order Recovery (Zero Lost Bills)',
             tag: 'RELIABILITY',
             details:
-                'If you are building a 20-item bill and receive an incoming phone call or accidentally close the app, your cart is automatically preserved. Re-opening the app will prompt: "Draft order restored".',
+                'If you are preparing a large order and answer an incoming phone call or the app closes, your complete cart is saved automatically. Re-opening prompts: "Draft order restored".',
           ),
         ],
       ),
 
-      // Section 4: Bill Calculation, GST & Charges
+      // Section 4: Billing, Discounts & Tax Engine
       _DocSection(
         title: '4. Billing, Discounts & Tax Engine',
         subtitle: 'GST rates, flat/percent discounts, extra charges & grand total',
@@ -393,7 +406,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Tax & GST Calculation',
             tag: 'GST ENGINE',
             details:
-                'Toggle "Add GST" on any bill. Select standard tax rates (5%, 12%, 18%, 28%) or enter a custom rate. The taxable value, GST amount, and grand total are calculated automatically and printed on invoices.',
+                'Toggle "Add GST" on any bill. Select standard tax rates (5%, 12%, 18%, 28%) or enter a custom rate. The taxable value, GST amount, and grand total are calculated automatically and itemized on invoices.',
           ),
           _DocItem(
             topic: 'Discounts (Flat ₹ or Percentage %)',
@@ -410,107 +423,181 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
         ],
       ),
 
-      // Section 5: Fulfillment, Partial Delivery & Repeat Order
+      // Section 5: Fulfillment & 90/10 Shortage Cutting
       _DocSection(
-        title: '5. Fulfillment & Repeat Orders',
-        subtitle: 'Item delivery statuses, partial bill adjustments & 1-tap reorders',
+        title: '5. Fulfillment & Intentional Less Stock (90/10 Case)',
+        subtitle: 'Dual-linked counters, shortage cutting, partial closing & repeat orders',
         icon: Icons.fact_check_outlined,
         color: const Color(0xFFEC4899),
         items: [
           _DocItem(
+            topic: 'Dual-Linked Fulfillment Controls (GIVEN ⇄ NOT GIVEN)',
+            tag: 'FULFILLMENT UI',
+            details:
+                'Each order item features two synchronised counter cards:\n'
+                '• GIVEN: Number of units handed over to the customer.\n'
+                '• NOT GIVEN (SHORT): Number of units remaining.\n'
+                'Adjusting one automatically updates the other in real-time.',
+          ),
+          _DocItem(
+            topic: '1-Tap Quick Adjustment Chips',
+            tag: 'SPEED CONTROLS',
+            details:
+                'Instant adjustment chips above each item:\n'
+                '• [All Given]: Fulfills 100% of the ordered quantity.\n'
+                '• [1 Short], [2 Short], [5 Short]: Instantly marks standard shortage.\n'
+                '• [None Given]: Sets given to 0 when item is completely out of stock.',
+          ),
+          _DocItem(
+            topic: '90/10 Case: "✂ Finalize at X (Don\'t Procure / Cut Shortage)"',
+            tag: 'SHORTAGE CUTTING',
+            details:
+                'Solves the practical scenario where the shop intentionally delivers fewer items (e.g. customer ordered 12, but you only give 7 and agree not to supply the rest):\n'
+                '• Tapping "✂ Finalize at 7 (Don\'t Procure / Cut Shortage)" prompts a confirmation dialog.\n'
+                '• Automatically adjusts quantity ordered to 7, quantity given to 7, and drops the 5-item shortage from Procurement.\n'
+                '• Recalculates the bill total strictly for the 7 delivered units and marks the item satisfied.',
+          ),
+          _DocItem(
+            topic: 'Order Closing Partial Settlement ("Adjust Bill for Given Items & Close")',
+            tag: 'ORDER CLOSING',
+            details:
+                'When closing an order with unfulfilled items, tapping "Adjust Bill for Given Items & Close" automatically commits current counter values, adjusts item quantities to match what was given, cancels pending godown shortages, and produces a finalized bill with zero discrepancies.',
+          ),
+          _DocItem(
             topic: '1-Tap "Repeat Order" (Duplicate Past Bill)',
             tag: 'PRODUCTIVITY',
             details:
-                'When a plumber, electrician, or painter says: "Give me the exact same items I took 3 days ago", open their past order and tap the "Repeat Order" (🔁) icon in the top bar. All items, specifications, and quantities are instantly loaded into a fresh cart in 1 second.',
-          ),
-          _DocItem(
-            topic: 'Item-Level Fulfillment Statuses',
-            tag: 'DISPATCH',
-            details:
-                'Every item has three delivery states:\n'
-                '• DELIVERED (Green): All ordered units given to customer.\n'
-                '• PARTIALLY GIVEN (Orange): Some units given, remaining pending.\n'
-                '• NOT GIVEN (Red): Awaiting warehouse pickup or procurement.',
-          ),
-          _DocItem(
-            topic: 'Partial Delivery Settlement Engine',
-            tag: 'INTELLIGENT BILLING',
-            details:
-                'If a customer ordered 10 items but you only had 6 in stock, closing the order prompts you: "Adjust bill to delivered items only?". Selecting this recalculates the bill to charge only for the 6 items handed over and saves an audit note: "Closed with partial items delivered".',
+                'When a regular contractor asks for the exact same materials they took last week, open their past order and tap the "Repeat Order" (🔁) icon in the top bar. All items, specifications, and quantities load into a fresh cart in 1 second.',
           ),
         ],
       ),
 
-      // Section 6: Payments, Khata (Udhaar) & Dynamic UPI QR
+      // Section 6: Khata Book & Locked Read-Only Bills
       _DocSection(
-        title: '6. Upgraded Khata Book, Passbook & UPI QR',
-        subtitle: 'Complete Udhaar ledger, debt ageing, passbook, PDF statements & WhatsApp reminders',
+        title: '6. Khata Book (Udhaar) & Locked Read-Only Bills',
+        subtitle: 'Immutable closed bills, receipt view, debt ageing & WhatsApp reminders',
         icon: Icons.account_balance_wallet_outlined,
         color: const Color(0xFFD97706),
         items: [
           _DocItem(
+            topic: 'Locked Read-Only Bills Once in Khata Book',
+            tag: 'AUDIT SECURITY',
+            details:
+                'Once an order is closed and posted to Khata Book, it is permanently locked against modifications or tampering.\n'
+                'When viewing a customer\'s transactions in Khata Book, tapping on a bill opens an authentic read-only receipt view (styled like the WhatsApp receipt photo) clearly stating:\n'
+                '• Item names, quantities, and rates.\n'
+                '• Amounts collected outside via Cash or UPI with exact timestamps.\n'
+                '• Final balance due (Udhaar).',
+          ),
+          _DocItem(
             topic: 'Customer Khata Passbook (Dual-Tone Ledger)',
             tag: 'PASSBOOK',
             details:
-                'Tap on any customer in Khata to open their dedicated Passbook:\n'
-                '• 🔴 YOU GAVE: Debit entries for bills & credit given with item count & bill amounts.\n'
-                '• 🟢 YOU GOT: Credit entries for cash/UPI/cheque payments received with notes.\n'
-                '• Running Balance calculated automatically after every single transaction.\n'
-                '• Sticky bottom action bar with "+ YOU GAVE" (manual debit/old balance) and "+ YOU GOT" (quick receive).',
+                'Dedicated customer ledger screen:\n'
+                '• 🔴 YOU GAVE: Debit entries for delivered goods and manual credits.\n'
+                '• 🟢 YOU GOT: Credit entries for cash/UPI payments received.\n'
+                '• Running Balance calculated automatically after every entry.\n'
+                '• Quick action buttons for "+ YOU GAVE" and "+ YOU GOT".',
           ),
           _DocItem(
             topic: 'Debt Ageing & Overdue Tracking (> 30 Days)',
             tag: 'AGEING ALERT',
             details:
-                'The Khata Book tracks how long debts have been pending:\n'
-                '• Smart Badges show exact pending days (e.g. ⚠️ 45 days overdue).\n'
+                'Tracks outstanding balances by age:\n'
+                '• Badges show exact overdue duration (e.g. ⚠️ 45 days overdue).\n'
                 '• Dashboard displays Total Market Udhaar and Overdue >30 Days metrics.\n'
-                '• 1-tap filter for "Overdue >30d" lets you target customers needing urgent recovery.',
+                '• 1-tap filter for "Overdue >30d" for prioritized collection follow-ups.',
           ),
           _DocItem(
-            topic: '3 Smart WhatsApp Reminder Templates',
-            tag: 'WHATSAPP',
+            topic: 'WhatsApp Reminders with Direct UPI Pay Link',
+            tag: 'WHATSAPP RECOVERY',
             details:
-                'Tap "Remind" on any customer card to choose from 3 tailored templates:\n'
-                '1. Friendly / Gentle Reminder: Polite request with your UPI ID.\n'
-                '2. Formal Due Notice: Formal account statement with days overdue.\n'
-                '3. Instant 1-Tap UPI Pay Link: Pre-filled deep link that opens Google Pay or PhonePe with the exact amount ready to pay.',
+                'Tap "Remind" on any customer card to send an instant WhatsApp notice with an embedded UPI payment link. Contractors tap the link to open GPay/PhonePe with the exact amount pre-filled.',
           ),
           _DocItem(
             topic: 'Download & Share Customer Statement PDF',
             tag: 'PDF STATEMENT',
             details:
-                'Tap "Statement PDF" to generate a professional A4 statement of account for any customer. Includes Shop Header, GSTIN, complete transaction ledger table with running balances, summary box, and an embedded Dynamic UPI QR code for direct scan-and-pay.',
+                'Generates an A4 PDF statement of account complete with Shop Header, GSTIN, chronological ledger table, running balance, and embedded Dynamic UPI QR code.',
           ),
           _DocItem(
-            topic: 'Market Udhaar Summary Report (PDF)',
-            tag: 'OWNER REPORT',
-            details:
-                'Tap the PDF icon on the Khata Book top bar to download or WhatsApp a complete 1-page Market Credit Summary report showing total market outstanding, active debtor count, and table of every customer with their phone and pending balance.',
-          ),
-          _DocItem(
-            topic: 'Instant Dynamic UPI QR Code',
+            topic: 'Dynamic NPCI UPI QR Code',
             tag: 'SCAN & PAY',
             details:
-                'Tap the "UPI QR" button on any bill. The app generates an official NPCI QR code containing your shop UPI ID and the exact due amount. The customer scans with Google Pay, PhonePe, Paytm, or BHIM to pay instantly without typing numbers.',
-            tip:
-                'Be sure to set your shop UPI ID in Shop Settings → INVOICE, UPI & DIGITAL STAMP.',
-          ),
-          _DocItem(
-            topic: 'Oldest-First Payment Allocation',
-            tag: 'ACCOUNTING',
-            details:
-                'When a customer pays a lumpsum amount (e.g. ₹5,000 towards an ₹8,000 credit), the app automatically credits and marks the oldest pending bills as PAID first, and leaves remaining balance on the latest bill.',
+                'Tap "UPI QR" on any bill. Generates a standard NPCI QR code containing your shop UPI ID and exact due amount. Customers scan with Google Pay, PhonePe, Paytm, or BHIM to pay instantly without typing numbers.',
           ),
         ],
       ),
 
-      // Section 7: Printing, PDF Invoices & Delivery Challans
+      // Section 7: Procurement Management & Godown Workflow
       _DocSection(
-        title: '7. Thermal Printing & PDF Bills',
+        title: '7. Procurement Management & Godown System',
+        subtitle: 'Item shortages, mark as procured, godown buying list & shortage cancel',
+        icon: Icons.inventory_2_outlined,
+        color: const Color(0xFF0284C7),
+        items: [
+          _DocItem(
+            topic: 'Centralized Procurement List Screen',
+            tag: 'GODOWN TRACKING',
+            details:
+                'Aggregates every shortage across all active orders into a single purchase list:\n'
+                '• Grouped by product category (Paints, Hardware, Tools).\n'
+                '• Displays exact shortage quantity, customer name, order number, and creator.\n'
+                '• Live search bar to search by product name, customer, or order ID.',
+          ),
+          _DocItem(
+            topic: '1-Tap "Mark as Procured" & "Mark All as Procured"',
+            tag: 'STOCK REPLENISHMENT',
+            details:
+                'When goods arrive from the distributor or warehouse:\n'
+                '• Tap "Mark as Procured" on any item to instantly mark it delivered.\n'
+                '• Tap "Mark All as Procured" in the top bar to fulfill all pending shortages in one tap.\n'
+                '• If all items of an order are fulfilled, the order automatically transitions to Completed.',
+          ),
+          _DocItem(
+            topic: '✂ Cut Shortage Directly from Procurement',
+            tag: 'SUPPLIER UNAVAILABLE',
+            details:
+                'If a distributor no longer has an item in stock, tap "✂ Cut Shortage" directly inside the Procurement List. The item is removed from the procurement list and the customer\'s bill is automatically adjusted.',
+          ),
+        ],
+      ),
+
+      // Section 8: Notification & Reminder Engine
+      _DocSection(
+        title: '8. Automated Notifications & Alert Timers',
+        subtitle: 'Daily background reminders, procurement alerts & configurable timers',
+        icon: Icons.notifications_active_outlined,
+        color: const Color(0xFFD97706),
+        items: [
+          _DocItem(
+            topic: 'Daily Multi-Schedule Background Notifications',
+            tag: 'DAILY ALERTS',
+            details:
+                'The app runs an intelligent background notification engine sending alerts at key business hours (e.g. 7:00 AM morning briefing, 1:00 PM afternoon check, 9:00 PM shop closing):\n'
+                '• Pending Orders Alert: "You have X unclosed bills waiting at the counter."\n'
+                '• Stale Orders Alert: "X orders taken >3 days ago need immediate closing."\n'
+                '• Procurement Alert: "X items need procurement. Tap to open Procurement List."',
+          ),
+          _DocItem(
+            topic: 'Configurable Notification Timers in Settings',
+            tag: 'CUSTOM TIMING',
+            details:
+                'In Shop Settings under NOTIFICATIONS & REMINDERS, customize:\n'
+                '• Preferred alert hours (e.g. Morning 7 AM, Afternoon 1 PM, Evening 9 PM).\n'
+                '• Enable / disable procurement alerts or pending order reminders.\n'
+                '• Stale Order Threshold (configure days before an order is marked overdue).\n'
+                '• Price Caution Days (configure days before unupdated prices trigger a caution).',
+          ),
+        ],
+      ),
+
+      // Section 9: Thermal Printing & PDF Invoices
+      _DocSection(
+        title: '9. Thermal Printing & PDF Bills',
         subtitle: '58mm thermal rolls, PDF invoices, and delivery challans',
         icon: Icons.print_outlined,
-        color: const Color(0xFF0284C7),
+        color: const Color(0xFF475569),
         items: [
           _DocItem(
             topic: 'Direct Bluetooth Thermal Printer Support (58mm)',
@@ -528,15 +615,15 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Delivery Challan (No-Price Dispatch Slip)',
             tag: 'LOGISTICS',
             details:
-                'When dispatching goods via auto, rickshaw, or helper, you do not want to reveal prices or profit margins. Tap "Delivery Challan" to generate a dispatch slip showing items, quantities, and customer address only — with prices completely omitted.',
+                'When dispatching goods via auto, rickshaw, or helper, tap "Delivery Challan" to generate a dispatch slip showing items, quantities, and customer address with prices completely omitted.',
           ),
         ],
       ),
 
-      // Section 8: Analytics & Evening Closing Report
+      // Section 10: Analytics & Evening Reports
       _DocSection(
-        title: '8. Analytics & Evening Reports',
-        subtitle: 'Top products, day-end closing report, WhatsApp to owner',
+        title: '10. Analytics & Evening Reports',
+        subtitle: 'Top products, day-end closing report, WhatsApp to family',
         icon: Icons.analytics_outlined,
         color: const Color(0xFF059669),
         items: [
@@ -544,7 +631,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Top Selling Products Analytics',
             tag: 'BUSINESS INSIGHTS',
             details:
-                'Available at the top of the Sidebar drawer and as a dedicated screen. View your best-performing inventory filtered by Today, This Week, This Month, or All Time. Toggle sorting between Highest Quantity Sold and Highest Revenue Generated.',
+                'View your best-performing inventory filtered by Today, This Week, This Month, or All Time. Toggle sorting between Highest Quantity Sold and Highest Revenue Generated.',
           ),
           _DocItem(
             topic: 'Evening Shop Closing Report (Day-End WhatsApp)',
@@ -555,14 +642,14 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
                 '• Breakdown by Cash (₹) vs UPI (₹) vs Udhaar (₹)\n'
                 '• Completed vs Pending Orders\n'
                 '• Top Selling Item of the Day\n'
-                '• 1-Click "Send Day-End Summary via WhatsApp" directly to the Shop Owner.',
+                '• 1-Click "Send Day-End Summary via WhatsApp" directly to family members.',
           ),
         ],
       ),
 
-      // Section 9: Catalog, Excel Import/Export & Shortcuts
+      // Section 11: Catalog & Excel Tools
       _DocSection(
-        title: '9. Catalog & Excel Spreadsheet Tools',
+        title: '11. Catalog & Excel Spreadsheet Tools',
         subtitle: 'Bulk product upload, quantity step shortcuts & backup',
         icon: Icons.table_chart_outlined,
         color: const Color(0xFF6366F1),
@@ -571,23 +658,23 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Excel & CSV Catalog Import / Export',
             tag: 'BULK CATALOG',
             details:
-                'Easily upload thousands of hardware items at once using standard Excel (.xlsx) files. The parser handles item names, categories, units, and combination pricing matrices. You can also export your catalog anytime to Excel.',
+                'Upload thousands of hardware items at once using standard Excel (.xlsx) files. The parser handles item names, categories, units, and combination pricing matrices. Export catalog anytime to Excel.',
           ),
           _DocItem(
             topic: 'Custom Quantity Step Shortcuts',
             tag: 'CONFIG',
             details:
-                'Configure global quick-add buttons in Shop Settings (e.g. +5, +6, +10, +12). You can also set custom shortcuts for specific products (e.g., pipes sold in 10s vs screws sold in 100s).',
+                'Configure global quick-add buttons in Shop Settings (e.g. +5, +6, +10, +12). Custom shortcuts can also be set for specific products.',
           ),
         ],
       ),
 
-      // Section 10: Shop Settings & Customization
+      // Section 12: Shop Settings & Branding
       _DocSection(
-        title: '10. Shop Settings & Branding',
-        subtitle: 'Shop details, digital stamp, language & data safety',
+        title: '12. Shop Settings, Digital Stamp & Data Safety',
+        subtitle: 'Shop details, digital stamp, notification timers, language & safety',
         icon: Icons.settings_suggest_outlined,
-        color: const Color(0xFF475569),
+        color: const Color(0xFF334155),
         items: [
           _DocItem(
             topic: 'Branding: Name, Phone, Address, GSTIN & UPI ID',
@@ -611,7 +698,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Data Safety & Reset Controls',
             tag: 'SAFETY CONTROLS',
             details:
-                'The settings screen includes granular data controls protected for Owner devices:\n'
+                'Settings includes protected data safety controls:\n'
                 '• Clear Past Orders (keeps catalog and customer list safe)\n'
                 '• Clear Products Catalog (keeps orders safe)\n'
                 '• Reset All Shop Data (factory reset with double confirmation).',

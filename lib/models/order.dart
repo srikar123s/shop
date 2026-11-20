@@ -535,6 +535,7 @@ class OrderItemEntity {
   }
 
   OrderItemEntity copyWith({
+    double? quantityOrdered,
     double? quantityGiven,
     ItemStatus? status,
     ProcurementStatus? procurementStatus,
@@ -553,7 +554,7 @@ class OrderItemEntity {
       orderId: orderId,
       productId: productId,
       itemName: itemName,
-      quantityOrdered: quantityOrdered,
+      quantityOrdered: quantityOrdered ?? this.quantityOrdered,
       quantityGiven: quantityGiven ?? this.quantityGiven,
       unit: unit,
       status: status ?? this.status,

@@ -120,6 +120,74 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     await _load();
   }
 
+  Future<void> _confirmCutShortage(OrderItemEntity passedItem, int index) async {
+    final currentItem = (_details != null && index < _details!.items.length)
+        ? _details!.items[index]
+        : passedItem;
+    final given = currentItem.quantityGiven;
+    final ordered = currentItem.quantityOrdered;
+    final unit = currentItem.unit;
+    final fmtGiven = given % 1 == 0 ? given.toInt().toString() : given.toString();
+    final fmtOrdered = ordered % 1 == 0 ? ordered.toInt().toString() : ordered.toString();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cut Shortage for "${currentItem.itemName}"?'),
+        content: Text(
+          'Customer was given $fmtGiven $unit out of $fmtOrdered $unit ordered.\n\n'
+          'Finalizing at $fmtGiven $unit will:\n'
+          '• Remove remaining shortage from Procurement\n'
+          '• Recalculate bill total for only the delivered items\n'
+          '• Mark this item as fully satisfied',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.content_cut_rounded, size: 16),
+            label: Text('Finalize at $fmtGiven $unit'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      if (currentItem.id != null && _details?.order.id != null) {
+        // First sync current on-screen fulfillment for all items
+        await widget.orderRepository.updateOrderFulfillment(
+          orderId: _details!.order.id!,
+          items: _details!.items,
+        );
+        await widget.orderRepository.cancelItemShortage(
+          itemId: currentItem.id!,
+          orderId: _details!.order.id!,
+          targetGiven: given,
+        );
+        await _load();
+      } else {
+        setState(() {
+          _details!.items[index] = currentItem.copyWith(
+            quantityOrdered: given,
+            quantityGiven: given,
+          );
+        });
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✂️ "${currentItem.itemName}" finalized at $fmtGiven $unit. Shortage dropped.'),
+            backgroundColor: const Color(0xFF0F766E),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _closeOrder() async {
     if (_details == null || !mounted) return;
     final order = _details!.order;
@@ -402,6 +470,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     if (!mounted || choice == null || choice == 'cancel') return;
 
     if (choice == 'delivered_only') {
+      // First save current item quantities given from the screen
+      await widget.orderRepository.updateOrderFulfillment(
+        orderId: order.id!,
+        items: _details!.items,
+      );
       await widget.orderRepository.closeOrderWithDeliveredItemsOnly(
         orderId: order.id!,
       );
@@ -1807,6 +1880,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                     item.copyWith(quantityGiven: newGiven);
                               });
                             },
+                            onCutShortage: () => _confirmCutShortage(_details!.items[index], index),
                           ),
                         ],
                       ),
@@ -1947,12 +2021,14 @@ class _DualFulfillmentWidget extends StatelessWidget {
     required this.given,
     required this.unit,
     required this.onChanged,
+    this.onCutShortage,
   });
 
   final double ordered;
   final double given;
   final String unit;
   final ValueChanged<double> onChanged;
+  final VoidCallback? onCutShortage;
 
   String _format(double v) => v % 1 == 0 ? v.toInt().toString() : v.toString();
 
@@ -2173,6 +2249,38 @@ class _DualFulfillmentWidget extends StatelessWidget {
                 ],
               ),
             ),
+            if (onCutShortage != null) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onCutShortage,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.content_cut_rounded,
+                          size: 14, color: Color(0xFFB45309)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Finalize at ${_format(given)} $unit (Don\'t Procure / Cut Shortage)',
+                        style: const TextStyle(
+                          color: Color(0xFF92400E),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),

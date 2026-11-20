@@ -11,13 +11,13 @@ class ProductRepository {
 
   Future<List<Product>> searchProducts(String query) async {
     final db = await _databaseHelper.database;
-    final normalized = query.trim();
+    final normalized = query.trim().toLowerCase();
     final result = await db.query(
       'products',
       where: normalized.isEmpty
           ? 'is_active = 1'
           : '''is_active = 1 AND
-            (name LIKE ? OR category LIKE ? OR configuration LIKE ?)''',
+            (LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(configuration) LIKE ?)''',
       whereArgs: normalized.isEmpty
           ? null
           : <Object?>['%$normalized%', '%$normalized%', '%$normalized%'],
@@ -72,9 +72,11 @@ class ProductRepository {
 
     // 1. If product ID is explicitly specified, update by ID
     if (product.id != null) {
+      final mapData = product.toMap();
+      mapData['price_updated_at'] = DateTime.now().toIso8601String();
       await db.update(
         'products',
-        product.toMap(),
+        mapData,
         where: 'id = ?',
         whereArgs: [product.id],
       );
@@ -110,6 +112,7 @@ class ProductRepository {
           'name': trimmedName,
           'category': product.category,
           'configuration': mapData['configuration'],
+          'price_updated_at': DateTime.now().toIso8601String(),
         },
         where: 'id = ?',
         whereArgs: [matchedId],
@@ -121,6 +124,7 @@ class ProductRepository {
         ...product.toMap(),
         'name': trimmedName,
         'created_at': DateTime.now().toIso8601String(),
+        'price_updated_at': DateTime.now().toIso8601String(),
       });
     }
 
@@ -129,6 +133,59 @@ class ProductRepository {
     }));
 
     return savedId;
+  }
+
+  Future<int> getNeedsReviewCount() async {
+    final db = await _databaseHelper.database;
+    final res = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM products WHERE needs_review = 1 AND is_active = 1',
+    );
+    if (res.isNotEmpty && res.first['count'] != null) {
+      return (res.first['count'] as num).toInt();
+    }
+    return 0;
+  }
+
+  Future<void> markProductReviewed(int id) async {
+    final db = await _databaseHelper.database;
+    await db.update(
+      'products',
+      {'needs_review': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    unawaited(getProductById(id).then((p) {
+      if (p != null) ShopSyncService.instance.syncProduct(p);
+    }));
+  }
+
+  Future<int> getStalePriceCount({int thresholdDays = 30}) async {
+    final products = await getStalePricedProducts(thresholdDays: thresholdDays);
+    return products.length;
+  }
+
+  Future<List<Product>> getStalePricedProducts({int thresholdDays = 30}) async {
+    final all = await getAllProducts(includeInactive: false);
+    final cutoff = DateTime.now().subtract(Duration(days: thresholdDays));
+    return all.where((p) {
+      final lastDate = p.priceUpdatedAt ?? p.createdAt;
+      if (lastDate == null) return true;
+      return lastDate.isBefore(cutoff);
+    }).toList();
+  }
+
+  Future<void> confirmProductPrice(int id) async {
+    final db = await _databaseHelper.database;
+    final nowIso = DateTime.now().toIso8601String();
+    await db.update(
+      'products',
+      {'price_updated_at': nowIso},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    unawaited(getProductById(id).then((p) {
+      if (p != null) ShopSyncService.instance.syncProduct(p);
+    }));
   }
 
   Future<void> setProductActive(int id, bool isActive) async {

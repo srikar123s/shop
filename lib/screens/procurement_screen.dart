@@ -47,13 +47,22 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
 
   Future<void> _loadItems() async {
     setState(() => _loading = true);
-    final items = await widget.orderRepository
-        .getProcurementItems(query: _searchController.text);
-    if (!mounted) return;
-    setState(() {
-      _items = items;
-      _loading = false;
-    });
+    try {
+      final items = await widget.orderRepository
+          .getProcurementItems(query: _searchController.text);
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _loading = false;
+      });
+    } catch (e, stack) {
+      debugPrint('Error loading procurement items: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _items = [];
+        _loading = false;
+      });
+    }
   }
 
   String _formatQty(double qty) =>
@@ -131,6 +140,54 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
         const SnackBar(
           content: Text('🎉 All items marked as procured & fulfilled!'),
           backgroundColor: Color(0xFF0F766E),
+        ),
+      );
+      _loadItems();
+    }
+  }
+
+  Future<void> _confirmCancelShortage(ProcurementItem item) async {
+    final fmtGiven = _formatQty(item.quantityGiven);
+    final fmtOrdered = _formatQty(item.quantityOrdered);
+    final fmtPending = _formatQty(item.quantityPending);
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cut Shortage for "${item.itemName}"?'),
+        content: Text(
+          'Customer took $fmtGiven ${item.unit} out of $fmtOrdered ${item.unit}.\n\n'
+          'Cancel the remaining $fmtPending ${item.unit}?\n'
+          '• Item will be removed from Procurement\n'
+          '• Bill for order ${item.formattedOrderId} will be adjusted to what was delivered\n'
+          '• Godown will NOT purchase this shortage',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFD97706)),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.content_cut_rounded, size: 16),
+            label: const Text('Yes, Cut Shortage'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      HapticFeedback.mediumImpact();
+      await widget.orderRepository.cancelItemShortage(
+        itemId: item.itemId,
+        orderId: item.orderId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✂️ Shortage cancelled for "${item.itemName}". Order updated.'),
+          backgroundColor: const Color(0xFF0F766E),
         ),
       );
       _loadItems();
@@ -576,31 +633,65 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        FilledButton.icon(
-                                          style: FilledButton.styleFrom(
-                                            backgroundColor:
-                                                const Color(0xFF0F766E),
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 4),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            OutlinedButton.icon(
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor:
+                                                    const Color(0xFFD97706),
+                                                side: const BorderSide(
+                                                    color: Color(0xFFF59E0B)),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                padding: const EdgeInsets.symmetric(
+                                                    horizontal: 8, vertical: 4),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                              ),
+                                              onPressed: () =>
+                                                  _confirmCancelShortage(item),
+                                              icon: const Icon(
+                                                  Icons.content_cut_rounded,
+                                                  size: 14),
+                                              label: const Text(
+                                                'Cut',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
                                             ),
-                                          ),
-                                          onPressed: () =>
-                                              _markItemProcured(item),
-                                          icon: const Icon(
-                                              Icons.check_circle_outline,
-                                              size: 15),
-                                          label: const Text(
-                                            'Mark Procured',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold,
+                                            const SizedBox(width: 6),
+                                            FilledButton.icon(
+                                              style: FilledButton.styleFrom(
+                                                backgroundColor:
+                                                    const Color(0xFF0F766E),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                padding: const EdgeInsets.symmetric(
+                                                    horizontal: 10, vertical: 4),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                              ),
+                                              onPressed: () =>
+                                                  _markItemProcured(item),
+                                              icon: const Icon(
+                                                  Icons.check_circle_outline,
+                                                  size: 15),
+                                              label: const Text(
+                                                'Mark Procured',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
                                             ),
-                                          ),
+                                          ],
                                         ),
                                       ],
                                     ),

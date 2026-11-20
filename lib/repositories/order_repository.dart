@@ -435,6 +435,8 @@ class OrderRepository {
         await txn.update(
           'order_items',
           {
+            'quantity_ordered': given,
+            'quantity_given': given,
             'status': itemStatusLabel(itemStatus),
             'procurement_status': ProcurementStatus.notRequired.name,
           },
@@ -721,7 +723,7 @@ class OrderRepository {
     final db = await _databaseHelper.database;
     final allOrders = await db.query(
       'orders',
-      where: "status NOT IN ('Completed', 'Closed')",
+      where: "UPPER(status) NOT IN ('COMPLETED', 'CLOSED')",
       orderBy: 'created_at ASC',
     );
     if (allOrders.isEmpty) return [];
@@ -761,6 +763,15 @@ class OrderRepository {
             .map((o) => '${o['option_name']}: ${o['option_value']}')
             .toList();
 
+        double unitPrice = 0.0;
+        final snapRaw = itemRow['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+
         result.add(
           ProcurementItem(
             itemId: itemRow['id'] as int,
@@ -773,7 +784,7 @@ class OrderRepository {
             unit: itemRow['unit'] as String,
             quantityOrdered: (itemRow['quantity_ordered'] as num).toDouble(),
             quantityGiven: (itemRow['quantity_given'] as num).toDouble(),
-            unitPrice: (itemRow['unit_price'] as num).toDouble(),
+            unitPrice: unitPrice,
             options: options,
             productSnapshot: itemRow['product_snapshot'] as String? ?? '',
           ),
@@ -798,7 +809,7 @@ class OrderRepository {
     final db = await _databaseHelper.database;
     final openOrders = await db.query(
       'orders',
-      where: "status NOT IN ('Completed', 'Closed')",
+      where: "UPPER(status) NOT IN ('COMPLETED', 'CLOSED')",
     );
 
     int pendingCount = openOrders.length;
@@ -816,7 +827,7 @@ class OrderRepository {
       SELECT COUNT(oi.id) as count
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.status NOT IN ('Completed', 'Closed')
+      WHERE UPPER(o.status) NOT IN ('COMPLETED', 'CLOSED')
         AND (oi.quantity_ordered - oi.quantity_given) > 0
     ''');
     int toProcureCount = 0;
@@ -879,6 +890,112 @@ class OrderRepository {
       await txn.update(
         'orders',
         {'status': orderStatusLabel(newOrderStatus)},
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+    });
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
+  }
+
+  /// Cancels remaining shortage for an item (e.g. customer cut / intentionally gave less).
+  /// Sets quantity_ordered to quantity_given, removes procurement requirement,
+  /// recalculates order bill breakdown and updates overall order status.
+  Future<void> cancelItemShortage({
+    required int itemId,
+    required int orderId,
+    double? targetGiven,
+  }) async {
+    final db = await _databaseHelper.database;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'order_items',
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      if (rows.isEmpty) return;
+
+      final ordered = (rows.first['quantity_ordered'] as num).toDouble();
+      final currentDbGiven = (rows.first['quantity_given'] as num).toDouble();
+      final finalGiven = targetGiven ?? currentDbGiven;
+      final itemName = rows.first['item_name'] as String;
+
+      // Update this item so quantity_ordered matches finalGiven and quantity_given matches finalGiven
+      await txn.update(
+        'order_items',
+        {
+          'quantity_ordered': finalGiven,
+          'quantity_given': finalGiven,
+          'status': itemStatusLabel(finalGiven > 0 ? ItemStatus.given : ItemStatus.notGiven),
+          'procurement_status': ProcurementStatus.notRequired.name,
+          'notes': 'Intentionally gave less: $finalGiven of $ordered fulfilled (shortage dropped).',
+        },
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+
+      // Recalculate order subtotal across all items
+      final allItems = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
+      );
+
+      double newSubtotal = 0.0;
+      for (final itemRow in allItems) {
+        final itemOrdered = (itemRow['quantity_ordered'] as num).toDouble();
+        double unitPrice = 0.0;
+        final snapRaw = itemRow['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+        newSubtotal += unitPrice * itemOrdered;
+      }
+
+      // Update bill breakdown
+      final orderRows = await txn.query(
+        'orders',
+        columns: ['notes'],
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+      final existingNotes = orderRows.isNotEmpty ? orderRows.first['notes'] as String? : null;
+      final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
+
+      BillBreakdown newBreakdown;
+      if (existingBreakdown != null) {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: newSubtotal,
+          applyGst: existingBreakdown.applyGst,
+          gstRate: existingBreakdown.gstRate,
+          otherCharges: existingBreakdown.otherCharges,
+          applyDiscount: existingBreakdown.applyDiscount,
+          discountType: existingBreakdown.discountType,
+          discountValue: existingBreakdown.discountValue,
+          note: existingBreakdown.note ?? 'Shortage cancelled for $itemName',
+        );
+      } else {
+        newBreakdown = BillBreakdown.calculate(
+          subtotal: newSubtotal,
+          note: 'Shortage cancelled for $itemName',
+        );
+      }
+
+      // Check new order status
+      final statuses = allItems
+          .map((e) => _itemStatusFromLabel(e['status'] as String))
+          .toList();
+      final newOrderStatus = _calculateOrderStatus(statuses);
+
+      await txn.update(
+        'orders',
+        {
+          'status': orderStatusLabel(newOrderStatus),
+          'estimate_total': newBreakdown.grandTotal,
+          'notes': jsonEncode(newBreakdown.toMap()),
+        },
         where: 'id = ?',
         whereArgs: [orderId],
       );

@@ -129,6 +129,12 @@ class DatabaseHelper {
             WHERE order_item_id NOT IN (SELECT id FROM order_items)
           ''');
         } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE products ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0');
+        } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE products ADD COLUMN price_updated_at TEXT');
+        } catch (_) {}
         await _seedInitialProducts(db);
       },
     );
@@ -168,7 +174,9 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         category TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
+        needs_review INTEGER NOT NULL DEFAULT 0,
         configuration TEXT NOT NULL,
+        price_updated_at TEXT,
         created_at TEXT NOT NULL
       )
     ''');

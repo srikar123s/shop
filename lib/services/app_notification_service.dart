@@ -9,6 +9,7 @@ import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/history_screen.dart';
 import 'package:shop/screens/procurement_screen.dart';
+import 'package:shop/screens/simple_product_admin_screen.dart';
 import 'package:shop/services/backup_service.dart';
 
 enum NotificationScheduleMode {
@@ -112,6 +113,15 @@ class AppNotificationService {
           ),
         ),
       );
+    } else if (payload == 'stale_prices' || payload == 'manage_products') {
+      nav.push(
+        MaterialPageRoute<void>(
+          builder: (_) => SimpleProductAdminScreen(
+            productRepository: prodRepo,
+            initialOnlyStalePrices: true,
+          ),
+        ),
+      );
     }
   }
 
@@ -143,6 +153,70 @@ class AppNotificationService {
     await prefs.setString(_prefModeKey, mode.name);
   }
 
+  // User-configurable custom milestone timings
+  Future<TimeOfDay> getMorningTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return TimeOfDay(
+      hour: prefs.getInt('morning_time_hour') ?? 8,
+      minute: prefs.getInt('morning_time_minute') ?? 0,
+    );
+  }
+
+  Future<void> setMorningTime(TimeOfDay time) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('morning_time_hour', time.hour);
+    await prefs.setInt('morning_time_minute', time.minute);
+  }
+
+  Future<TimeOfDay> getMiddayTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return TimeOfDay(
+      hour: prefs.getInt('midday_time_hour') ?? 14,
+      minute: prefs.getInt('midday_time_minute') ?? 0,
+    );
+  }
+
+  Future<void> setMiddayTime(TimeOfDay time) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('midday_time_hour', time.hour);
+    await prefs.setInt('midday_time_minute', time.minute);
+  }
+
+  Future<TimeOfDay> getEveningTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    return TimeOfDay(
+      hour: prefs.getInt('evening_time_hour') ?? 20,
+      minute: prefs.getInt('evening_time_minute') ?? 30,
+    );
+  }
+
+  Future<void> setEveningTime(TimeOfDay time) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('evening_time_hour', time.hour);
+    await prefs.setInt('evening_time_minute', time.minute);
+  }
+
+  // Price caution threshold days (default 30 days)
+  Future<int> getPriceCautionDays() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('price_caution_days') ?? 30;
+  }
+
+  Future<void> setPriceCautionDays(int days) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('price_caution_days', days);
+  }
+
+  Future<bool> isPriceCautionEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('price_caution_enabled') ?? true;
+  }
+
+  Future<void> setPriceCautionEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('price_caution_enabled', enabled);
+  }
+
   /// Checks order & procurement status and posts notifications according to schedule.
   Future<void> checkAndNotify({bool force = false}) async {
     try {
@@ -156,15 +230,15 @@ class AppNotificationService {
 
       if (!force) {
         if (mode == NotificationScheduleMode.threeTimesDaily) {
-          // 3 Smart Daily Milestones:
-          // Slot 1: Morning 08:00 - 08:59 (Godown & Procurement Digest)
-          // Slot 2: Midday  14:00 - 14:59 (Fulfillment Check)
-          // Slot 3: Evening 20:30 - 21:59 (Day-End Closing Siren)
-          if (now.hour == 8) {
+          final morning = await getMorningTime();
+          final midday = await getMiddayTime();
+          final evening = await getEveningTime();
+
+          if (now.hour == morning.hour) {
             currentSlot = '${now.year}-${now.month}-${now.day}-morning';
-          } else if (now.hour == 14) {
+          } else if (now.hour == midday.hour) {
             currentSlot = '${now.year}-${now.month}-${now.day}-midday';
-          } else if (now.hour == 20 || (now.hour == 21 && now.minute <= 30)) {
+          } else if (now.hour == evening.hour) {
             currentSlot = '${now.year}-${now.month}-${now.day}-evening';
           } else {
             // Not a milestone hour, check only if there are critical overdue (>3 days) orders
@@ -190,6 +264,19 @@ class AppNotificationService {
         final lastSlot = prefs.getString(_prefLastNotifiedKey);
         if (lastSlot == currentSlot) {
           return; // Already notified in this slot
+        }
+      }
+
+      // Check price caution alert if in morning or forced
+      if (force || now.hour <= 11) {
+        final priceCautionOn = await isPriceCautionEnabled();
+        if (priceCautionOn) {
+          final cautionDays = await getPriceCautionDays();
+          final prodRepo = ProductRepository(DatabaseHelper.instance);
+          final staleCount = await prodRepo.getStalePriceCount(thresholdDays: cautionDays);
+          if (staleCount > 0) {
+            await _showStalePriceNotification(staleCount, cautionDays);
+          }
         }
       }
 
@@ -294,6 +381,27 @@ class AppNotificationService {
       '$totalPending total orders pending. $oldOrdersCount order(s) taken over 3 days ago are still not closed! Tap to review.',
       details,
       payload: 'pending_orders',
+    );
+  }
+
+  Future<void> _showStalePriceNotification(int count, int days) async {
+    const androidDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      color: Color(0xFFD97706),
+      styleInformation: BigTextStyleInformation(''),
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    await _notificationsPlugin.show(
+      104,
+      '🏷️ Market Price Check: $count Product(s) Outdated',
+      '$count item rate(s) have not been updated for >$days days. Market rates may have changed. Tap to review.',
+      details,
+      payload: 'stale_prices',
     );
   }
 

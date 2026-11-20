@@ -7,6 +7,9 @@ class Product {
     required this.category,
     required this.isActive,
     required this.configuration,
+    this.needsReview = false,
+    this.priceUpdatedAt,
+    this.createdAt,
   });
 
   final int? id;
@@ -14,6 +17,9 @@ class Product {
   final String category;
   final bool isActive;
   final ProductConfiguration configuration;
+  final bool needsReview;
+  final DateTime? priceUpdatedAt;
+  final DateTime? createdAt;
 
   Product copyWith({
     int? id,
@@ -21,6 +27,9 @@ class Product {
     String? category,
     bool? isActive,
     ProductConfiguration? configuration,
+    bool? needsReview,
+    DateTime? priceUpdatedAt,
+    DateTime? createdAt,
   }) {
     return Product(
       id: id ?? this.id,
@@ -28,6 +37,9 @@ class Product {
       category: category ?? this.category,
       isActive: isActive ?? this.isActive,
       configuration: configuration ?? this.configuration,
+      needsReview: needsReview ?? this.needsReview,
+      priceUpdatedAt: priceUpdatedAt ?? this.priceUpdatedAt,
+      createdAt: createdAt ?? this.createdAt,
     );
   }
 
@@ -38,6 +50,10 @@ class Product {
       'category': category,
       'is_active': isActive ? 1 : 0,
       'configuration': jsonEncode(configuration.toMap()),
+      'needs_review': needsReview ? 1 : 0,
+      if (priceUpdatedAt != null)
+        'price_updated_at': priceUpdatedAt!.toIso8601String(),
+      if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
     };
   }
 
@@ -50,6 +66,13 @@ class Product {
       configuration: ProductConfiguration.fromMap(
         jsonDecode(map['configuration'] as String) as Map<String, dynamic>,
       ),
+      needsReview: (map['needs_review'] as int? ?? 0) == 1,
+      priceUpdatedAt: map['price_updated_at'] != null
+          ? DateTime.tryParse(map['price_updated_at'] as String)
+          : null,
+      createdAt: map['created_at'] != null
+          ? DateTime.tryParse(map['created_at'] as String)
+          : null,
     );
   }
 }

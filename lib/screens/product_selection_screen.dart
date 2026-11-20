@@ -172,6 +172,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     final itemNameCtrl = TextEditingController();
     final detailsCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
+    final rateCtrl = TextEditingController();
     double qty = 1;
     String unit =
         const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
@@ -203,6 +204,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                         controller: itemNameCtrl,
                         decoration:
                             InputDecoration(labelText: s.t('itemName'))),
+                    TextField(
+                        controller: rateCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Price / Rate per unit (₹)',
+                          prefixText: '₹ ',
+                        )),
                     TextField(
                         controller: detailsCtrl,
                         decoration: InputDecoration(
@@ -256,22 +264,54 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                     const SizedBox(height: 16),
                     LargeActionButton(
                       label: s.t('addItem'),
-                      onTap: () {
-                        if (itemNameCtrl.text.trim().isEmpty) {
-                          return;
-                        }
-                        Navigator.pop(
-                          context,
-                          DraftOrderItem(
-                            itemName: itemNameCtrl.text.trim(),
-                            options: const <String, String>{},
-                            quantity: qty,
-                            unit: unit,
-                            isOtherItem: true,
-                            description: detailsCtrl.text.trim(),
-                            notes: notesCtrl.text.trim(),
-                          ),
+                      onTap: () async {
+                        final rawName = itemNameCtrl.text.trim();
+                        if (rawName.isEmpty) return;
+
+                        final enteredRate = double.tryParse(rateCtrl.text.trim()) ?? 0.0;
+
+                        // Check if product exists; if not, auto-create in catalog with needsReview flag
+                        final existing = await widget.productRepository.searchProducts(rawName);
+                        Product? matched = existing.cast<Product?>().firstWhere(
+                          (p) => p?.name.trim().toLowerCase() == rawName.toLowerCase(),
+                          orElse: () => null,
                         );
+
+                        int productId;
+                        if (matched != null && matched.id != null) {
+                          productId = matched.id!;
+                        } else {
+                          final newProd = Product(
+                            name: rawName,
+                            category: 'Custom / Other',
+                            isActive: true,
+                            needsReview: true,
+                            configuration: ProductConfiguration(
+                              steps: const [],
+                              defaultUnit: unit,
+                              unitOptions: [unit],
+                              basePrice: enteredRate,
+                            ),
+                          );
+                          productId = await widget.productRepository.upsertProduct(newProd);
+                        }
+
+                        if (context.mounted) {
+                          Navigator.pop(
+                            context,
+                            DraftOrderItem(
+                              productId: productId,
+                              itemName: rawName,
+                              options: const <String, String>{},
+                              quantity: qty,
+                              unit: unit,
+                              unitPrice: enteredRate > 0 ? enteredRate : null,
+                              isOtherItem: true,
+                              description: detailsCtrl.text.trim(),
+                              notes: notesCtrl.text.trim(),
+                            ),
+                          );
+                        }
                       },
                     ),
                   ],
@@ -286,6 +326,207 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     if (result != null) {
       setState(() => _items.add(result));
       _saveCurrentDraft();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Added "${result.itemName}" to cart & saved to catalog (flagged for review).'),
+            backgroundColor: const Color(0xFF0F766E),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _quickAddNewProductFromSearch(String rawName) async {
+    final name = rawName.trim();
+    if (name.isEmpty) return;
+
+    final rateCtrl = TextEditingController();
+    double qty = 1;
+    String unit = const bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false)
+        ? 'Piece'
+        : 'Box';
+
+    final added = await showModalBottomSheet<DraftOrderItem>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.add_shopping_cart,
+                            color: Color(0xFF0F766E), size: 22),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Add "$name"',
+                              style: const TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            const Text(
+                              'Add to cart & auto-save to product catalog',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: rateCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Price / Rate per unit (₹)',
+                      prefixText: '₹ ',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Quantity',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 6),
+                            QuantitySelector(
+                              value: qty,
+                              min: 1,
+                              onChanged: (v) => setSheetState(() => qty = v),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Unit',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13)),
+                            const SizedBox(height: 6),
+                            DropdownButtonFormField<String>(
+                              initialValue: unit,
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 8),
+                              ),
+                              items: const [
+                                'Piece',
+                                'Box',
+                                'Kg',
+                                'Litre',
+                                'Meter',
+                                'Packet',
+                                'Bundle',
+                                'Carton',
+                                'Bag',
+                              ]
+                                  .map((u) => DropdownMenuItem(
+                                      value: u, child: Text(u)))
+                                  .toList(),
+                              onChanged: (val) {
+                                if (val != null) setSheetState(() => unit = val);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      minimumSize: const Size(double.infinity, 48),
+                    ),
+                    onPressed: () async {
+                      final enteredRate =
+                          double.tryParse(rateCtrl.text.trim()) ?? 0.0;
+                      final newProd = Product(
+                        name: name,
+                        category: 'Custom / Other',
+                        isActive: true,
+                        needsReview: true,
+                        configuration: ProductConfiguration(
+                          steps: const [],
+                          defaultUnit: unit,
+                          unitOptions: [unit],
+                          basePrice: enteredRate,
+                        ),
+                      );
+                      final pid =
+                          await widget.productRepository.upsertProduct(newProd);
+
+                      final orderItem = DraftOrderItem(
+                        productId: pid,
+                        itemName: name,
+                        options: const <String, String>{},
+                        quantity: qty,
+                        unit: unit,
+                        unitPrice: enteredRate > 0 ? enteredRate : null,
+                        isOtherItem: true,
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx, orderItem);
+                    },
+                    icon: const Icon(Icons.check),
+                    label: const Text('ADD TO CART & SAVE ITEM',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (added != null && mounted) {
+      setState(() {
+        _items.add(added);
+        _searchController.clear();
+      });
+      _saveCurrentDraft();
+      _loadProducts();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Added "$name" to cart & saved to product catalog (flagged for review).'),
+          backgroundColor: const Color(0xFF0F766E),
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
   }
 
@@ -567,12 +808,91 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : ListView(
                         children: <Widget>[
-                          if (isSearching && _products.isNotEmpty)
-                            _ProductSuggestions(
-                              products: _products,
-                              onProductTap: _selectProduct,
-                              cartItems: _items,
-                            )
+                          if (isSearching) ...<Widget>[
+                            // Quick Add Banner for typed search query
+                            Card(
+                              elevation: 0,
+                              color: const Color(0xFFF0FDF4),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: const BorderSide(color: Color(0xFF86EFAC)),
+                              ),
+                              child: ListTile(
+                                dense: true,
+                                leading: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0F766E),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.add_shopping_cart,
+                                      color: Colors.white, size: 18),
+                                ),
+                                title: Text(
+                                  'Add "${_searchController.text.trim()}" as New Item',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Color(0xFF065F46),
+                                  ),
+                                ),
+                                subtitle: const Text(
+                                  'Add to cart & auto-save to product catalog',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Color(0xFF047857)),
+                                ),
+                                trailing: FilledButton.tonal(
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 4),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  onPressed: () =>
+                                      _quickAddNewProductFromSearch(
+                                          _searchController.text.trim()),
+                                  child: const Text('ADD TO CART',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+
+                            if (_products.isNotEmpty)
+                              _ProductSuggestions(
+                                products: _products,
+                                onProductTap: _selectProduct,
+                                cartItems: _items,
+                              )
+                            else
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: Column(
+                                    children: [
+                                      const Icon(Icons.search_off_rounded,
+                                          size: 40, color: Colors.grey),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'No catalog match for "${_searchController.text.trim()}"',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                            color: Colors.grey.shade700),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      const Text(
+                                        'Tap the green button above to add it now!',
+                                        style: TextStyle(
+                                            fontSize: 11, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ]
                           else ...<Widget>[
                             if (_frequentlyUsed.isNotEmpty) ...<Widget>[
                               Padding(

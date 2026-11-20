@@ -212,7 +212,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         return order.createdAt.isAfter(todayStart) &&
             order.createdAt.isBefore(todayEnd);
       } else if (_filter == HistoryFilter.pending) {
-        return order.status == OrderStatus.pending;
+        return order.status == OrderStatus.pending ||
+            order.status == OrderStatus.partiallyCompleted;
       } else if (_filter == HistoryFilter.partial) {
         return order.status == OrderStatus.partiallyCompleted;
       } else if (_filter == HistoryFilter.completed) {
