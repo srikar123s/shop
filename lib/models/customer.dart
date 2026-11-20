@@ -15,6 +15,32 @@ class Customer {
   final double creditLimit;
   final DateTime createdAt;
 
+  /// Returns individual phone numbers if customer has multiple (e.g. "9876543210, 9123456789" -> ["9876543210", "9123456789"])
+  List<String> get phoneNumbers => extractNumbers(phone);
+
+  /// Helper to extract list of cleaned individual phone numbers from a raw string
+  static List<String> extractNumbers(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return const [];
+    return raw
+        .split(RegExp(r'[,/;&|\n]+'))
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
+  /// Returns the primary (first) phone number
+  String? get primaryPhone {
+    final list = phoneNumbers;
+    return list.isNotEmpty ? list.first : null;
+  }
+
+  /// Whether the customer has more than one phone number registered
+  bool get hasMultiplePhones => phoneNumbers.length > 1;
+
+  /// Clean display string for multiple phone numbers
+  String get displayPhone => phoneNumbers.isNotEmpty ? phoneNumbers.join(' • ') : (phone ?? '');
+
   Customer copyWith({
     int? id,
     String? name,

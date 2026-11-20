@@ -81,11 +81,68 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       );
 
   double _calculateDiscountAmount(double subtotal) {
-    if (!_applyDiscount) return 0.0;
+    if (!_applyDiscount || subtotal <= 0) return 0.0;
+    final safeSubtotal = subtotal.clamp(0.0, double.infinity);
+    final safeDiscountValue = _discountValue.clamp(0.0, double.infinity);
     if (_discountType == 'percent') {
-      return subtotal * _discountValue / 100.0;
+      final safePercent = safeDiscountValue.clamp(0.0, 100.0);
+      return (safeSubtotal * safePercent / 100.0).clamp(0.0, safeSubtotal);
     }
-    return _discountValue;
+    return safeDiscountValue.clamp(0.0, safeSubtotal);
+  }
+
+  bool _ensureAllItemsPriced(String actionName) {
+    final unpricedItems = widget.draftOrder.items
+        .where((i) => (i.unitPrice ?? 0.0) <= 0)
+        .toList();
+    if (unpricedItems.isEmpty) return true;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(child: Text('Missing Item Prices')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cannot $actionName without proper prices. The following item(s) do not have a price set:'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: unpricedItems.map((i) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text('• ${i.itemName}', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Please return and set a valid price for all items before proceeding.'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    return false;
   }
 
   double _calculateTaxableSubtotal() {
@@ -353,6 +410,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   }
 
   Future<void> _saveOrder() async {
+    if (!_ensureAllItemsPriced('place order or share bill')) return;
     final breakdown = _getBillBreakdown();
     final estimate = breakdown.grandTotal;
 
@@ -569,11 +627,14 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
           IconButton(
             tooltip: 'Share Estimate',
             icon: const Icon(Icons.share),
-            onPressed: () => ShareService.shareDraftEstimate(
-              widget.draftOrder,
-              totalOverride: currentEstimate,
-              billBreakdown: breakdown,
-            ),
+            onPressed: () {
+              if (!_ensureAllItemsPriced('share estimate')) return;
+              ShareService.shareDraftEstimate(
+                widget.draftOrder,
+                totalOverride: currentEstimate,
+                billBreakdown: breakdown,
+              );
+            },
           ),
         ],
       ),
@@ -787,9 +848,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                               Padding(
                                 padding: const EdgeInsets.only(top: 4),
                                 child: Text(
-                                  s.t('toProcure'),
-                                  style: const TextStyle(
-                                      color: Colors.red,
+                                  'Other Item (Custom)',
+                                  style: TextStyle(
+                                      color: Colors.deepPurple.shade700,
                                       fontWeight: FontWeight.w700),
                                 ),
                               ),
@@ -1101,6 +1162,13 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                             const EdgeInsets.symmetric(
                                                 horizontal: 10, vertical: 8),
                                         border: const OutlineInputBorder(),
+                                        errorText: _discountValue < 0
+                                            ? 'Cannot be negative'
+                                            : (_discountType == 'percent' && _discountValue > 100
+                                                ? 'Cannot exceed 100%'
+                                                : (_discountType == 'flat' && _discountValue > subtotal
+                                                    ? 'Cannot exceed bill total'
+                                                    : null)),
                                       ),
                                       onChanged: (val) {
                                         setState(() {
@@ -1279,11 +1347,14 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => ShareService.shareDraftEstimate(
-                      widget.draftOrder,
-                      totalOverride: currentEstimate,
-                      billBreakdown: breakdown,
-                    ),
+                    onPressed: () {
+                      if (!_ensureAllItemsPriced('share estimate')) return;
+                      ShareService.shareDraftEstimate(
+                        widget.draftOrder,
+                        totalOverride: currentEstimate,
+                        billBreakdown: breakdown,
+                      );
+                    },
                     icon: const Icon(Icons.share, size: 18),
                     label: const Text('SHARE ESTIMATE'),
                   ),

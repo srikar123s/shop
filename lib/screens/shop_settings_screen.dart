@@ -30,11 +30,25 @@ class ShopSettingsScreen extends StatefulWidget {
 class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   final _customService = ShopCustomizationService.instance;
   bool _remindersEnabled = true;
-  NotificationScheduleMode _scheduleMode =
-      NotificationScheduleMode.threeTimesDaily;
-  TimeOfDay _morningTime = const TimeOfDay(hour: 8, minute: 0);
-  TimeOfDay _middayTime = const TimeOfDay(hour: 14, minute: 0);
-  TimeOfDay _eveningTime = const TimeOfDay(hour: 20, minute: 30);
+
+  // Category specific notification settings
+  bool _pendingOrdersEnabled = true;
+  String _pendingMode = 'scheduled';
+  List<TimeOfDay> _pendingTimes = [
+    const TimeOfDay(hour: 10, minute: 0),
+    const TimeOfDay(hour: 14, minute: 0),
+    const TimeOfDay(hour: 19, minute: 0),
+  ];
+
+  bool _procurementEnabled = true;
+  List<TimeOfDay> _procurementTimes = [
+    const TimeOfDay(hour: 9, minute: 30),
+    const TimeOfDay(hour: 17, minute: 30),
+  ];
+
+  bool _dailyReportEnabled = true;
+  TimeOfDay _dailyReportTime = const TimeOfDay(hour: 21, minute: 0);
+
   int _priceCautionDays = 30;
   bool _priceCautionEnabled = true;
 
@@ -47,24 +61,85 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
 
   Future<void> _loadNotificationPref() async {
     final enabled = await AppNotificationService.instance.isEnabled();
-    final mode = await AppNotificationService.instance.getScheduleMode();
-    final morning = await AppNotificationService.instance.getMorningTime();
-    final midday = await AppNotificationService.instance.getMiddayTime();
-    final evening = await AppNotificationService.instance.getEveningTime();
-    final cautionDays =
-        await AppNotificationService.instance.getPriceCautionDays();
-    final cautionEnabled =
-        await AppNotificationService.instance.isPriceCautionEnabled();
+    final pendingOn = await AppNotificationService.instance.isPendingOrdersEnabled();
+    final pendingMode = await AppNotificationService.instance.getPendingOrdersMode();
+    final pendingTimes = await AppNotificationService.instance.getPendingOrdersTimes();
+    final procureOn = await AppNotificationService.instance.isProcurementEnabled();
+    final procureTimes = await AppNotificationService.instance.getProcurementTimes();
+    final dailyOn = await AppNotificationService.instance.isDailyReportEnabled();
+    final dailyTime = await AppNotificationService.instance.getDailyReportTime();
+    final cautionDays = await AppNotificationService.instance.getPriceCautionDays();
+    final cautionEnabled = await AppNotificationService.instance.isPriceCautionEnabled();
+
     if (mounted) {
       setState(() {
         _remindersEnabled = enabled;
-        _scheduleMode = mode;
-        _morningTime = morning;
-        _middayTime = midday;
-        _eveningTime = evening;
+        _pendingOrdersEnabled = pendingOn;
+        _pendingMode = pendingMode;
+        _pendingTimes = pendingTimes;
+        _procurementEnabled = procureOn;
+        _procurementTimes = procureTimes;
+        _dailyReportEnabled = dailyOn;
+        _dailyReportTime = dailyTime;
         _priceCautionDays = cautionDays;
         _priceCautionEnabled = cautionEnabled;
       });
+    }
+  }
+
+  Future<void> _pickTime({
+    required TimeOfDay current,
+    required ValueChanged<TimeOfDay> onSaved,
+  }) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current,
+    );
+    if (picked != null) {
+      onSaved(picked);
+      setState(() {});
+    }
+  }
+
+  Future<void> _addPendingTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 12, minute: 0),
+    );
+    if (picked != null) {
+      _pendingTimes.add(picked);
+      _pendingTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+      await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      setState(() {});
+    }
+  }
+
+  Future<void> _removePendingTime(int index) async {
+    if (index >= 0 && index < _pendingTimes.length) {
+      _pendingTimes.removeAt(index);
+      await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      setState(() {});
+    }
+  }
+
+  Future<void> _addProcureTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 16, minute: 0),
+    );
+    if (picked != null) {
+      _procurementTimes.add(picked);
+      _procurementTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+      await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      setState(() {});
+    }
+  }
+
+  Future<void> _removeProcureTime(int index) async {
+    if (index >= 0 && index < _procurementTimes.length) {
+      _procurementTimes.removeAt(index);
+      await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      setState(() {});
     }
   }
 
@@ -82,82 +157,6 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     final now = DateTime.now();
     final dt = DateTime(now.year, now.month, now.day, time.hour, time.minute);
     return DateFormat('hh:mm a').format(dt);
-  }
-
-  Future<void> _pickTime({
-    required TimeOfDay current,
-    required ValueChanged<TimeOfDay> onSaved,
-  }) async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: current,
-    );
-    if (picked != null) {
-      onSaved(picked);
-      setState(() {});
-    }
-  }
-
-  Widget _buildMilestoneTimeTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required TimeOfDay time,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 16),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _formatTimeOfDay(time),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      color: color,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.edit, size: 12, color: color),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _editShopNameDialog() async {
@@ -715,11 +714,11 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         color: Colors.teal.shade700),
                   ),
                   title: const Text(
-                    'Pending Orders & Procurement Alerts',
+                    'Shop Reminders & Notifications',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: const Text(
-                    'Sends alert for unclosed orders and items to procure.',
+                    'Automated alerts for pending orders, procurement, and daily summaries.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   value: _remindersEnabled,
@@ -730,143 +729,292 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                 ),
                 if (_remindersEnabled) ...[
                   const Divider(height: 1),
+
+                  // SECTION 1: PENDING ORDERS NOTIFICATIONS
                   Padding(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Notification Frequency:',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF0F766E)),
-                        ),
-                        const SizedBox(height: 6),
                         Row(
                           children: [
-                            Expanded(
-                              child: ChoiceChip(
-                                label: const Text('3 Times Daily (Smart)'),
-                                selected: _scheduleMode ==
-                                    NotificationScheduleMode.threeTimesDaily,
-                                onSelected: (sel) async {
-                                  if (sel) {
-                                    await AppNotificationService.instance
-                                        .setScheduleMode(
-                                            NotificationScheduleMode
-                                                .threeTimesDaily);
-                                    setState(() => _scheduleMode =
-                                        NotificationScheduleMode
-                                            .threeTimesDaily);
-                                  }
-                                },
+                            Icon(Icons.assignment_outlined,
+                                size: 20, color: Colors.teal.shade800),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Pending Orders Reminders',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0F766E),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ChoiceChip(
-                                label: const Text('Hourly (7 AM - 9 PM)'),
-                                selected: _scheduleMode ==
-                                    NotificationScheduleMode.hourly,
-                                onSelected: (sel) async {
-                                  if (sel) {
-                                    await AppNotificationService.instance
-                                        .setScheduleMode(
-                                            NotificationScheduleMode.hourly);
-                                    setState(() => _scheduleMode =
-                                        NotificationScheduleMode.hourly);
-                                  }
-                                },
-                              ),
+                            Switch(
+                              value: _pendingOrdersEnabled,
+                              onChanged: (val) async {
+                                await AppNotificationService.instance
+                                    .setPendingOrdersEnabled(val);
+                                setState(() => _pendingOrdersEnabled = val);
+                              },
                             ),
                           ],
                         ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            _scheduleMode ==
-                                    NotificationScheduleMode.threeTimesDaily
-                                ? '• Customizable times for morning, midday, and closing below'
-                                : '• Fires every 1 hour between 7:00 AM and 9:00 PM',
+                        if (_pendingOrdersEnabled) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Reminder Frequency:',
                             style: TextStyle(
-                                fontSize: 11, color: Colors.grey.shade600),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey),
                           ),
-                        ),
-                        if (_scheduleMode ==
-                            NotificationScheduleMode.threeTimesDaily) ...[
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF8FAFC),
-                              borderRadius: BorderRadius.circular(12),
-                              border:
-                                  Border.all(color: const Color(0xFFE2E8F0)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Custom Times / Day'),
+                                selected: _pendingMode == 'scheduled',
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setPendingOrdersMode('scheduled');
+                                    setState(() => _pendingMode = 'scheduled');
+                                  }
+                                },
+                              ),
+                              ChoiceChip(
+                                label: const Text('Every 1 Hour'),
+                                selected: _pendingMode == 'hourly',
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setPendingOrdersMode('hourly');
+                                    setState(() => _pendingMode = 'hourly');
+                                  }
+                                },
+                              ),
+                              ChoiceChip(
+                                label: const Text('Every 2 Hours'),
+                                selected: _pendingMode == 'two_hours',
+                                onSelected: (sel) async {
+                                  if (sel) {
+                                    await AppNotificationService.instance
+                                        .setPendingOrdersMode('two_hours');
+                                    setState(() => _pendingMode = 'two_hours');
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (_pendingMode == 'scheduled') ...[
+                            Text(
+                              'Alert Times (${_pendingTimes.length} times set):',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                const Text(
-                                  'Tap any milestone to customize timing:',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.grey),
-                                ),
-                                const SizedBox(height: 8),
-                                _buildMilestoneTimeTile(
-                                  icon: Icons.wb_sunny_outlined,
-                                  color: const Color(0xFFD97706),
-                                  title: 'Morning Godown & Procurement',
-                                  time: _morningTime,
-                                  onTap: () => _pickTime(
-                                    current: _morningTime,
-                                    onSaved: (t) async {
-                                      _morningTime = t;
-                                      await AppNotificationService.instance
-                                          .setMorningTime(t);
-                                    },
+                                for (int i = 0; i < _pendingTimes.length; i++)
+                                  InputChip(
+                                    avatar: const Icon(Icons.access_time,
+                                        size: 16, color: Color(0xFF0F766E)),
+                                    label: Text(
+                                        _formatTimeOfDay(_pendingTimes[i])),
+                                    onDeleted: () => _removePendingTime(i),
+                                    deleteIconColor: Colors.red.shade400,
+                                    onPressed: () => _pickTime(
+                                      current: _pendingTimes[i],
+                                      onSaved: (t) async {
+                                        _pendingTimes[i] = t;
+                                        _pendingTimes.sort((a, b) =>
+                                            (a.hour * 60 + a.minute).compareTo(
+                                                b.hour * 60 + b.minute));
+                                        await AppNotificationService.instance
+                                            .setPendingOrdersTimes(
+                                                _pendingTimes);
+                                        setState(() {});
+                                      },
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                _buildMilestoneTimeTile(
-                                  icon: Icons.access_time_filled_rounded,
-                                  color: const Color(0xFF0F766E),
-                                  title: 'Midday Counter Orders Check',
-                                  time: _middayTime,
-                                  onTap: () => _pickTime(
-                                    current: _middayTime,
-                                    onSaved: (t) async {
-                                      _middayTime = t;
-                                      await AppNotificationService.instance
-                                          .setMiddayTime(t);
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                _buildMilestoneTimeTile(
-                                  icon: Icons.nights_stay_outlined,
-                                  color: const Color(0xFF4338CA),
-                                  title: 'Evening Day-End Closing Siren',
-                                  time: _eveningTime,
-                                  onTap: () => _pickTime(
-                                    current: _eveningTime,
-                                    onSaved: (t) async {
-                                      _eveningTime = t;
-                                      await AppNotificationService.instance
-                                          .setEveningTime(t);
-                                    },
-                                  ),
+                                ActionChip(
+                                  avatar: const Icon(Icons.add_alarm,
+                                      size: 16, color: Color(0xFF0F766E)),
+                                  label: const Text('+ Add Time'),
+                                  onPressed: _addPendingTime,
                                 ),
                               ],
+                            ),
+                          ] else ...[
+                            Text(
+                              _pendingMode == 'hourly'
+                                  ? '• Fires every 1 hour during shop hours (7:00 AM - 9:00 PM).'
+                                  : '• Fires every 2 hours during shop hours (7:00 AM - 9:00 PM).',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // SECTION 2: PROCUREMENT LIST NOTIFICATIONS
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.inventory_2_outlined,
+                                size: 20, color: Colors.indigo.shade700),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Procurement List Reminders',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF3730A3),
+                                ),
+                              ),
+                            ),
+                            Switch(
+                              value: _procurementEnabled,
+                              onChanged: (val) async {
+                                await AppNotificationService.instance
+                                    .setProcurementEnabled(val);
+                                setState(() => _procurementEnabled = val);
+                              },
+                            ),
+                          ],
+                        ),
+                        if (_procurementEnabled) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Procurement Alert Times (${_procurementTimes.length} times set):',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              for (int i = 0; i < _procurementTimes.length; i++)
+                                InputChip(
+                                  avatar: const Icon(Icons.alarm,
+                                      size: 16, color: Color(0xFF3730A3)),
+                                  label: Text(
+                                      _formatTimeOfDay(_procurementTimes[i])),
+                                  onDeleted: () => _removeProcureTime(i),
+                                  deleteIconColor: Colors.red.shade400,
+                                  onPressed: () => _pickTime(
+                                    current: _procurementTimes[i],
+                                    onSaved: (t) async {
+                                      _procurementTimes[i] = t;
+                                      _procurementTimes.sort((a, b) =>
+                                          (a.hour * 60 + a.minute).compareTo(
+                                              b.hour * 60 + b.minute));
+                                      await AppNotificationService.instance
+                                          .setProcurementTimes(
+                                              _procurementTimes);
+                                      setState(() {});
+                                    },
+                                  ),
+                                ),
+                              ActionChip(
+                                avatar: const Icon(Icons.add_alarm,
+                                    size: 16, color: Color(0xFF3730A3)),
+                                label: const Text('+ Add Time'),
+                                onPressed: _addProcureTime,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // SECTION 3: DAILY BUSINESS CLOSING REPORT
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.assessment_outlined,
+                                size: 20, color: Colors.deepOrange.shade700),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Daily Business Summary Report',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFC2410C),
+                                ),
+                              ),
+                            ),
+                            Switch(
+                              value: _dailyReportEnabled,
+                              onChanged: (val) async {
+                                await AppNotificationService.instance
+                                    .setDailyReportEnabled(val);
+                                setState(() => _dailyReportEnabled = val);
+                              },
+                            ),
+                          ],
+                        ),
+                        if (_dailyReportEnabled) ...[
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Daily report summarizes total sales, completed orders, and collections.',
+                            style: TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                          const SizedBox(height: 6),
+                          ActionChip(
+                            avatar: const Icon(Icons.nightlight_round,
+                                size: 16, color: Color(0xFFC2410C)),
+                            label: Text(
+                                'Report Time: ${_formatTimeOfDay(_dailyReportTime)} (Tap to edit)'),
+                            onPressed: () => _pickTime(
+                              current: _dailyReportTime,
+                              onSaved: (t) async {
+                                _dailyReportTime = t;
+                                await AppNotificationService.instance
+                                    .setDailyReportTime(t);
+                                setState(() {});
+                              },
                             ),
                           ),
                         ],
                       ],
                     ),
                   ),
+
                   const Divider(height: 1),
                   ListTile(
                     contentPadding:

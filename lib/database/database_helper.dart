@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shop/models/top_product_stat.dart';
+import 'package:shop/services/shop_sync_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
@@ -883,20 +884,21 @@ class DatabaseHelper {
     return entries;
   }
 
-  /// Records a manual Udhaar / Debit entry (e.g. Previous balance or cash lent)
+  /// Records a manual Udhaar / Debit entry (e.g. Previous balance, opening balance, or cash lent)
   Future<int> recordManualKhataDebit({
     required int customerId,
     required double amount,
     required String description,
+    String? takenBy,
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
     return await db.insert('orders', {
       'customer_id': customerId,
-      'status': 'Completed',
+      'status': 'COMPLETED',
       'created_at': now,
       'notes': jsonEncode({'type': 'khata_debit', 'description': description}),
-      'taken_by': 'Srikar',
+      'taken_by': takenBy ?? ShopSyncService.instance.currentUserOrDeviceName,
       'estimate_total': amount,
       'paid_amount': 0.0,
       'payment_mode': 'Khata',

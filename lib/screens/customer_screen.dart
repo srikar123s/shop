@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:shop/l10n/app_localizations.dart';
@@ -6,7 +8,9 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/product_selection_screen.dart';
+import 'package:shop/services/excel_customer_service.dart';
 import 'package:shop/services/voice_search_service.dart';
+import 'package:shop/widgets/customer_import_dialog.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
 class CustomerScreen extends StatefulWidget {
@@ -57,6 +61,50 @@ class _CustomerScreenState extends State<CustomerScreen> {
     });
   }
 
+  Future<void> _importCustomersFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls', 'csv'],
+      );
+      if (result == null || result.files.isEmpty || result.files.first.path == null) {
+        return;
+      }
+
+      final file = File(result.files.first.path!);
+      final parsedList = await ExcelCustomerService.parseCustomersFromFile(
+        file,
+        widget.customerRepository,
+      );
+
+      if (!mounted) return;
+
+      if (parsedList.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No valid customers found in file. Please ensure shop/customer names are present.'),
+          ),
+        );
+        return;
+      }
+
+      await showCustomerImportDialog(
+        context: context,
+        candidates: parsedList,
+        customerRepository: widget.customerRepository,
+        onImportComplete: () => _loadCustomers(),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to read file: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _showAddCustomerDialog() async {
     final s = AppLocalizations.of(context);
     final nameCtrl = TextEditingController();
@@ -83,7 +131,8 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
                     labelText: 'Phone Number * (Compulsory)',
-                    hintText: 'e.g. 9876543210',
+                    hintText: 'e.g. 9876543210 or 9876543210, 9123456789',
+                    helperText: 'Separate multiple numbers with a comma',
                   ),
                 ),
                 TextField(
@@ -179,7 +228,11 @@ class _CustomerScreenState extends State<CustomerScreen> {
                 TextField(
                   controller: phoneCtrl,
                   keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(labelText: s.t('phone')),
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number(s)',
+                    hintText: 'e.g. 9876543210, 9123456789',
+                    helperText: 'Separate multiple numbers with a comma',
+                  ),
                 ),
                 TextField(
                   controller: addressCtrl,
@@ -510,6 +563,11 @@ class _CustomerScreenState extends State<CustomerScreen> {
         title: Text(s.t('newOrderSelectCustomer')),
         actions: [
           IconButton(
+            tooltip: 'Import Customers from Excel / CSV',
+            icon: const Icon(Icons.file_upload_outlined),
+            onPressed: _importCustomersFile,
+          ),
+          IconButton(
             tooltip: s.t('addCustomer'),
             icon: const Icon(Icons.person_add_alt_1),
             onPressed: _showAddCustomerDialog,
@@ -579,25 +637,47 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
+                          horizontal: 8, vertical: 10),
                       visualDensity: VisualDensity.compact,
                     ),
                     onPressed: _showAddCustomerDialog,
                     icon: const Icon(Icons.add, size: 16),
                     label: Text(
                       s.t('addNewCustomer'),
-                      style: const TextStyle(fontSize: 12),
+                      style: const TextStyle(fontSize: 11.5),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Expanded(
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
+                          horizontal: 8, vertical: 10),
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: const Color(0xFF0F766E),
+                    ),
+                    onPressed: _importCustomersFile,
+                    icon: const Icon(Icons.file_upload_outlined, size: 16),
+                    label: const Text(
+                      'Import Excel',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0F766E)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
                       visualDensity: VisualDensity.compact,
                     ),
                     onPressed: () async {
@@ -625,9 +705,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
                     icon: const Icon(Icons.flash_on_rounded,
                         size: 16, color: Color(0xFFD97706)),
                     label: const Text(
-                      'Walk-in Counter',
+                      'Walk-in',
                       style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFFD97706)),
                       maxLines: 1,
@@ -755,7 +835,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                         Expanded(
                                           child: Text(
                                             customer.phone?.isNotEmpty == true
-                                                ? customer.phone!
+                                                ? customer.displayPhone
                                                 : s.t('phoneNotAdded'),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
@@ -764,6 +844,29 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                                 fontSize: 12),
                                           ),
                                         ),
+                                        if (customer.hasMultiplePhones) ...[
+                                          const SizedBox(width: 4),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 5, vertical: 1),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                              border: Border.all(
+                                                  color: Colors.blue.shade200,
+                                                  width: 0.5),
+                                            ),
+                                            child: Text(
+                                              '${customer.phoneNumbers.length} phones',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.blue.shade800,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                     if (customer.creditLimit > 0) ...[

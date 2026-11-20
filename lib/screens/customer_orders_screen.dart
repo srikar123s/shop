@@ -80,9 +80,62 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
     await _load();
   }
 
+  bool _ensureAllItemsPriced(OrderDetails details, {required String actionName}) {
+    final unpriced = details.items.where((i) => i.unitPrice <= 0).toList();
+    if (unpriced.isEmpty) return true;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(child: Text('Missing Item Prices')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cannot $actionName without proper prices. The following item(s) do not have a price set:'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: unpriced.map((i) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text('• ${i.itemName}', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Please open order details and set a valid price for all items first.'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   Future<void> _closeSingleOrder(OrderSummary order) async {
     final details = await widget.orderRepository.getOrderDetails(order.orderId);
     if (details == null || !mounted) return;
+    if (!_ensureAllItemsPriced(details, actionName: 'close order')) return;
 
     final unfulfilled = details.items
         .where((i) => i.quantityGiven < i.quantityOrdered)
@@ -766,7 +819,8 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                                     .orderRepository
                                                     .getOrderDetails(
                                                         order.orderId);
-                                                if (details != null) {
+                                                if (details != null && context.mounted) {
+                                                  if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
                                                   ShareService.shareOrderDetails(details);
                                                 }
                                               },

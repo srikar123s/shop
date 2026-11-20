@@ -144,29 +144,40 @@ class BillBreakdown {
     String? customerPhone,
     String? takenBy,
   }) {
-    final discount = applyDiscount
-        ? (discountType == 'percent'
-            ? (subtotal * discountValue / 100.0)
-            : discountValue)
-        : 0.0;
-    final taxableOrNet = (subtotal - discount).clamp(0.0, double.infinity);
-    final gst = applyGst ? (taxableOrNet * gstRate / 100.0) : 0.0;
+    final safeSubtotal = subtotal.clamp(0.0, double.infinity);
+    final safeDiscountValue = discountValue.clamp(0.0, double.infinity);
+    double discount = 0.0;
+    if (applyDiscount && safeSubtotal > 0) {
+      if (discountType == 'percent') {
+        final clampedPercent = safeDiscountValue.clamp(0.0, 100.0);
+        discount = (safeSubtotal * clampedPercent / 100.0).clamp(0.0, safeSubtotal);
+      } else {
+        discount = safeDiscountValue.clamp(0.0, safeSubtotal);
+      }
+    }
+    final taxableOrNet = (safeSubtotal - discount).clamp(0.0, double.infinity);
+    final safeGstRate = gstRate.clamp(0.0, 100.0);
+    final gst = applyGst ? (taxableOrNet * safeGstRate / 100.0) : 0.0;
     final otherTotal =
-        otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount);
+        otherCharges.fold<double>(0.0, (sum, c) => sum + c.amount.clamp(0.0, double.infinity));
     final calculatedGrandTotal =
         (taxableOrNet + gst + otherTotal).clamp(0.0, double.infinity);
+    final finalGrandTotal = (grandTotalOverride != null
+            ? grandTotalOverride.clamp(0.0, double.infinity)
+            : calculatedGrandTotal);
+
     return BillBreakdown(
-      subtotal: subtotal,
+      subtotal: safeSubtotal,
       applyGst: applyGst,
-      gstRate: gstRate,
+      gstRate: safeGstRate,
       gstAmount: gst,
       otherCharges: otherCharges,
       otherChargesTotal: otherTotal,
       applyDiscount: applyDiscount,
       discountType: discountType,
-      discountValue: discountValue,
+      discountValue: safeDiscountValue,
       discountAmount: discount,
-      grandTotal: grandTotalOverride ?? calculatedGrandTotal,
+      grandTotal: finalGrandTotal,
       note: note,
       customerPhone: customerPhone,
       takenBy: takenBy,

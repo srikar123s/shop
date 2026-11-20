@@ -1,15 +1,21 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/customer_khata_passbook_screen.dart';
+import 'package:shop/services/excel_customer_service.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/voice_search_service.dart';
+import 'package:shop/widgets/customer_import_dialog.dart';
+import 'package:shop/widgets/phone_picker_modal.dart';
 
 class KhataBookScreen extends StatefulWidget {
   const KhataBookScreen({
@@ -108,14 +114,78 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     });
   }
 
-  Future<void> _callCustomer(String? phone) async {
-    if (phone == null || phone.isEmpty) {
+  Future<void> _importCustomersFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls', 'csv'],
+      );
+      if (result == null || result.files.isEmpty || result.files.first.path == null) {
+        return;
+      }
+
+      final file = File(result.files.first.path!);
+      final parsedList = await ExcelCustomerService.parseCustomersFromFile(
+        file,
+        widget.customerRepository,
+      );
+
+      if (!mounted) return;
+
+      if (parsedList.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No valid customers found in file. Please ensure shop/customer names are present.'),
+          ),
+        );
+        return;
+      }
+
+      await showCustomerImportDialog(
+        context: context,
+        candidates: parsedList,
+        customerRepository: widget.customerRepository,
+        onImportComplete: () => _loadKhata(),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to read file: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _callCustomer(String? rawPhone, {String customerName = 'Customer'}) async {
+    if (rawPhone == null || rawPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No phone number recorded for this customer')),
       );
       return;
     }
-    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    final numbers = Customer.extractNumbers(rawPhone);
+    if (numbers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No valid phone number found')),
+      );
+      return;
+    }
+
+    String phoneToCall = numbers.first;
+    if (numbers.length > 1) {
+      final chosen = await showPhonePickerModal(
+        context: context,
+        customerName: customerName,
+        phoneNumbers: numbers,
+        actionTitle: 'Call Customer',
+      );
+      if (chosen == null) return;
+      phoneToCall = chosen;
+    }
+
+    final clean = phoneToCall.replaceAll(RegExp(r'[^0-9+]'), '');
     final uri = Uri(scheme: 'tel', path: clean);
     try {
       if (await canLaunchUrl(uri)) {
@@ -126,23 +196,39 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phone')),
+        SnackBar(content: Text('Could not dial $phoneToCall')),
       );
     }
   }
 
-  Future<void> _sendWhatsAppMessage(String? phone, String text) async {
-    if (phone != null && phone.isNotEmpty) {
-      final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      final fullPhone = clean.length == 10 ? '91$clean' : clean;
-      final uri = Uri.parse(
-          'https://wa.me/$fullPhone?text=${Uri.encodeComponent(text)}');
-      try {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          return;
-        }
-      } catch (_) {}
+  Future<void> _sendWhatsAppMessage(String? rawPhone, String text, {String customerName = 'Customer'}) async {
+    if (rawPhone != null && rawPhone.isNotEmpty) {
+      final numbers = Customer.extractNumbers(rawPhone);
+      String? phoneToMsg;
+      if (numbers.length > 1) {
+        phoneToMsg = await showPhonePickerModal(
+          context: context,
+          customerName: customerName,
+          phoneNumbers: numbers,
+          actionTitle: 'Send WhatsApp Reminder',
+        );
+        if (phoneToMsg == null) return;
+      } else if (numbers.isNotEmpty) {
+        phoneToMsg = numbers.first;
+      }
+
+      if (phoneToMsg != null && phoneToMsg.isNotEmpty) {
+        final clean = phoneToMsg.replaceAll(RegExp(r'[^0-9]'), '');
+        final fullPhone = clean.length == 10 ? '91$clean' : clean;
+        final uri = Uri.parse(
+            'https://wa.me/$fullPhone?text=${Uri.encodeComponent(text)}');
+        try {
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            return;
+          }
+        } catch (_) {}
+      }
     }
     // Fallback to SharePlus
     await Share.share(text);
@@ -241,7 +327,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                         color: Color(0xFF25D366), size: 20),
                     onTap: () async {
                       Navigator.pop(ctx);
-                      await _sendWhatsAppMessage(customerPhone, t['text']!);
+                      await _sendWhatsAppMessage(
+                        customerPhone,
+                        t['text']!,
+                        customerName: customerName,
+                      );
                     },
                   ),
                 );
@@ -376,6 +466,43 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                     isDense: true,
                   ),
                   autofocus: true,
+                  onChanged: (val) => setDState(() {}),
+                ),
+                Builder(
+                  builder: (context) {
+                    final entered =
+                        double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+                    if (entered > balanceDue && balanceDue > 0) {
+                      final advance = entered - balanceDue;
+                      return Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline,
+                                size: 16, color: Colors.amber.shade900),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Current due is ₹${balanceDue.toStringAsFixed(2)}. The extra ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.amber.shade900,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
                 ),
                 const SizedBox(height: 14),
 
@@ -450,14 +577,88 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     );
 
     if (received == true && mounted) {
-      final amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+      double amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
       if (amount <= 0) return;
+
+      if (amount > balanceDue && balanceDue > 0) {
+        final advance = amount - balanceDue;
+        final confirmAdvance = await showDialog<String>(
+          context: context,
+          builder: (actx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.account_balance_wallet_outlined,
+                    color: Color(0xFF0F766E)),
+                SizedBox(width: 8),
+                Text('Advance Payment Notice'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Customer\'s balance due is ₹${balanceDue.toStringAsFixed(2)}.'),
+                Text('Entered payment: ₹${amount.toStringAsFixed(2)}.\n'),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.teal.shade200),
+                  ),
+                  child: Text(
+                    'The remaining amount of ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0F766E)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                    'Would you like to accept this advance or cap at the exact balance due?'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(actx, 'cancel'),
+                child: const Text('Cancel'),
+              ),
+              OutlinedButton(
+                onPressed: () => Navigator.pop(actx, 'cap_due'),
+                child: Text('Cap at ₹${balanceDue.toStringAsFixed(2)}'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E)),
+                onPressed: () => Navigator.pop(actx, 'advance'),
+                child: Text('Accept ₹${advance.toStringAsFixed(2)} as Advance'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmAdvance == null || confirmAdvance == 'cancel') return;
+        if (confirmAdvance == 'cap_due') {
+          amount = balanceDue;
+        }
+      }
+
+      final advanceNote = amount > balanceDue && balanceDue > 0
+          ? 'Includes ₹${(amount - balanceDue).toStringAsFixed(2)} Advance Payment (to settle with future bills)'
+          : '';
+      final finalNotes = [
+        if (notesCtrl.text.trim().isNotEmpty) notesCtrl.text.trim(),
+        if (advanceNote.isNotEmpty) advanceNote,
+      ].join(' | ');
 
       await DatabaseHelper.instance.recordCustomerKhataPayment(
         customerId: customerId,
         amount: amount,
         paymentMode: paymentMode.toLowerCase(),
-        notes: notesCtrl.text.trim(),
+        notes: finalNotes,
       );
 
       await _loadKhata();
@@ -474,13 +675,22 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
 
       if (sendWhatsAppReceipt) {
         final shopName = ShopCustomizationService.instance.shopName;
-        final newDue = (balanceDue - amount) > 0 ? (balanceDue - amount) : 0.0;
+        final remainingDue = balanceDue - amount;
+        final remainingStr = remainingDue <= 0
+            ? (remainingDue < 0
+                ? '₹ 0.00 (Advance Credit: ₹${(-remainingDue).toStringAsFixed(2)} - will settle with future bills)'
+                : '₹ 0.00 (All dues cleared)')
+            : '₹ ${remainingDue.toStringAsFixed(2)}';
         final receiptMsg =
             '🙏 *Payment Received with Thanks!*\nReceived: *₹ ${amount.toStringAsFixed(2)}*\nMode: *$paymentMode*\nFrom: *$customerName*'
-            '${notesCtrl.text.trim().isNotEmpty ? "\nNote: ${notesCtrl.text.trim()}" : ""}'
-            '\nRemaining Balance: *₹ ${newDue.toStringAsFixed(2)}*'
+            '${finalNotes.isNotEmpty ? "\nNote: $finalNotes" : ""}'
+            '\nRemaining Balance: *$remainingStr*'
             '\nThank you for your business! - *$shopName*';
-        await _sendWhatsAppMessage(customerPhone, receiptMsg);
+        await _sendWhatsAppMessage(
+          customerPhone,
+          receiptMsg,
+          customerName: customerName,
+        );
       }
     }
   }
@@ -553,6 +763,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         title: const Text('Khata Book (Udhaar Ledger)',
             style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
+          IconButton(
+            tooltip: 'Import Customers & Opening Balances from Excel / CSV',
+            icon: const Icon(Icons.file_upload_outlined),
+            onPressed: _importCustomersFile,
+          ),
           IconButton(
             tooltip: 'Export Market Report (PDF)',
             icon: const Icon(Icons.picture_as_pdf_outlined),
@@ -1061,18 +1276,41 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                                   phone.isNotEmpty)
                                                 Row(
                                                   children: [
-                                                    Text(
-                                                      phone,
+                                                    Flexible(
+                                                      child: Text(
+                                                        Customer.extractNumbers(phone).isNotEmpty
+                                                            ? Customer.extractNumbers(phone).join(' • ')
+                                                            : phone,
                                                       style: TextStyle(
                                                         fontSize: 12,
                                                         color: Colors
                                                             .grey.shade600,
                                                       ),
                                                     ),
+                                                  ),
+                                                    if (Customer.extractNumbers(phone).length > 1) ...[
+                                                      const SizedBox(width: 4),
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.blue.shade50,
+                                                          borderRadius: BorderRadius.circular(4),
+                                                          border: Border.all(color: Colors.blue.shade200, width: 0.5),
+                                                        ),
+                                                        child: Text(
+                                                          '${Customer.extractNumbers(phone).length} phones',
+                                                          style: TextStyle(
+                                                            fontSize: 10,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.blue.shade800,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
                                                     const SizedBox(width: 4),
                                                     InkWell(
                                                       onTap: () =>
-                                                          _callCustomer(phone),
+                                                          _callCustomer(phone, customerName: name),
                                                       child: const Padding(
                                                         padding:
                                                             EdgeInsets.all(2),

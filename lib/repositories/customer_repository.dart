@@ -14,35 +14,64 @@ class CustomerRepository {
     final normalized = query.trim();
     final result = await db.query(
       'customers',
-      where: normalized.isEmpty ? null : 'name LIKE ?',
-      whereArgs: normalized.isEmpty ? null : ['%$normalized%'],
+      where: normalized.isEmpty ? null : 'name LIKE ? OR phone LIKE ? OR address LIKE ?',
+      whereArgs: normalized.isEmpty ? null : ['%$normalized%', '%$normalized%', '%$normalized%'],
       orderBy: 'name COLLATE NOCASE ASC',
     );
     return result.map(Customer.fromMap).toList();
   }
 
-  Future<Customer?> findByNameAndPhone(String name, String? phone) async {
-    final cleanPhone = phone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
-    if (cleanPhone != null && cleanPhone.isNotEmpty) {
-      final byPhone = await findByPhone(cleanPhone);
+  static String mergePhoneNumbers(String? existingPhone, String? newPhone) {
+    final set = <String>{};
+    if (existingPhone != null && existingPhone.trim().isNotEmpty) {
+      set.addAll(existingPhone
+          .split(RegExp(r'[,/;&|\n]+'))
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty));
+    }
+    if (newPhone != null && newPhone.trim().isNotEmpty) {
+      set.addAll(newPhone
+          .split(RegExp(r'[,/;&|\n]+'))
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty));
+    }
+    return set.join(', ');
+  }
+
+  Future<Customer?> findByNameAndPhone(String name, [dynamic phone]) async {
+    final normalizedName = name.trim().toLowerCase();
+    final List<String> inputNumbers = [];
+
+    if (phone is List<String>) {
+      for (final p in phone) {
+        final clean = p.replaceAll(RegExp(r'[^0-9]'), '').trim();
+        if (clean.length >= 6) inputNumbers.add(clean);
+      }
+    } else if (phone is String && phone.trim().isNotEmpty) {
+      inputNumbers.addAll(
+        phone
+            .split(RegExp(r'[,/;&|\n]+'))
+            .map((p) => p.replaceAll(RegExp(r'[^0-9]'), '').trim())
+            .where((p) => p.length >= 6),
+      );
+    }
+
+    // 1. Check if any phone number belongs to an existing customer
+    for (final cleanDigits in inputNumbers) {
+      final byPhone = await findByPhone(cleanDigits);
       if (byPhone != null) return byPhone;
     }
+
+    // 2. Check by exact name (case-insensitive)
     final db = await _databaseHelper.database;
     final result = await db.query(
       'customers',
       where: 'LOWER(TRIM(name)) = ?',
-      whereArgs: [name.trim().toLowerCase()],
+      whereArgs: [normalizedName],
       limit: 1,
     );
     if (result.isNotEmpty) {
-      final c = Customer.fromMap(result.first);
-      if (cleanPhone == null ||
-          cleanPhone.isEmpty ||
-          c.phone == null ||
-          c.phone!.trim().isEmpty ||
-          c.phone!.replaceAll(RegExp(r'[^0-9+]'), '').trim() == cleanPhone) {
-        return c;
-      }
+      return Customer.fromMap(result.first);
     }
     return null;
   }
@@ -56,17 +85,21 @@ class CustomerRepository {
     final cleanPhone = phone?.trim().isEmpty == true ? null : phone?.trim();
     final existing = await findByNameAndPhone(name, cleanPhone);
     if (existing != null) {
-      if ((cleanPhone != null && cleanPhone != existing.phone) ||
-          (address != null &&
-              address.trim().isNotEmpty &&
-              address != existing.address) ||
-          (creditLimit > 0 && creditLimit != existing.creditLimit)) {
+      final mergedPhone = mergePhoneNumbers(existing.phone, cleanPhone);
+      final newAddress = (address != null && address.trim().isNotEmpty)
+          ? address.trim()
+          : existing.address;
+      final newCredit = creditLimit > 0 ? creditLimit : existing.creditLimit;
+
+      if (mergedPhone != (existing.phone ?? '') ||
+          newAddress != existing.address ||
+          newCredit != existing.creditLimit) {
         await updateCustomer(
           id: existing.id!,
           name: name.trim().isNotEmpty ? name.trim() : existing.name,
-          phone: cleanPhone ?? existing.phone,
-          address: address ?? existing.address,
-          creditLimit: creditLimit > 0 ? creditLimit : existing.creditLimit,
+          phone: mergedPhone.isNotEmpty ? mergedPhone : null,
+          address: newAddress,
+          creditLimit: newCredit,
         );
         return (await getCustomerById(existing.id!))!;
       }
@@ -148,15 +181,22 @@ class CustomerRepository {
   }
 
   Future<Customer?> findByPhone(String phone) async {
-    final normalized = phone.trim();
-    if (normalized.isEmpty) return null;
+    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '').trim();
+    if (cleanDigits.isEmpty) return null;
     final db = await _databaseHelper.database;
-    final result = await db.query(
-      'customers',
-      where: 'phone = ?',
-      whereArgs: <Object?>[normalized],
-      limit: 1,
-    );
-    return result.isEmpty ? null : Customer.fromMap(result.first);
+    final all = await db.query('customers');
+    for (final row in all) {
+      final c = Customer.fromMap(row);
+      for (final p in c.phoneNumbers) {
+        final pDigits = p.replaceAll(RegExp(r'[^0-9]'), '').trim();
+        if (pDigits.isNotEmpty &&
+            (pDigits == cleanDigits ||
+                pDigits.endsWith(cleanDigits) ||
+                cleanDigits.endsWith(pDigits))) {
+          return c;
+        }
+      }
+    }
+    return null;
   }
 }

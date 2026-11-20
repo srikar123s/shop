@@ -59,6 +59,58 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
     }
   }
 
+  bool _ensureAllItemsPriced(OrderDetails details, {required String actionName}) {
+    final unpriced = details.items.where((i) => i.unitPrice <= 0).toList();
+    if (unpriced.isEmpty) return true;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(child: Text('Missing Item Prices')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cannot $actionName without proper prices. The following item(s) do not have a price set:'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: unpriced.map((i) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text('• ${i.itemName}', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Please return and set a valid price for each item before proceeding.'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final currency = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ');
@@ -152,20 +204,29 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
           IconButton(
             tooltip: 'Share on WhatsApp',
             icon: const Icon(Icons.share_rounded),
-            onPressed: () => ShareService.shareOrderDetails(details),
+            onPressed: () {
+              if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
+              ShareService.shareOrderDetails(details);
+            },
           ),
           IconButton(
             tooltip: 'Print Thermal Receipt (58mm)',
             icon: const Icon(Icons.print_outlined),
-            onPressed: () => InvoicePdfService.instance.printReceipt(
-              details,
-              isThermal58mm: true,
-            ),
+            onPressed: () {
+              if (!_ensureAllItemsPriced(details, actionName: 'print receipt')) return;
+              InvoicePdfService.instance.printReceipt(
+                details,
+                isThermal58mm: true,
+              );
+            },
           ),
           IconButton(
             tooltip: 'Download / Share PDF',
             icon: const Icon(Icons.picture_as_pdf_outlined),
-            onPressed: () => InvoicePdfService.instance.sharePdf(details),
+            onPressed: () {
+              if (!_ensureAllItemsPriced(details, actionName: 'download/share PDF')) return;
+              InvoicePdfService.instance.sharePdf(details);
+            },
           ),
         ],
       ),
@@ -700,7 +761,10 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
                     'Share on WhatsApp',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  onPressed: () => ShareService.shareOrderDetails(details),
+                  onPressed: () {
+                    if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
+                    ShareService.shareOrderDetails(details);
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -717,10 +781,13 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
                     'Print (58mm)',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  onPressed: () => InvoicePdfService.instance.printReceipt(
-                    details,
-                    isThermal58mm: true,
-                  ),
+                  onPressed: () {
+                    if (!_ensureAllItemsPriced(details, actionName: 'print receipt')) return;
+                    InvoicePdfService.instance.printReceipt(
+                      details,
+                      isThermal58mm: true,
+                    );
+                  },
                 ),
               ),
             ],

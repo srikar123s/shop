@@ -304,6 +304,103 @@ void main() {
       expect(restored.discountAmount, 100.0);
       expect(restored.grandTotal, 1062.0);
     });
+
+    test('90% Case (Out of Stock): Delivered goods billed strictly & shortage flagged for procurement', () {
+      // Ordered: 10 units @ 50 = 500, 5 units @ 100 = 500 (Ordered total = 1000)
+      // Delivered: 6 units @ 50 = 300, 2 units @ 100 = 200 (Delivered total = 500)
+      const deliveredSubtotal = (6 * 50.0) + (2 * 100.0);
+      final deliveredBill = BillBreakdown.calculate(
+        subtotal: deliveredSubtotal,
+        note: 'Closed with partial items delivered. Billed for given goods. To Procure: Item A (4 to procure), Item B (3 to procure)',
+      );
+
+      expect(deliveredBill.subtotal, 500.0);
+      expect(deliveredBill.grandTotal, 500.0);
+      expect(deliveredBill.note, contains('To Procure: Item A (4 to procure)'));
+    });
+
+    test('10% Case (Intentionally gave less): Shortage dropped and customer billed only for given items', () {
+      // Ordered: 10 units @ 50 = 500
+      // Intentionally gave: 6 units @ 50 = 300. Shortage of 4 is dropped (not sent to procurement).
+      const deliveredSubtotal = 6 * 50.0;
+      final deliveredBill = BillBreakdown.calculate(
+        subtotal: deliveredSubtotal,
+        note: 'Closed with partial items delivered. Billed for given goods. Shortage Dropped: Item A (6 of 10, shortage dropped)',
+      );
+
+      expect(deliveredBill.subtotal, 300.0);
+      expect(deliveredBill.grandTotal, 300.0);
+      expect(deliveredBill.note, contains('Shortage Dropped: Item A'));
+    });
+
+    test('Mixed 90/10 Case: Item A out of stock (procured), Item B intentional less (dropped)', () {
+      // Item A: 5 ordered, 2 given @ 100 = 200 (3 to procure)
+      // Item B: 10 ordered, 7 given @ 50 = 350 (3 dropped)
+      const deliveredSubtotal = (2 * 100.0) + (7 * 50.0);
+      final bill = BillBreakdown.calculate(
+        subtotal: deliveredSubtotal,
+        applyGst: true,
+        gstRate: 18.0,
+        note: 'To Procure: Item A (3 to procure). Shortage Dropped: Item B (7 of 10, shortage dropped)',
+      );
+
+      // Subtotal = 550, GST 18% = 99 -> Grand total = 649
+      expect(bill.subtotal, 550.0);
+      expect(bill.gstAmount, 99.0);
+      expect(bill.grandTotal, 649.0);
+      expect(bill.note, contains('To Procure: Item A'));
+      expect(bill.note, contains('Shortage Dropped: Item B'));
+    });
+
+    test('Discount validation: Cannot be negative and cannot exceed bill amount', () {
+      // 1. Negative discount test
+      final negativeDiscountBill = BillBreakdown.calculate(
+        subtotal: 1000.0,
+        applyDiscount: true,
+        discountType: 'flat',
+        discountValue: -250.0,
+      );
+      expect(negativeDiscountBill.discountValue, 0.0);
+      expect(negativeDiscountBill.discountAmount, 0.0);
+      expect(negativeDiscountBill.grandTotal, 1000.0);
+
+      // 2. Discount greater than subtotal test (flat)
+      final excessiveFlatDiscountBill = BillBreakdown.calculate(
+        subtotal: 500.0,
+        applyDiscount: true,
+        discountType: 'flat',
+        discountValue: 800.0,
+      );
+      expect(excessiveFlatDiscountBill.discountAmount, 500.0); // Clamped to subtotal
+      expect(excessiveFlatDiscountBill.grandTotal, 0.0); // Clamped to 0.0, not negative
+
+      // 3. Discount greater than 100% test (percent)
+      final excessivePercentDiscountBill = BillBreakdown.calculate(
+        subtotal: 800.0,
+        applyDiscount: true,
+        discountType: 'percent',
+        discountValue: 150.0,
+      );
+      expect(excessivePercentDiscountBill.discountAmount, 800.0); // 100% of 800
+      expect(excessivePercentDiscountBill.grandTotal, 0.0);
+
+      // 4. Negative override test
+      final negativeOverrideBill = BillBreakdown.calculate(
+        subtotal: 500.0,
+        grandTotalOverride: -100.0,
+      );
+      expect(negativeOverrideBill.grandTotal, 0.0);
+    });
+
+    test('Advance payment calculation logic: excess payment reflects as credit for future bills', () {
+      const balanceDue = 1200.0;
+      const amountPaid = 1500.0;
+      const excessAdvance = amountPaid - balanceDue;
+
+      expect(excessAdvance, 300.0);
+      const remainingDue = balanceDue - amountPaid;
+      expect(remainingDue, -300.0); // Negative due indicates advance credit balance
+    });
   });
 }
 

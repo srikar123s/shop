@@ -79,13 +79,15 @@ class ShareService {
       final opts = distinctOpts.join(', ');
       final qtyStr = item.quantityOrdered % 1 == 0 ? item.quantityOrdered.toInt().toString() : item.quantityOrdered.toString();
       
-      double price = 0;
-      try {
-        final snapshot = jsonDecode(item.productSnapshot) as Map<String, dynamic>;
-        if (snapshot.containsKey('unitPrice') && snapshot['unitPrice'] != null) {
-          price = (snapshot['unitPrice'] as num).toDouble();
-        }
-      } catch (_) {}
+      double price = item.unitPrice > 0 ? item.unitPrice : 0.0;
+      if (price <= 0) {
+        try {
+          final snapshot = jsonDecode(item.productSnapshot) as Map<String, dynamic>;
+          if (snapshot.containsKey('unitPrice') && snapshot['unitPrice'] != null) {
+            price = (snapshot['unitPrice'] as num).toDouble();
+          }
+        } catch (_) {}
+      }
 
       final amount = price * item.quantityOrdered;
       calculatedTotal += amount;

@@ -3,12 +3,14 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/order_receipt_screen.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
+import 'package:shop/widgets/phone_picker_modal.dart';
 
 class CustomerKhataPassbookScreen extends StatefulWidget {
   const CustomerKhataPassbookScreen({
@@ -76,14 +78,34 @@ class _CustomerKhataPassbookScreenState
   }
 
   Future<void> _callCustomer() async {
-    final phone = widget.customerPhone;
-    if (phone == null || phone.isEmpty) {
+    final rawPhone = widget.customerPhone;
+    if (rawPhone == null || rawPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No phone number for this customer')),
       );
       return;
     }
-    final clean = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    final numbers = Customer.extractNumbers(rawPhone);
+    if (numbers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No valid phone number for this customer')),
+      );
+      return;
+    }
+
+    String phoneToCall = numbers.first;
+    if (numbers.length > 1) {
+      final chosen = await showPhonePickerModal(
+        context: context,
+        customerName: widget.customerName,
+        phoneNumbers: numbers,
+        actionTitle: 'Call Customer',
+      );
+      if (chosen == null) return;
+      phoneToCall = chosen;
+    }
+
+    final clean = phoneToCall.replaceAll(RegExp(r'[^0-9+]'), '');
     final uri = Uri(scheme: 'tel', path: clean);
     try {
       if (await canLaunchUrl(uri)) {
@@ -94,7 +116,7 @@ class _CustomerKhataPassbookScreenState
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not dial $phone')),
+        SnackBar(content: Text('Could not dial $phoneToCall')),
       );
     }
   }
@@ -202,18 +224,34 @@ class _CustomerKhataPassbookScreenState
   }
 
   Future<void> _sendWhatsAppMessage(String text) async {
-    final phone = widget.customerPhone;
-    if (phone != null && phone.isNotEmpty) {
-      final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      final fullPhone = clean.length == 10 ? '91$clean' : clean;
-      final uri = Uri.parse(
-          'https://wa.me/$fullPhone?text=${Uri.encodeComponent(text)}');
-      try {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          return;
-        }
-      } catch (_) {}
+    final rawPhone = widget.customerPhone;
+    if (rawPhone != null && rawPhone.isNotEmpty) {
+      final numbers = Customer.extractNumbers(rawPhone);
+      String? phoneToMsg;
+      if (numbers.length > 1) {
+        phoneToMsg = await showPhonePickerModal(
+          context: context,
+          customerName: widget.customerName,
+          phoneNumbers: numbers,
+          actionTitle: 'Send WhatsApp Reminder',
+        );
+        if (phoneToMsg == null) return;
+      } else if (numbers.isNotEmpty) {
+        phoneToMsg = numbers.first;
+      }
+
+      if (phoneToMsg != null && phoneToMsg.isNotEmpty) {
+        final clean = phoneToMsg.replaceAll(RegExp(r'[^0-9]'), '');
+        final fullPhone = clean.length == 10 ? '91$clean' : clean;
+        final uri = Uri.parse(
+            'https://wa.me/$fullPhone?text=${Uri.encodeComponent(text)}');
+        try {
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            return;
+          }
+        } catch (_) {}
+      }
     }
     // Fallback to SharePlus
     await Share.share(text);
@@ -337,6 +375,43 @@ class _CustomerKhataPassbookScreenState
                     isDense: true,
                   ),
                   autofocus: true,
+                  onChanged: (val) => setDState(() {}),
+                ),
+                Builder(
+                  builder: (context) {
+                    final entered =
+                        double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+                    if (entered > _totalDue && _totalDue > 0) {
+                      final advance = entered - _totalDue;
+                      return Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline,
+                                size: 16, color: Colors.amber.shade900),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Current due is ₹${_totalDue.toStringAsFixed(2)}. The extra ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.amber.shade900,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
                 ),
                 const SizedBox(height: 14),
 
@@ -411,14 +486,88 @@ class _CustomerKhataPassbookScreenState
     );
 
     if (received == true && mounted) {
-      final amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
+      double amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
       if (amount <= 0) return;
+
+      if (amount > _totalDue && _totalDue > 0) {
+        final advance = amount - _totalDue;
+        final confirmAdvance = await showDialog<String>(
+          context: context,
+          builder: (actx) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.account_balance_wallet_outlined,
+                    color: Color(0xFF0F766E)),
+                SizedBox(width: 8),
+                Text('Advance Payment Notice'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Customer\'s balance due is ₹${_totalDue.toStringAsFixed(2)}.'),
+                Text('Entered payment: ₹${amount.toStringAsFixed(2)}.\n'),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.teal.shade200),
+                  ),
+                  child: Text(
+                    'The remaining amount of ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF0F766E)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                    'Would you like to accept this advance or cap at the exact balance due?'),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(actx, 'cancel'),
+                child: const Text('Cancel'),
+              ),
+              OutlinedButton(
+                onPressed: () => Navigator.pop(actx, 'cap_due'),
+                child: Text('Cap at ₹${_totalDue.toStringAsFixed(2)}'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E)),
+                onPressed: () => Navigator.pop(actx, 'advance'),
+                child: Text('Accept ₹${advance.toStringAsFixed(2)} as Advance'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmAdvance == null || confirmAdvance == 'cancel') return;
+        if (confirmAdvance == 'cap_due') {
+          amount = _totalDue;
+        }
+      }
+
+      final advanceNote = amount > _totalDue && _totalDue > 0
+          ? 'Includes ₹${(amount - _totalDue).toStringAsFixed(2)} Advance Payment (to settle with future bills)'
+          : '';
+      final finalNotes = [
+        if (notesCtrl.text.trim().isNotEmpty) notesCtrl.text.trim(),
+        if (advanceNote.isNotEmpty) advanceNote,
+      ].join(' | ');
 
       await DatabaseHelper.instance.recordCustomerKhataPayment(
         customerId: widget.customerId,
         amount: amount,
         paymentMode: paymentMode.toLowerCase(),
-        notes: notesCtrl.text.trim(),
+        notes: finalNotes,
       );
 
       await _loadLedger();
@@ -435,10 +584,16 @@ class _CustomerKhataPassbookScreenState
 
       if (sendReceiptOnWhatsApp) {
         final shopName = ShopCustomizationService.instance.shopName;
+        final remainingDue = _totalDue - amount;
+        final remainingStr = remainingDue <= 0
+            ? (remainingDue < 0
+                ? '₹ 0.00 (Advance Credit: ₹${(-remainingDue).toStringAsFixed(2)} - will settle with future bills)'
+                : '₹ 0.00 (All dues cleared)')
+            : '₹ ${remainingDue.toStringAsFixed(2)}';
         final receiptMsg =
             '🙏 *Payment Received with Thanks!*\nReceived: *₹ ${amount.toStringAsFixed(2)}*\nMode: *$paymentMode*\nFrom: *${widget.customerName}*'
-            '${notesCtrl.text.trim().isNotEmpty ? "\nNote: ${notesCtrl.text.trim()}" : ""}'
-            '\nRemaining Balance: *₹ ${_totalDue.toStringAsFixed(2)}*'
+            '${finalNotes.isNotEmpty ? "\nNote: $finalNotes" : ""}'
+            '\nRemaining Balance: *$remainingStr*'
             '\nThank you for your business! - *$shopName*';
         await _sendWhatsAppMessage(receiptMsg);
       }
@@ -638,7 +793,11 @@ class _CustomerKhataPassbookScreenState
               overflow: TextOverflow.ellipsis,
             ),
             Text(
-              widget.customerPhone ?? 'Khata Passbook',
+              widget.customerPhone != null
+                  ? (Customer.extractNumbers(widget.customerPhone).isNotEmpty
+                      ? Customer.extractNumbers(widget.customerPhone).join(' • ')
+                      : widget.customerPhone!)
+                  : 'Khata Passbook',
               style: const TextStyle(fontSize: 11, color: Colors.white70),
             ),
           ],

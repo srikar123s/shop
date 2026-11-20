@@ -188,8 +188,63 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     }
   }
 
+  bool _ensureAllItemsPriced({required String actionName}) {
+    if (_details == null) return false;
+    final unpricedItems =
+        _details!.items.where((i) => i.unitPrice <= 0).toList();
+    if (unpricedItems.isEmpty) return true;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 24),
+            SizedBox(width: 8),
+            Expanded(child: Text('Missing Item Prices')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cannot $actionName without proper prices. The following item(s) do not have a price set:'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: unpricedItems.map((i) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text('• ${i.itemName}', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Please enter a valid Price/Unit for each item before proceeding.'),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   Future<void> _closeOrder() async {
     if (_details == null || !mounted) return;
+    if (!_ensureAllItemsPriced(actionName: 'close order')) return;
     final order = _details!.order;
     final unfulfilled = _details!.items
         .where((i) => i.quantityGiven < i.quantityOrdered)
@@ -258,212 +313,379 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           )
         : BillBreakdown.calculate(subtotal: orderedSubtotal);
 
+    final Map<int, bool> itemProcureMap = {
+      for (final item in unfulfilled)
+        if (item.id != null) item.id!: true,
+    };
+
     final choice = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(Icons.warning_amber_rounded,
-                  color: Colors.orange.shade900, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Order ${order.formattedOrderId}',
-                    style: const TextStyle(
-                        fontSize: 17, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    '${unfulfilled.length} item(s) not fully given',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.deepOrange.shade800,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final procureCount = itemProcureMap.values.where((v) => v).length;
+          final dropCount = itemProcureMap.values.where((v) => !v).length;
+
+          return AlertDialog(
+            titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            title: Row(
               children: [
-                const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade300),
+                    color: Colors.orange.shade100,
+                    borderRadius: BorderRadius.circular(10),
                   ),
+                  child: Icon(Icons.inventory_2_outlined,
+                      color: Colors.orange.shade900, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Items not given / partially given:',
+                      Text(
+                        'Close ${order.formattedOrderId}',
+                        style: const TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        '${unfulfilled.length} item(s) partially given',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                      const SizedBox(height: 8),
-                      ...unfulfilled.map((item) {
-                        final pending =
-                            item.quantityOrdered - item.quantityGiven;
-                        final ordStr = item.quantityOrdered % 1 == 0
-                            ? item.quantityOrdered.toInt().toString()
-                            : item.quantityOrdered.toString();
-                        final gvnStr = item.quantityGiven % 1 == 0
-                            ? item.quantityGiven.toInt().toString()
-                            : item.quantityGiven.toString();
-                        final pndStr = pending % 1 == 0
-                            ? pending.toInt().toString()
-                            : pending.toString();
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('• ',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.red)),
-                              Expanded(
-                                child: Text(
-                                  item.itemName,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13),
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade50,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                      color: Colors.red.shade200),
-                                ),
-                                child: Text(
-                                  'Given $gvnStr of $ordStr ($pndStr not given)',
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.red.shade900,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primaryContainer
-                        .withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.3)),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Delivered Items Value:'),
-                          Text(
-                            '₹ ${deliveredBreakdown.grandTotal.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal,
-                                fontSize: 14),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Original Ordered Value:'),
-                          Text(
-                            '₹ ${fullBreakdown.grandTotal.toStringAsFixed(2)}',
-                            style: TextStyle(
-                                color: Colors.grey.shade700,
-                                decoration: TextDecoration.lineThrough,
-                                fontSize: 13),
-                          ),
-                        ],
+                            fontSize: 12,
+                            color: Colors.deepOrange.shade800,
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'How would you like to close this order?',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ],
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, 'cancel'),
-            child: const Text('CANCEL'),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.done_all, size: 18),
-              label: Text(
-                'Deliver All Remaining Items (₹${fullBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 6),
+                    Text(
+                      'Choose what to do with remaining unfulfilled items:',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade800,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Quick Bulk Selection
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              setDialogState(() {
+                                for (final k in itemProcureMap.keys) {
+                                  itemProcureMap[k] = true;
+                                }
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              decoration: BoxDecoration(
+                                color: procureCount == unfulfilled.length
+                                    ? Colors.orange.shade100
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: procureCount == unfulfilled.length
+                                      ? Colors.orange.shade400
+                                      : Colors.grey.shade300,
+                                ),
+                              ),
+                              child: const Text(
+                                '📦 All Out of Stock\n(Procure All - 90%)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () {
+                              setDialogState(() {
+                                for (final k in itemProcureMap.keys) {
+                                  itemProcureMap[k] = false;
+                                }
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              decoration: BoxDecoration(
+                                color: dropCount == unfulfilled.length
+                                    ? Colors.amber.shade100
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: dropCount == unfulfilled.length
+                                      ? Colors.amber.shade400
+                                      : Colors.grey.shade300,
+                                ),
+                              ),
+                              child: const Text(
+                                '✂️ All Gave Less\n(Drop All - 10%)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Per-item list
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ...unfulfilled.map((item) {
+                            final pending =
+                                item.quantityOrdered - item.quantityGiven;
+                            final ordStr = item.quantityOrdered % 1 == 0
+                                ? item.quantityOrdered.toInt().toString()
+                                : item.quantityOrdered.toString();
+                            final gvnStr = item.quantityGiven % 1 == 0
+                                ? item.quantityGiven.toInt().toString()
+                                : item.quantityGiven.toString();
+                            final pndStr = pending % 1 == 0
+                                ? pending.toInt().toString()
+                                : pending.toString();
+                            final shouldProcure =
+                                itemProcureMap[item.id] ?? true;
+
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: shouldProcure
+                                          ? Colors.orange.shade200
+                                          : Colors.teal.shade200),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item.itemName,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13),
+                                          ),
+                                        ),
+                                        Text(
+                                          'Given $gvnStr / $ordStr',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade700,
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () {
+                                              if (item.id != null) {
+                                                setDialogState(() {
+                                                  itemProcureMap[item.id!] = true;
+                                                });
+                                              }
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  vertical: 5, horizontal: 6),
+                                              decoration: BoxDecoration(
+                                                color: shouldProcure
+                                                    ? Colors.orange.shade600
+                                                    : Colors.grey.shade100,
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                '📦 Procure ($pndStr)',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: shouldProcure
+                                                      ? Colors.white
+                                                      : Colors.grey.shade800,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () {
+                                              if (item.id != null) {
+                                                setDialogState(() {
+                                                  itemProcureMap[item.id!] = false;
+                                                });
+                                              }
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  vertical: 5, horizontal: 6),
+                                              decoration: BoxDecoration(
+                                                color: !shouldProcure
+                                                    ? const Color(0xFF0F766E)
+                                                    : Colors.grey.shade100,
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                '✂️ Gave less (Drop)',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: !shouldProcure
+                                                      ? Colors.white
+                                                      : Colors.grey.shade800,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Bill Summary Card
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.teal.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Customer Bill (Delivered Goods):',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12)),
+                              Text(
+                                '₹ ${deliveredBreakdown.grandTotal.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF0F766E),
+                                    fontSize: 15),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Original Ordered Total:',
+                                  style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 11)),
+                              Text(
+                                '₹ ${fullBreakdown.grandTotal.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    decoration: TextDecoration.lineThrough,
+                                    fontSize: 11),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Customer is billed strictly for delivered items (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)}).',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.teal.shade900,
+                                fontStyle: FontStyle.italic),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: () => Navigator.pop(context, 'all_given'),
             ),
-          ),
-          const SizedBox(height: 6),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E)),
-              icon: const Icon(Icons.receipt_long, size: 18),
-              label: Text(
-                'Adjust Bill for Given Items (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'cancel'),
+                child: const Text('CANCEL'),
               ),
-              onPressed: () => Navigator.pop(context, 'delivered_only'),
-            ),
-          ),
-        ],
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.done_all, size: 18),
+                  label: Text(
+                    'Deliver All 100% (₹${fullBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () => Navigator.pop(context, 'all_given'),
+                ),
+              ),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E)),
+                  icon: const Icon(Icons.receipt_long, size: 18),
+                  label: Text(
+                    'Close & Bill Given (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)})',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  onPressed: () => Navigator.pop(context, 'delivered_only'),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -477,13 +699,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       );
       await widget.orderRepository.closeOrderWithDeliveredItemsOnly(
         orderId: order.id!,
+        itemProcureMap: itemProcureMap,
       );
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${order.formattedOrderId} closed. Bill adjusted to ₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)} with partial items note.',
+              '${order.formattedOrderId} closed. Bill adjusted to ₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)} for delivered goods.',
             ),
             backgroundColor: Colors.teal,
             duration: const Duration(seconds: 4),
@@ -590,6 +813,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     const Text('Direct print via Bluetooth thermal printer'),
                 onTap: () async {
                   Navigator.pop(ctx);
+                  if (!_ensureAllItemsPriced(actionName: 'print receipt')) return;
                   await InvoicePdfService.instance.printReceipt(
                     _details!,
                     isThermal58mm: true,
@@ -611,6 +835,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                     const Text('Standard format with shop stamp & details'),
                 onTap: () async {
                   Navigator.pop(ctx);
+                  if (!_ensureAllItemsPriced(actionName: 'share PDF bill')) return;
                   await InvoicePdfService.instance.sharePdf(_details!);
                 },
               ),
@@ -797,6 +1022,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
+                onChanged: (val) => setDialogState(() {}),
+              ),
+              Builder(
+                builder: (context) {
+                  final entered =
+                      double.tryParse(amountController.text.trim()) ?? 0.0;
+                  if (entered > due && due > 0) {
+                    final excess = entered - due;
+                    return Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade400),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 16, color: Colors.amber.shade900),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Excess ₹${excess.toStringAsFixed(2)} will be credited as advance payment for future bills.',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade900,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
               ),
               const SizedBox(height: 16),
               const Text('Payment Mode:',
@@ -833,20 +1094,104 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 backgroundColor: const Color(0xFF0F766E),
               ),
               onPressed: () async {
-                final entered =
+                double entered =
                     double.tryParse(amountController.text.trim()) ?? 0.0;
-                final newPaid = currentPaid + entered;
+                if (entered <= 0) return;
+
+                if (entered > due && due > 0) {
+                  final excess = entered - due;
+                  final confirmAdvance = await showDialog<String>(
+                    context: ctx,
+                    builder: (actx) => AlertDialog(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      title: const Row(
+                        children: [
+                          Icon(Icons.account_balance_wallet_outlined,
+                              color: Color(0xFF0F766E)),
+                          SizedBox(width: 8),
+                          Text('Advance Payment Notice'),
+                        ],
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                              'Order balance due is ₹${due.toStringAsFixed(2)}.'),
+                          Text(
+                              'Entered payment: ₹${entered.toStringAsFixed(2)}.\n'),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.teal.shade200),
+                            ),
+                            child: Text(
+                              'The excess amount of ₹${excess.toStringAsFixed(2)} will be credited as an ADVANCE PAYMENT on the customer\'s account and settled with future bills.',
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF0F766E)),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          const Text(
+                              'Would you like to accept this advance or cap at the exact due amount?'),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(actx, 'cancel'),
+                          child: const Text('Cancel'),
+                        ),
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(actx, 'cap_due'),
+                          child: Text('Cap at ₹${due.toStringAsFixed(2)}'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0F766E)),
+                          onPressed: () => Navigator.pop(actx, 'advance'),
+                          child: Text(
+                              'Accept ₹${excess.toStringAsFixed(2)} as Advance'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirmAdvance == null || confirmAdvance == 'cancel') return;
+                  if (confirmAdvance == 'cap_due') {
+                    entered = due;
+                  }
+                }
+
+                final newPaid = (currentPaid + entered).clamp(0.0, total);
                 await DatabaseHelper.instance.recordOrderPayment(
                   orderId: order.id!,
                   paidAmount: newPaid,
                   paymentMode: selectedMode,
                 );
+
+                if (entered > due && due > 0) {
+                  final excess = entered - due;
+                  await DatabaseHelper.instance.recordCustomerKhataPayment(
+                    customerId: order.customerId,
+                    amount: excess,
+                    paymentMode: selectedMode.toLowerCase(),
+                    notes:
+                        'Advance payment of ₹${excess.toStringAsFixed(2)} from ${order.formattedOrderId}',
+                  );
+                }
+
                 if (ctx.mounted) Navigator.pop(ctx);
                 await _load();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Payment of ₹$entered recorded!'),
+                      content: Text(
+                          'Payment of ₹${entered.toStringAsFixed(2)} recorded!'),
                       backgroundColor: const Color(0xFF0F766E),
                     ),
                   );
@@ -910,11 +1255,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             );
 
             double discountAmount = 0.0;
-            if (applyDiscount) {
+            if (applyDiscount && subtotal > 0) {
+              final safeDiscountValue = discountValue.clamp(0.0, double.infinity);
               if (discountType == 'percent') {
-                discountAmount = subtotal * discountValue / 100.0;
+                final safePercent = safeDiscountValue.clamp(0.0, 100.0);
+                discountAmount = (subtotal * safePercent / 100.0).clamp(0.0, subtotal);
               } else {
-                discountAmount = discountValue;
+                discountAmount = safeDiscountValue.clamp(0.0, subtotal);
               }
             }
 
@@ -1034,6 +1381,13 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                       discountType == 'percent' ? '%' : null,
                                   isDense: true,
                                   border: const OutlineInputBorder(),
+                                  errorText: discountValue < 0
+                                      ? 'Cannot be negative'
+                                      : (discountType == 'percent' && discountValue > 100
+                                          ? 'Cannot exceed 100%'
+                                          : (discountType == 'flat' && discountValue > subtotal
+                                              ? 'Cannot exceed bill total'
+                                              : null)),
                                 ),
                                 onChanged: (val) {
                                   setModalState(() {
@@ -1366,7 +1720,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           IconButton(
             tooltip: 'Share Order Summary',
             icon: const Icon(Icons.share),
-            onPressed: () => ShareService.shareOrderDetails(_details!),
+            onPressed: () {
+              if (!_ensureAllItemsPriced(actionName: 'share bill')) return;
+              ShareService.shareOrderDetails(_details!);
+            },
           ),
           IconButton(
             tooltip: 'Add products to order',
@@ -2238,7 +2595,7 @@ class _DualFulfillmentWidget extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '${_format(notGiven)} $unit not given (needs procurement)',
+                      '${_format(notGiven)} $unit not delivered yet',
                       style: const TextStyle(
                         color: Color(0xFF991B1B),
                         fontWeight: FontWeight.w600,
@@ -2269,7 +2626,7 @@ class _DualFulfillmentWidget extends StatelessWidget {
                           size: 14, color: Color(0xFFB45309)),
                       const SizedBox(width: 6),
                       Text(
-                        'Finalize at ${_format(given)} $unit (Don\'t Procure / Cut Shortage)',
+                        '10% Case: Intentionally Give Less (Drop Shortage)',
                         style: const TextStyle(
                           color: Color(0xFF92400E),
                           fontWeight: FontWeight.bold,
