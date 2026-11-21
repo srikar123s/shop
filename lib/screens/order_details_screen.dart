@@ -40,6 +40,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   OrderDetails? _details;
   bool _loading = true;
   bool _saving = false;
+  int? _customerBillNumber;
 
   @override
   void initState() {
@@ -51,8 +52,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     setState(() => _loading = true);
     final details =
         await widget.orderRepository.getOrderDetails(widget.orderId);
+    final seq = await DatabaseHelper.instance.getCustomerBillSequence(widget.orderId);
     setState(() {
       _details = details;
+      _customerBillNumber = seq;
       _loading = false;
     });
   }
@@ -817,6 +820,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   await InvoicePdfService.instance.printReceipt(
                     _details!,
                     isThermal58mm: true,
+                    customerBillNumber: _customerBillNumber,
                   );
                 },
               ),
@@ -836,7 +840,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 onTap: () async {
                   Navigator.pop(ctx);
                   if (!_ensureAllItemsPriced(actionName: 'share PDF bill')) return;
-                  await InvoicePdfService.instance.sharePdf(_details!);
+                  await InvoicePdfService.instance.sharePdf(_details!, customerBillNumber: _customerBillNumber);
                 },
               ),
               ListTile(
@@ -1682,7 +1686,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${order.formattedOrderId} - ${order.customerNameSnapshot}',
+              '${_customerBillNumber != null ? "Bill #$_customerBillNumber • " : ""}${order.formattedOrderId} - ${order.customerNameSnapshot}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -1722,7 +1726,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             icon: const Icon(Icons.share),
             onPressed: () {
               if (!_ensureAllItemsPriced(actionName: 'share bill')) return;
-              ShareService.shareOrderDetails(_details!);
+              ShareService.shareOrderDetails(_details!, customerBillNumber: _customerBillNumber);
             },
           ),
           IconButton(

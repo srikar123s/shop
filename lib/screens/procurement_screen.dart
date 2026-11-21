@@ -7,7 +7,6 @@ import 'package:shop/models/order.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
-import 'package:shop/screens/order_details_screen.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -220,9 +219,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
       int count = 1;
       for (final item in items) {
         final opts = item.options.isNotEmpty ? ' (${item.options.join(', ')})' : '';
-        sb.writeln('  $count. *${item.itemName}*$opts');
-        sb.writeln('     👉 *Need: ${_formatQty(item.quantityPending)} ${item.unit}* (Given ${_formatQty(item.quantityGiven)}/${_formatQty(item.quantityOrdered)})');
-        sb.writeln('     👤 For: ${item.customerName} (${item.formattedOrderId})');
+        sb.writeln('  $count. *${item.itemName}*$opts: *${_formatQty(item.quantityPending)} ${item.unit}*');
         count++;
       }
       sb.writeln('');
@@ -549,90 +546,48 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
                                           ),
                                       ],
                                     ),
-                                    const SizedBox(height: 12),
+                                    const SizedBox(height: 10),
 
-                                    // Quantity badge row
-                                    Row(
-                                      children: [
-                                        _ProcureBadge(
-                                          label: 'Ordered',
-                                          value:
-                                              '${_formatQty(item.quantityOrdered)} ${item.unit}',
-                                          color: Colors.blue.shade700,
-                                          bgColor: Colors.blue.shade50,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        _ProcureBadge(
-                                          label: 'Given',
-                                          value:
-                                              '${_formatQty(item.quantityGiven)} ${item.unit}',
-                                          color: Colors.teal.shade700,
-                                          bgColor: Colors.teal.shade50,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        _ProcureBadge(
-                                          label: 'To Procure',
-                                          value:
-                                              '${_formatQty(item.quantityPending)} ${item.unit}',
-                                          color: Colors.red.shade800,
-                                          bgColor: Colors.red.shade50,
-                                          isHighlight: true,
-                                        ),
-                                      ],
-                                    ),
-
-                                    const SizedBox(height: 12),
-                                    const Divider(height: 1),
-                                    const SizedBox(height: 8),
-
-                                    // Action Row: Customer info + "Mark Procured" button
+                                    // Item quantity to procure and quick actions row
                                     Row(
                                       mainAxisAlignment:
                                           MainAxisAlignment.spaceBetween,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
                                       children: [
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () async {
-                                              await Navigator.push(
-                                                context,
-                                                MaterialPageRoute<void>(
-                                                  builder: (_) =>
-                                                      OrderDetailsScreen(
-                                                    orderId: item.orderId,
-                                                    orderRepository:
-                                                        widget.orderRepository,
-                                                    productRepository:
-                                                        widget.productRepository,
-                                                    customerRepository:
-                                                        widget.customerRepository,
-                                                  ),
+                                        // Highlighted quantity to procure
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFEF2F2),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            border: Border.all(
+                                                color: const Color(0xFFFECACA),
+                                                width: 1),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.shopping_bag_outlined,
+                                                size: 15,
+                                                color: Color(0xFFDC2626),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '  to Procure',
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFFB91C1C),
                                                 ),
-                                              );
-                                              _loadItems();
-                                            },
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  '${item.customerName} • ${item.formattedOrderId}',
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w700,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'Order taken: ${DateFormat("dd MMM, hh:mm a").format(item.createdAt)}',
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
+                                        // Action buttons: Cut Shortage & Mark Procured
                                         Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -702,59 +657,6 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
                           },
                         ),
                       ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProcureBadge extends StatelessWidget {
-  const _ProcureBadge({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.bgColor,
-    this.isHighlight = false,
-  });
-
-  final String label;
-  final String value;
-  final Color color;
-  final Color bgColor;
-  final bool isHighlight;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color:
-              isHighlight ? color.withValues(alpha: 0.4) : Colors.transparent,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: color.withValues(alpha: 0.8),
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
           ),
         ],
       ),

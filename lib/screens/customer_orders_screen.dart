@@ -683,7 +683,7 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                                 BorderRadius.circular(8),
                                           ),
                                           child: Text(
-                                            order.formattedOrderId,
+                                            'Bill #${_orders.length - index} • ${order.formattedOrderId}',
                                             style: TextStyle(
                                               fontWeight: FontWeight.w800,
                                               fontSize: 13,
@@ -768,6 +768,60 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                         ),
                                       ],
                                     ),
+                                    if (order.unfulfilledItemNames.isNotEmpty) ...[
+                                      const SizedBox(height: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFEF2F2),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: const Color(0xFFFECACA)),
+                                        ),
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Icon(
+                                              Icons.warning_amber_rounded,
+                                              size: 15,
+                                              color: Color(0xFFDC2626),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Not Given (${order.unfulfilledItemNames.length} pending):',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Color(0xFF991B1B),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    order.unfulfilledItemNames
+                                                        .join(' • '),
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: Color(0xFF7F1D1D),
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                     const SizedBox(height: 10),
                                     Row(
                                       mainAxisAlignment:

@@ -17,6 +17,7 @@ class InvoicePdfService {
     OrderDetails details, {
     bool isDeliveryChallan = false,
     bool isThermal58mm = false,
+    int? customerBillNumber,
   }) async {
     final pdf = pw.Document();
     final shopService = ShopCustomizationService.instance;
@@ -56,6 +57,8 @@ class InvoicePdfService {
               shopName: shopName,
               shopPhone: shopPhone,
               shopAddress: shopAddress,
+              gstin: gstin,
+              upiId: upiId,
               docTitle: docTitle,
               order: order,
               items: items,
@@ -63,6 +66,7 @@ class InvoicePdfService {
               dateStr: dateStr,
               isDeliveryChallan: isDeliveryChallan,
               digitalStamp: digitalStamp,
+              customerBillNumber: customerBillNumber,
             );
           }
 
@@ -150,11 +154,15 @@ class InvoicePdfService {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
-                      pw.Text(order.formattedOrderId,
-                          style: pw.TextStyle(
-                              fontWeight: pw.FontWeight.bold,
-                              fontSize: 13,
-                              color: PdfColors.teal800)),
+                      pw.Text(
+                        customerBillNumber != null
+                            ? 'Bill #$customerBillNumber (${order.formattedOrderId})'
+                            : order.formattedOrderId,
+                        style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold,
+                            fontSize: 13,
+                            color: PdfColors.teal800),
+                      ),
                       pw.Text('Date: $dateStr',
                           style: const pw.TextStyle(fontSize: 10)),
                       pw.Text('Status: ${orderStatusLabel(order.status)}',
@@ -183,8 +191,8 @@ class InvoicePdfService {
                   'Item & Description',
                   'Qty',
                   'Unit',
-                  if (!isDeliveryChallan) 'Rate (₹)',
-                  if (!isDeliveryChallan) 'Amount (₹)',
+                  if (!isDeliveryChallan) 'Rate (Rs. )',
+                  if (!isDeliveryChallan) 'Amount (Rs. )',
                 ],
                 data: List.generate(items.length, (i) {
                   final item = items[i];
@@ -245,22 +253,22 @@ class InvoicePdfService {
                         children: [
                           if (breakdown != null) ...[
                             _buildPdfRow('Items Subtotal:',
-                                '₹ ${breakdown.subtotal.toStringAsFixed(2)}'),
+                                'Rs. ${breakdown.subtotal.toStringAsFixed(2)}'),
                             if (breakdown.discountAmount > 0)
                               _buildPdfRow('Discount:',
-                                  '- ₹ ${breakdown.discountAmount.toStringAsFixed(2)}'),
+                                  '- Rs. ${breakdown.discountAmount.toStringAsFixed(2)}'),
                             if (breakdown.applyGst)
                               _buildPdfRow(
                                   'GST (${breakdown.gstRate}%):',
-                                  '+ ₹ ${breakdown.gstAmount.toStringAsFixed(2)}'),
+                                  '+ Rs. ${breakdown.gstAmount.toStringAsFixed(2)}'),
                             if (breakdown.otherChargesTotal > 0)
                               _buildPdfRow('Other Charges:',
-                                  '+ ₹ ${breakdown.otherChargesTotal.toStringAsFixed(2)}'),
+                                  '+ Rs. ${breakdown.otherChargesTotal.toStringAsFixed(2)}'),
                             pw.Divider(color: PdfColors.grey400),
                           ],
                           _buildPdfRow(
                             'TOTAL AMOUNT:',
-                            '₹ ${order.estimateTotal.toStringAsFixed(2)}',
+                            'Rs. ${order.estimateTotal.toStringAsFixed(2)}',
                             isBold: true,
                           ),
                         ],
@@ -307,6 +315,8 @@ class InvoicePdfService {
     required String shopName,
     required String shopPhone,
     required String shopAddress,
+    required String gstin,
+    required String upiId,
     required String docTitle,
     required OrderEntity order,
     required List<OrderItemEntity> items,
@@ -314,69 +324,286 @@ class InvoicePdfService {
     required String dateStr,
     required bool isDeliveryChallan,
     required String digitalStamp,
+    int? customerBillNumber,
   }) {
     return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(shopName,
+        // Shop Name & Header (Centered)
+        pw.Center(
+          child: pw.Text(
+            shopName,
             style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
-            textAlign: pw.TextAlign.center),
-        if (shopAddress.isNotEmpty)
-          pw.Text(shopAddress,
-              style: const pw.TextStyle(fontSize: 8),
-              textAlign: pw.TextAlign.center),
-        if (shopPhone.isNotEmpty)
-          pw.Text('Tel: $shopPhone',
-              style: const pw.TextStyle(fontSize: 8),
-              textAlign: pw.TextAlign.center),
+            textAlign: pw.TextAlign.center,
+          ),
+        ),
+        if (shopAddress.isNotEmpty) ...[
+          pw.SizedBox(height: 1),
+          pw.Center(
+            child: pw.Text(
+              shopAddress,
+              style: const pw.TextStyle(fontSize: 7.5),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+        if (shopPhone.isNotEmpty || gstin.isNotEmpty) ...[
+          pw.SizedBox(height: 1),
+          pw.Center(
+            child: pw.Text(
+              [
+                if (shopPhone.isNotEmpty) 'Tel: $shopPhone',
+                if (gstin.isNotEmpty) 'GSTIN: $gstin',
+              ].join('  |  '),
+              style: const pw.TextStyle(fontSize: 7.5),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
         pw.SizedBox(height: 4),
-        pw.Text('*** $docTitle ***',
-            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-        pw.Text('Order: ${order.formattedOrderId} | $dateStr',
-            style: const pw.TextStyle(fontSize: 7)),
-        pw.Text('Cust: ${order.customerNameSnapshot}',
-            style: const pw.TextStyle(fontSize: 8)),
-        pw.SizedBox(height: 4),
-        pw.Divider(thickness: 0.5),
-        ...items.map((item) => pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      '${item.itemName} x ${item.quantityOrdered % 1 == 0 ? item.quantityOrdered.toInt() : item.quantityOrdered}',
-                      style: const pw.TextStyle(fontSize: 7.5),
-                    ),
-                  ),
-                  if (!isDeliveryChallan)
-                    pw.Text(
-                      '₹ ${(item.unitPrice * item.quantityOrdered).toStringAsFixed(0)}',
-                      style: pw.TextStyle(
-                          fontSize: 7.5, fontWeight: pw.FontWeight.bold),
-                    ),
-                ],
+        pw.Center(
+          child: pw.Text(
+            '*** $docTitle ***',
+            style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        pw.Divider(thickness: 0.8),
+
+        // Order metadata
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              customerBillNumber != null
+                  ? 'Bill: Bill #$customerBillNumber (${order.formattedOrderId})'
+                  : 'Order: ${order.formattedOrderId}',
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(dateStr, style: const pw.TextStyle(fontSize: 7.5)),
+          ],
+        ),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('Cust: ${order.customerNameSnapshot}',
+                style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+            if (order.customerPhone != null && order.customerPhone!.isNotEmpty)
+              pw.Text(order.customerPhone!, style: const pw.TextStyle(fontSize: 7.5)),
+          ],
+        ),
+        if (order.takenBy != null && order.takenBy!.trim().isNotEmpty && order.takenBy!.trim() != 'Store')
+          pw.Text('Billed by: ${order.takenBy}',
+              style: const pw.TextStyle(fontSize: 7)),
+
+        pw.SizedBox(height: 3),
+        pw.Divider(thickness: 0.8),
+
+        // Table Header
+        pw.Row(
+          children: [
+            pw.Expanded(
+              flex: 5,
+              child: pw.Text('ITEM DESCRIPTION',
+                  style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Expanded(
+              flex: 2,
+              child: pw.Text('QTY',
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
+            ),
+            if (!isDeliveryChallan) ...[
+              pw.Expanded(
+                flex: 2,
+                child: pw.Text('RATE',
+                    textAlign: pw.TextAlign.right,
+                    style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
               ),
-            )),
+              pw.Expanded(
+                flex: 3,
+                child: pw.Text('AMOUNT',
+                    textAlign: pw.TextAlign.right,
+                    style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
+              ),
+            ],
+          ],
+        ),
         pw.Divider(thickness: 0.5),
+
+        // Item List
+        ...items.map((item) {
+          final opts = item.options.map((o) => '${o.optionName}: ${o.optionValue}').join(', ');
+          final qtyStr = item.quantityOrdered % 1 == 0
+              ? item.quantityOrdered.toInt().toString()
+              : item.quantityOrdered.toString();
+          final lineTotal = item.unitPrice * item.quantityOrdered;
+
+          return pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 2),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(
+                      flex: 5,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            item.itemName,
+                            style: pw.TextStyle(
+                                fontSize: 8, fontWeight: pw.FontWeight.bold),
+                          ),
+                          if (opts.isNotEmpty)
+                            pw.Text(
+                              opts,
+                              style: const pw.TextStyle(
+                                  fontSize: 6.5, color: PdfColors.grey700),
+                            ),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text(
+                        '$qtyStr ${item.unit}',
+                        textAlign: pw.TextAlign.center,
+                        style: const pw.TextStyle(fontSize: 7.5),
+                      ),
+                    ),
+                    if (!isDeliveryChallan) ...[
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Text(
+                          item.unitPrice.toStringAsFixed(2),
+                          textAlign: pw.TextAlign.right,
+                          style: const pw.TextStyle(fontSize: 7.5),
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Text(
+                          lineTotal.toStringAsFixed(2),
+                          textAlign: pw.TextAlign.right,
+                          style: pw.TextStyle(
+                              fontSize: 8, fontWeight: pw.FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+
+        pw.Divider(thickness: 0.8),
+
+        // Financial Breakdown (Matching WhatsApp Bill)
         if (!isDeliveryChallan) ...[
+          if (breakdown != null) ...[
+            _buildThermalRow('Subtotal:', 'Rs. ${breakdown.subtotal.toStringAsFixed(2)}'),
+            if (breakdown.discountAmount > 0)
+              _buildThermalRow('Discount:', '- Rs. ${breakdown.discountAmount.toStringAsFixed(2)}'),
+            if (breakdown.applyGst)
+              _buildThermalRow('GST (${breakdown.gstRate}%):', '+ Rs. ${breakdown.gstAmount.toStringAsFixed(2)}'),
+            for (final charge in breakdown.otherCharges)
+              _buildThermalRow('${charge.name}:', '+ Rs. ${charge.amount.toStringAsFixed(2)}'),
+            pw.Divider(thickness: 0.5),
+          ],
+          // Grand Total
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('TOTAL:',
-                  style: pw.TextStyle(
-                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
-              pw.Text('₹ ${order.estimateTotal.toStringAsFixed(2)}',
-                  style: pw.TextStyle(
-                      fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('GRAND TOTAL:',
+                  style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Rs. ${order.estimateTotal.toStringAsFixed(2)}',
+                  style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
             ],
           ),
-          pw.SizedBox(height: 4),
+          pw.SizedBox(height: 3),
+          if (order.paidAmount > 0 || order.dueAmount > 0) ...[
+            pw.Divider(thickness: 0.5),
+            _buildThermalRow('Paid Amount:', 'Rs. ${order.paidAmount.toStringAsFixed(2)}'),
+            if (order.dueAmount > 0.01)
+              _buildThermalRow('Balance Due (Khata):', 'Rs. ${order.dueAmount.toStringAsFixed(2)}', isBold: true),
+            if (order.paidAmount > order.estimateTotal && order.estimateTotal > 0)
+              _buildThermalRow('Advance Credit:', 'Rs. ${(order.paidAmount - order.estimateTotal).toStringAsFixed(2)}'),
+          ],
+          pw.Divider(thickness: 0.8),
         ],
-        pw.Text('Thank you! Visit again.',
-            style: const pw.TextStyle(fontSize: 7)),
-        pw.SizedBox(height: 10),
+
+        // UPI QR Code
+        if (upiId.isNotEmpty && order.estimateTotal > 0 && !isDeliveryChallan) ...[
+          pw.Center(
+            child: pw.Column(
+              children: [
+                pw.SizedBox(height: 3),
+                pw.BarcodeWidget(
+                  barcode: pw.Barcode.qrCode(),
+                  data:
+                      'upi://pay?pa=$upiId&pn=${Uri.encodeComponent(shopName)}&am=${order.estimateTotal.toStringAsFixed(2)}&cu=INR&tn=${Uri.encodeComponent(order.formattedOrderId)}',
+                  width: 65,
+                  height: 65,
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text('Scan with PhonePe / GPay / Paytm to Pay',
+                    style: const pw.TextStyle(fontSize: 6.5)),
+                pw.SizedBox(height: 3),
+              ],
+            ),
+          ),
+          pw.Divider(thickness: 0.5),
+        ],
+
+        // Footer
+        pw.Center(
+          child: pw.Text(
+            'Thank you for your business! Visit again.',
+            style: const pw.TextStyle(fontSize: 7.5),
+            textAlign: pw.TextAlign.center,
+          ),
+        ),
+        if (digitalStamp.isNotEmpty) ...[
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text(
+              digitalStamp,
+              style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+        pw.SizedBox(height: 8),
       ],
+    );
+  }
+
+  pw.Widget _buildThermalRow(String label, String value, {bool isBold = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 7.5,
+              fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 7.5,
+              fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -543,7 +770,7 @@ class InvoicePdfService {
                         ),
                         pw.SizedBox(height: 4),
                         pw.Text(
-                          totalDue > 0.01 ? '₹ ${totalDue.toStringAsFixed(2)}' : 'ALL SETTLED',
+                          totalDue > 0.01 ? 'Rs. ${totalDue.toStringAsFixed(2)}' : 'ALL SETTLED',
                           style: pw.TextStyle(
                             fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
@@ -574,9 +801,9 @@ class InvoicePdfService {
                   children: [
                     _cellHeader('Date'),
                     _cellHeader('Particulars / Ref'),
-                    _cellHeader('Debit (Gave ₹)'),
-                    _cellHeader('Credit (Got ₹)'),
-                    _cellHeader('Balance (₹)'),
+                    _cellHeader('Debit (Gave Rs. )'),
+                    _cellHeader('Credit (Got Rs. )'),
+                    _cellHeader('Balance (Rs. )'),
                   ],
                 ),
                 ...ledgerEntries.map((e) {
@@ -659,13 +886,13 @@ class InvoicePdfService {
                   ),
                   child: pw.Column(
                     children: [
-                      _summaryRow('Total Billed:', '₹ ${totalBilled.toStringAsFixed(2)}'),
+                      _summaryRow('Total Billed:', 'Rs. ${totalBilled.toStringAsFixed(2)}'),
                       pw.SizedBox(height: 4),
-                      _summaryRow('Total Paid:', '₹ ${totalPaid.toStringAsFixed(2)}'),
+                      _summaryRow('Total Paid:', 'Rs. ${totalPaid.toStringAsFixed(2)}'),
                       pw.Divider(thickness: 0.5, color: PdfColors.grey400),
                       _summaryRow(
                         'Net Balance Due:',
-                        '₹ ${totalDue.toStringAsFixed(2)}',
+                        'Rs. ${totalDue.toStringAsFixed(2)}',
                         bold: true,
                         color: totalDue > 0 ? PdfColors.red900 : PdfColors.green900,
                       ),
@@ -755,12 +982,12 @@ class InvoicePdfService {
             pw.Row(
               children: [
                 pw.Expanded(
-                  child: _metricCard('TOTAL OUTSTANDING', '₹ ${totalDue.toStringAsFixed(2)}',
+                  child: _metricCard('TOTAL OUTSTANDING', 'Rs. ${totalDue.toStringAsFixed(2)}',
                       PdfColors.red900, PdfColors.red50),
                 ),
                 pw.SizedBox(width: 8),
                 pw.Expanded(
-                  child: _metricCard('OVERDUE (>30 DAYS)', '₹ ${overdue30.toStringAsFixed(2)}',
+                  child: _metricCard('OVERDUE (>30 DAYS)', 'Rs. ${overdue30.toStringAsFixed(2)}',
                       PdfColors.orange900, PdfColors.orange50),
                 ),
                 pw.SizedBox(width: 8),
@@ -790,7 +1017,7 @@ class InvoicePdfService {
                     _cellHeader('Customer Name', color: PdfColors.white),
                     _cellHeader('Phone', color: PdfColors.white),
                     _cellHeader('Ageing (Days)', color: PdfColors.white),
-                    _cellHeader('Balance Due (₹)', color: PdfColors.white),
+                    _cellHeader('Balance Due (Rs. )', color: PdfColors.white),
                   ],
                 ),
                 ...khataList.asMap().entries.map((entry) {
@@ -830,7 +1057,7 @@ class InvoicePdfService {
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Total market balance across all customers: ₹ ${totalDue.toStringAsFixed(2)}',
+                pw.Text('Total market balance across all customers: Rs. ${totalDue.toStringAsFixed(2)}',
                     style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
                 pw.Text('Shop Management System',
                     style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey500)),
@@ -939,7 +1166,7 @@ class InvoicePdfService {
 
     await Share.shareXFiles(
       [XFile(file.path)],
-      text: 'Khata Statement of Account for $customerName (Due: ₹ ${totalDue.toStringAsFixed(2)})',
+      text: 'Khata Statement of Account for $customerName (Due: Rs. ${totalDue.toStringAsFixed(2)})',
     );
   }
 
@@ -978,7 +1205,7 @@ class InvoicePdfService {
 
     await Share.shareXFiles(
       [XFile(file.path)],
-      text: 'Market Udhaar Summary Report - Total Outstanding: ₹ ${(metrics["totalMarketDue"] as num?)?.toDouble().toStringAsFixed(2) ?? "0"}',
+      text: 'Market Udhaar Summary Report - Total Outstanding: Rs. ${(metrics["totalMarketDue"] as num?)?.toDouble().toStringAsFixed(2) ?? "0"}',
     );
   }
 
@@ -987,11 +1214,13 @@ class InvoicePdfService {
     OrderDetails details, {
     bool isDeliveryChallan = false,
     bool isThermal58mm = false,
+    int? customerBillNumber,
   }) async {
     final bytes = await generatePdfBytes(
       details,
       isDeliveryChallan: isDeliveryChallan,
       isThermal58mm: isThermal58mm,
+      customerBillNumber: customerBillNumber,
     );
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
@@ -1004,10 +1233,12 @@ class InvoicePdfService {
   Future<void> sharePdf(
     OrderDetails details, {
     bool isDeliveryChallan = false,
+    int? customerBillNumber,
   }) async {
     final bytes = await generatePdfBytes(
       details,
       isDeliveryChallan: isDeliveryChallan,
+      customerBillNumber: customerBillNumber,
     );
     final tempDir = await getTemporaryDirectory();
     final filename =

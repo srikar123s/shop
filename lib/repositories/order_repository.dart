@@ -233,6 +233,20 @@ class OrderRepository {
           .toList();
       final pendingCount = statuses.where((s) => s != ItemStatus.given).length;
       final status = _calculateOrderStatus(statuses);
+
+      final unfulfilledItems = <String>[];
+      for (final item in itemRows) {
+        final ordered = (item['quantity_ordered'] as num).toDouble();
+        final given = (item['quantity_given'] as num?)?.toDouble() ?? 0.0;
+        final pending = ordered - given;
+        if (pending > 0.001) {
+          final name = item['item_name'] as String;
+          final unit = (item['unit'] as String?) ?? 'pcs';
+          final pStr = pending % 1 == 0 ? pending.toInt().toString() : pending.toString();
+          unfulfilledItems.add('$name ($pStr $unit)');
+        }
+      }
+
       summaries.add(
         OrderSummary(
           orderId: orderId,
@@ -248,6 +262,7 @@ class OrderRepository {
           paidAmount: (row['paid_amount'] as num?)?.toDouble() ?? 0.0,
           paymentMode: row['payment_mode'] as String?,
           paymentStatus: row['payment_status'] as String?,
+          unfulfilledItemNames: unfulfilledItems,
         ),
       );
     }

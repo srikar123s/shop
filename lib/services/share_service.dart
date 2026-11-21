@@ -42,7 +42,7 @@ class ShareService {
     }).toList();
 
     try {
-      final imageFile = await _generateEstimateImage(
+      final imageFiles = await _generateEstimateImages(
         title: 'ORDER ESTIMATE',
         orderId: orderIdStr,
         customerName: draftOrder.customer.name,
@@ -54,8 +54,8 @@ class ShareService {
       );
 
       await Share.shareXFiles(
-        [XFile(imageFile.path)],
-        text: 'Order Estimate for ${draftOrder.customer.name}',
+        imageFiles.map((f) => XFile(f.path)).toList(),
+        text: 'Order Estimate for ',
       );
     } catch (_) {
       // Fallback to text if image generation/sharing fails
@@ -63,7 +63,10 @@ class ShareService {
     }
   }
 
-  static Future<void> shareOrderDetails(OrderDetails details) async {
+  static Future<void> shareOrderDetails(
+    OrderDetails details, {
+    int? customerBillNumber,
+  }) async {
     final order = details.order;
     double calculatedTotal = 0;
 
@@ -113,10 +116,13 @@ class ShareService {
     }
     final finalTotal = breakdown.grandTotal > 0 ? breakdown.grandTotal : (order.estimateTotal > 0 ? order.estimateTotal : calculatedTotal);
 
+    final billLabel = customerBillNumber != null
+        ? 'Bill #$customerBillNumber (${order.formattedOrderId})'
+        : order.formattedOrderId;
     try {
-      final imageFile = await _generateEstimateImage(
+      final imageFiles = await _generateEstimateImages(
         title: 'ORDER RECEIPT',
-        orderId: order.formattedOrderId,
+        orderId: billLabel,
         customerName: order.customerNameSnapshot,
         phone: '',
         dateStr: DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt),
@@ -125,16 +131,23 @@ class ShareService {
         billBreakdown: breakdown,
       );
 
+      final shareSubject = customerBillNumber != null
+          ? 'Bill #$customerBillNumber for ${order.customerNameSnapshot}'
+          : 'Bill Receipt ${order.formattedOrderId} for ${order.customerNameSnapshot}';
       await Share.shareXFiles(
-        [XFile(imageFile.path)],
-        text: 'Order ${order.formattedOrderId} for ${order.customerNameSnapshot}',
+        imageFiles.map((f) => XFile(f.path)).toList(),
+        text: shareSubject,
       );
     } catch (_) {
-      await _shareOrderAsText(details, billBreakdown: breakdown);
+      await _shareOrderAsText(
+        details,
+        billBreakdown: breakdown,
+        customerBillNumber: customerBillNumber,
+      );
     }
   }
 
-  static Future<File> _generateEstimateImage({
+  static Future<List<File>> _generateEstimateImages({
     required String title,
     required String orderId,
     required String customerName,
@@ -144,10 +157,16 @@ class ShareService {
     required double grandTotal,
     BillBreakdown? billBreakdown,
   }) async {
-    final customShopName = ShopCustomizationService.instance.shopName.toUpperCase();
+    const int itemsPerPage = 16;
+    final int totalPages = (items.length / itemsPerPage).ceil().clamp(1, 99);
+    final tempDir = await getTemporaryDirectory();
+    final List<File> generatedFiles = [];
+
+    final customShopName =
+        ShopCustomizationService.instance.shopName.toUpperCase();
     const double width = 800;
-    final double headerHeight = 220;
-    final double itemHeight = 65;
+    const double headerHeight = 220;
+    const double itemHeight = 65;
     final bool hasBreakdown = billBreakdown != null &&
         (billBreakdown.applyDiscount ||
             billBreakdown.applyGst ||
@@ -159,215 +178,269 @@ class ShareService {
             (billBreakdown.otherCharges.length * 28.0) +
             15.0)
         : 0.0;
-    final double footerHeight = 160;
-    final double height = headerHeight +
-        (items.length * itemHeight) +
-        breakdownHeight +
-        footerHeight;
+    const double footerHeight = 160;
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
+    for (int page = 0; page < totalPages; page++) {
+      final startIndex = page * itemsPerPage;
+      final endIndex = (startIndex + itemsPerPage < items.length)
+          ? startIndex + itemsPerPage
+          : items.length;
+      final pageItems = items.sublist(startIndex, endIndex);
+      final isLastPage = (page == totalPages - 1);
 
-    // Paint Background
-    final bgPaint = Paint()..color = const Color(0xFFF8FAFC);
-    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), bgPaint);
+      final double height = headerHeight +
+          (pageItems.length * itemHeight) +
+          (isLastPage ? breakdownHeight : 0.0) +
+          (isLastPage ? footerHeight : 90.0);
 
-    // Header Banner
-    final bannerPaint = Paint()..color = const Color(0xFF0F766E);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          const Rect.fromLTWH(20, 20, width - 40, 140), const Radius.circular(16)),
-      bannerPaint,
-    );
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width, height));
 
-    // Title Text
-    final titlePainter = TextPainter(
-      text: TextSpan(
-        text: '$customShopName • $title',
-        style: const TextStyle(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1),
-      ),
-      textDirection: ui.TextDirection.ltr,
-    );
-    titlePainter.layout();
-    titlePainter.paint(canvas, const Offset(40, 40));
+      // Paint Background
+      final bgPaint = Paint()..color = const Color(0xFFF8FAFC);
+      canvas.drawRect(Rect.fromLTWH(0, 0, width, height), bgPaint);
 
-    // Subheader Date & ID
-    final subPainter = TextPainter(
-      text: TextSpan(
-        text: '$orderId   •   $dateStr',
-        style: const TextStyle(color: Color(0xFFCCFBF1), fontSize: 16),
-      ),
-      textDirection: ui.TextDirection.ltr,
-    );
-    subPainter.layout();
-    subPainter.paint(canvas, const Offset(40, 80));
-
-    // Customer Name & Phone
-    final custPainter = TextPainter(
-      text: TextSpan(
-        text: 'Customer: $customerName ${phone.isNotEmpty ? "($phone)" : ""}',
-        style: const TextStyle(
-            color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-      ),
-      textDirection: ui.TextDirection.ltr,
-    );
-    custPainter.layout();
-    custPainter.paint(canvas, const Offset(40, 115));
-
-    // Table Header Background
-    final thBg = Paint()..color = const Color(0xFFE2E8F0);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          Rect.fromLTWH(20, headerHeight - 30, width - 40, 40),
-          const Radius.circular(8)),
-      thBg,
-    );
-
-    // Table Column Titles
-    _drawText(canvas, 'ITEM & DETAILS', 40, headerHeight - 22, 14,
-        FontWeight.bold, const Color(0xFF334155));
-    _drawText(canvas, 'QTY', 440, headerHeight - 22, 14, FontWeight.bold,
-        const Color(0xFF334155));
-    _drawText(canvas, 'RATE', 560, headerHeight - 22, 14, FontWeight.bold,
-        const Color(0xFF334155));
-    _drawText(canvas, 'AMOUNT', 680, headerHeight - 22, 14, FontWeight.bold,
-        const Color(0xFF334155));
-
-    // Draw Items
-    double currentY = headerHeight + 20;
-
-    for (int i = 0; i < items.length; i++) {
-      final item = items[i];
-      final name = item['name'] as String;
-      final options = item['options'] as String;
-      final qtyStr = item['qtyStr'] as String;
-      final price = item['price'] as double;
-      final amount = item['amount'] as double;
-
-      // Card row background
-      final rowBg =
-          Paint()..color = i % 2 == 0 ? Colors.white : const Color(0xFFF1F5F9);
+      // Header Banner
+      final bannerPaint = Paint()..color = const Color(0xFF0F766E);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-            Rect.fromLTWH(20, currentY - 10, width - 40, itemHeight - 8),
-            const Radius.circular(8)),
-        rowBg,
+            const Rect.fromLTWH(20, 20, width - 40, 140),
+            const Radius.circular(16)),
+        bannerPaint,
       );
 
-      // Item Name
-      _drawText(canvas, name, 40, currentY - 4, 16, FontWeight.bold,
-          const Color(0xFF1E293B));
-      if (options.isNotEmpty) {
-        _drawText(canvas, options, 40, currentY + 18, 13, FontWeight.normal,
-            const Color(0xFF64748B));
-      }
+      // Title Text (with Page Number if multi-page)
+      final pageIndicator =
+          totalPages > 1 ? ' (Page ${page + 1} of $totalPages)' : '';
+      final titlePainter = TextPainter(
+        text: TextSpan(
+          text: '$customShopName • $title$pageIndicator',
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      );
+      titlePainter.layout(maxWidth: width - 80);
+      titlePainter.paint(canvas, const Offset(40, 36));
 
-      _drawText(canvas, qtyStr, 440, currentY + 6, 14, FontWeight.w600,
-          const Color(0xFF1E293B));
-      _drawText(canvas, price > 0 ? '₹${price.toStringAsFixed(2)}' : '-', 560,
-          currentY + 6, 14, FontWeight.normal, const Color(0xFF475569));
-      _drawText(canvas, amount > 0 ? '₹${amount.toStringAsFixed(2)}' : '-', 680,
-          currentY + 6, 15, FontWeight.bold, const Color(0xFF0F766E));
+      // Subheader Date & ID
+      final subPainter = TextPainter(
+        text: TextSpan(
+          text: '$orderId   •   $dateStr',
+          style: const TextStyle(color: Color(0xFFCCFBF1), fontSize: 15),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      );
+      subPainter.layout();
+      subPainter.paint(canvas, const Offset(40, 76));
 
-      currentY += itemHeight;
-    }
+      // Customer Name & Phone
+      final custPainter = TextPainter(
+        text: TextSpan(
+          text: 'Customer: $customerName ${phone.isNotEmpty ? "($phone)" : ""}',
+          style: const TextStyle(
+              color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      );
+      custPainter.layout(maxWidth: width - 80);
+      custPainter.paint(canvas, const Offset(40, 110));
 
-    // Divider Line
-    final linePaint = Paint()
-      ..color = const Color(0xFFCBD5E1)
-      ..strokeWidth = 2;
-    canvas.drawLine(
-        Offset(20, currentY + 10), Offset(width - 20, currentY + 10), linePaint);
-    currentY += 24;
+      // Table Header Background
+      final thBg = Paint()..color = const Color(0xFFE2E8F0);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(20, headerHeight - 30, width - 40, 40),
+            const Radius.circular(8)),
+        thBg,
+      );
 
-    if (hasBreakdown) {
-      // Subtotal
-      _drawText(canvas, 'Items Subtotal', 40, currentY, 15, FontWeight.w600,
-          const Color(0xFF475569));
-      _drawText(canvas, '₹ ${billBreakdown.subtotal.toStringAsFixed(2)}', 680,
-          currentY, 15, FontWeight.w700, const Color(0xFF1E293B));
-      currentY += 28;
+      // Table Column Titles
+      _drawText(canvas, '#  ITEM & DETAILS', 36, headerHeight - 22, 14,
+          FontWeight.bold, const Color(0xFF334155));
+      _drawText(canvas, 'QTY', 440, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155));
+      _drawText(canvas, 'RATE', 560, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155));
+      _drawText(canvas, 'AMOUNT', 680, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155));
 
-      if (billBreakdown.applyDiscount && billBreakdown.discountAmount > 0) {
-        final discLabel = billBreakdown.discountType == 'percent'
-            ? 'Discount (${billBreakdown.discountValue % 1 == 0 ? billBreakdown.discountValue.toInt() : billBreakdown.discountValue}%)'
-            : 'Discount (Flat)';
-        _drawText(canvas, discLabel, 40, currentY, 15, FontWeight.w600,
-            const Color(0xFF166534));
+      // Draw Items for this page
+      double currentY = headerHeight + 20;
+
+      for (int i = 0; i < pageItems.length; i++) {
+        final globalIndex = startIndex + i;
+        final item = pageItems[i];
+        final name = '${globalIndex + 1}. ${item['name'] as String}';
+        final options = item['options'] as String;
+        final qtyStr = item['qtyStr'] as String;
+        final price = item['price'] as double;
+        final amount = item['amount'] as double;
+
+        // Card row background
+        final rowBg = Paint()
+          ..color =
+              globalIndex % 2 == 0 ? Colors.white : const Color(0xFFF1F5F9);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(20, currentY - 10, width - 40, itemHeight - 8),
+              const Radius.circular(8)),
+          rowBg,
+        );
+
+        // Item Name
+        _drawText(canvas, name, 36, currentY - 4, 15, FontWeight.bold,
+            const Color(0xFF1E293B));
+        if (options.isNotEmpty) {
+          _drawText(canvas, options, 40, currentY + 18, 12, FontWeight.normal,
+              const Color(0xFF64748B));
+        }
+
+        _drawText(canvas, qtyStr, 440, currentY + 6, 14, FontWeight.w600,
+            const Color(0xFF1E293B));
         _drawText(
             canvas,
-            '- ₹ ${billBreakdown.discountAmount.toStringAsFixed(2)}',
+            price > 0 ? '₹${price.toStringAsFixed(2)}' : '-',
+            560,
+            currentY + 6,
+            14,
+            FontWeight.normal,
+            const Color(0xFF475569));
+        _drawText(
+            canvas,
+            amount > 0 ? '₹${amount.toStringAsFixed(2)}' : '-',
             680,
-            currentY,
+            currentY + 6,
             15,
-            FontWeight.w700,
-            const Color(0xFF166534));
-        currentY += 28;
+            FontWeight.bold,
+            const Color(0xFF0F766E));
+
+        currentY += itemHeight;
       }
 
-      if (billBreakdown.applyGst) {
-        final rateStr = billBreakdown.gstRate % 1 == 0
-            ? billBreakdown.gstRate.toInt().toString()
-            : billBreakdown.gstRate.toString();
-        _drawText(canvas, 'GST ($rateStr%)', 40, currentY, 15, FontWeight.w600,
-            const Color(0xFF475569));
-        _drawText(canvas, '+ ₹ ${billBreakdown.gstAmount.toStringAsFixed(2)}',
-            680, currentY, 15, FontWeight.w700, const Color(0xFF0F766E));
-        currentY += 28;
+      // Divider Line
+      final linePaint = Paint()
+        ..color = const Color(0xFFCBD5E1)
+        ..strokeWidth = 2;
+      canvas.drawLine(Offset(20, currentY + 10),
+          Offset(width - 20, currentY + 10), linePaint);
+      currentY += 24;
+
+      if (isLastPage) {
+        if (hasBreakdown) {
+          // Subtotal
+          _drawText(canvas, 'Items Subtotal', 40, currentY, 15, FontWeight.w600,
+              const Color(0xFF475569));
+          _drawText(canvas, '₹ ${billBreakdown.subtotal.toStringAsFixed(2)}',
+              680, currentY, 15, FontWeight.w700, const Color(0xFF1E293B));
+          currentY += 28;
+
+          if (billBreakdown.applyDiscount && billBreakdown.discountAmount > 0) {
+            final discLabel = billBreakdown.discountType == 'percent'
+                ? 'Discount (${billBreakdown.discountValue % 1 == 0 ? billBreakdown.discountValue.toInt() : billBreakdown.discountValue}%)'
+                : 'Discount (Flat)';
+            _drawText(canvas, discLabel, 40, currentY, 15, FontWeight.w600,
+                const Color(0xFF166534));
+            _drawText(
+                canvas,
+                '- ₹ ${billBreakdown.discountAmount.toStringAsFixed(2)}',
+                680,
+                currentY,
+                15,
+                FontWeight.w700,
+                const Color(0xFF166534));
+            currentY += 28;
+          }
+
+          if (billBreakdown.applyGst) {
+            final rateStr = billBreakdown.gstRate % 1 == 0
+                ? billBreakdown.gstRate.toInt().toString()
+                : billBreakdown.gstRate.toString();
+            _drawText(canvas, 'GST ($rateStr%)', 40, currentY, 15,
+                FontWeight.w600, const Color(0xFF475569));
+            _drawText(
+                canvas,
+                '+ ₹ ${billBreakdown.gstAmount.toStringAsFixed(2)}',
+                680,
+                currentY,
+                15,
+                FontWeight.w700,
+                const Color(0xFF0F766E));
+            currentY += 28;
+          }
+
+          for (final charge in billBreakdown.otherCharges) {
+            _drawText(canvas, charge.name, 40, currentY, 15, FontWeight.w600,
+                const Color(0xFF475569));
+            _drawText(canvas, '+ ₹ ${charge.amount.toStringAsFixed(2)}', 680,
+                currentY, 15, FontWeight.w700, const Color(0xFF0F766E));
+            currentY += 28;
+          }
+
+          canvas.drawLine(Offset(20, currentY + 4),
+              Offset(width - 20, currentY + 4), linePaint);
+          currentY += 16;
+        }
+
+        // Total Card Banner
+        final totalCard = Paint()..color = const Color(0xFF0F766E);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(20, currentY, width - 40, 70),
+              const Radius.circular(12)),
+          totalCard,
+        );
+
+        _drawText(canvas, 'TOTAL AMOUNT:', 40, currentY + 24, 18,
+            FontWeight.bold, Colors.white);
+        _drawText(canvas, '₹ ${grandTotal.toStringAsFixed(2)}', 560,
+            currentY + 20, 24, FontWeight.w900, const Color(0xFF5EEAD4));
+
+        // Footer
+        _drawText(
+            canvas,
+            'Thank you for your business! • $customShopName',
+            220,
+            currentY + 105,
+            14,
+            FontWeight.normal,
+            const Color(0xFF94A3B8));
+      } else {
+        // Intermediate page bottom banner
+        final contBg = Paint()..color = const Color(0xFFE2E8F0);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+              Rect.fromLTWH(20, currentY, width - 40, 48),
+              const Radius.circular(8)),
+          contBg,
+        );
+        _drawText(
+            canvas,
+            '--- Continued on Page ${page + 2} of $totalPages ---',
+            260,
+            currentY + 15,
+            15,
+            FontWeight.bold,
+            const Color(0xFF0F766E));
       }
 
-      for (final charge in billBreakdown.otherCharges) {
-        _drawText(canvas, charge.name, 40, currentY, 15, FontWeight.w600,
-            const Color(0xFF475569));
-        _drawText(canvas, '+ ₹ ${charge.amount.toStringAsFixed(2)}', 680,
-            currentY, 15, FontWeight.w700, const Color(0xFF0F766E));
-        currentY += 28;
-      }
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(width.toInt(), height.toInt());
+      final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+      final pngBytes = byteData!.buffer.asUint8List();
 
-      canvas.drawLine(
-          Offset(20, currentY + 4), Offset(width - 20, currentY + 4), linePaint);
-      currentY += 16;
+      final cleanId = orderId.replaceAll('#', '');
+      final pageSuffix = totalPages > 1 ? '_p${page + 1}' : '';
+      final file = File('${tempDir.path}/estimate_$cleanId$pageSuffix.png');
+      await file.writeAsBytes(pngBytes);
+      generatedFiles.add(file);
     }
 
-    // Total Card Banner
-    final totalCard = Paint()..color = const Color(0xFF0F766E);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          Rect.fromLTWH(20, currentY, width - 40, 70), const Radius.circular(12)),
-      totalCard,
-    );
-
-    _drawText(canvas, 'TOTAL AMOUNT:', 40, currentY + 24, 18, FontWeight.bold,
-        Colors.white);
-    _drawText(canvas, '₹ ${grandTotal.toStringAsFixed(2)}', 560, currentY + 20,
-        24, FontWeight.w900, const Color(0xFF5EEAD4));
-
-    // Footer
-    _drawText(
-        canvas,
-        'Thank you for your business! • $customShopName',
-        220,
-        currentY + 105,
-        14,
-        FontWeight.normal,
-        const Color(0xFF94A3B8));
-
-    final picture = recorder.endRecording();
-    final img = await picture.toImage(width.toInt(), height.toInt());
-    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
-    final pngBytes = byteData!.buffer.asUint8List();
-
-    final tempDir = await getTemporaryDirectory();
-    final file =
-        File('${tempDir.path}/estimate_${orderId.replaceAll('#', '')}.png');
-    await file.writeAsBytes(pngBytes);
-    return file;
+    return generatedFiles;
   }
-
   static void _drawText(Canvas canvas, String text, double x, double y,
       double fontSize, FontWeight weight, Color color) {
     final painter = TextPainter(
@@ -459,13 +532,19 @@ class ShareService {
     }
   }
 
-  static Future<void> _shareOrderAsText(OrderDetails details,
-      {BillBreakdown? billBreakdown}) async {
+  static Future<void> _shareOrderAsText(
+    OrderDetails details, {
+    BillBreakdown? billBreakdown,
+    int? customerBillNumber,
+  }) async {
     final shopName = ShopCustomizationService.instance.shopName;
     final order = details.order;
     final breakdown = billBreakdown ?? order.billBreakdown;
     final buffer = StringBuffer();
-    buffer.writeln('📋 *$shopName • ORDER ${order.formattedOrderId}*');
+    final billTitle = customerBillNumber != null
+        ? 'BILL #$customerBillNumber (${order.formattedOrderId})'
+        : 'ORDER ${order.formattedOrderId}';
+    buffer.writeln('📋 *$shopName • $billTitle*');
     buffer.writeln('Customer: ${order.customerNameSnapshot}');
     buffer.writeln(
         'Date: ${DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt)}');

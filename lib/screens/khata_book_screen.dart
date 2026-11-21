@@ -74,9 +74,10 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
       final days = (item['days_overdue'] as num?)?.toInt() ?? 0;
 
       if (_filter == 'due' && due <= 0.01) return false;
+      if (_filter == 'advance' && due >= -0.01) return false;
       if (_filter == 'overdue30' && (due <= 0.01 || days < 30)) return false;
       if (_filter == 'over_limit' && item['is_over_limit'] != true) return false;
-      if (_filter == 'settled' && due > 0.01) return false;
+      if (_filter == 'settled' && (due > 0.01 || due < -0.01)) return false;
 
       final name = (item['customer_name'] as String?)?.toLowerCase() ?? '';
       final phone = (item['customer_phone'] as String?)?.toLowerCase() ?? '';
@@ -757,6 +758,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         (_metrics['settledCustomersCount'] as num?)?.toInt() ?? 0;
     final overLimitCount =
         (_metrics['overLimitCustomersCount'] as num?)?.toInt() ?? 0;
+    final advanceCount = _khataList
+        .where((i) => ((i['balance_due'] as num?)?.toDouble() ?? 0.0) < -0.01)
+        .length;
 
     return Scaffold(
       appBar: AppBar(
@@ -1058,6 +1062,21 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                     },
                     visualDensity: VisualDensity.compact,
                   ),
+                  if (advanceCount > 0) ...[
+                    const SizedBox(width: 6),
+                    ChoiceChip(
+                      label: Text('Advance ($advanceCount)'),
+                      selected: _filter == 'advance',
+                      selectedColor: Colors.teal.shade100,
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() => _filter = 'advance');
+                          _applyFilterAndSort();
+                        }
+                      },
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
                   if (overLimitCount > 0) ...[
                     const SizedBox(width: 6),
                     ChoiceChip(
@@ -1161,18 +1180,24 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                           final daysOverdue =
                               (item['days_overdue'] as num?)?.toInt() ?? 0;
                           final hasDue = balanceDue > 0.01;
+                          final isAdvance = balanceDue < -0.01;
+                          final advanceAmt = -balanceDue;
 
                           return Card(
                             elevation: 1,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                               side: BorderSide(
-                                color: hasDue
-                                    ? (daysOverdue >= 30
-                                        ? Colors.red.shade400
-                                        : Colors.red.shade200)
-                                    : Colors.green.shade200,
-                                width: hasDue && daysOverdue >= 30 ? 1.5 : 1,
+                                color: isAdvance
+                                    ? const Color(0xFF0F766E)
+                                    : (hasDue
+                                        ? (daysOverdue >= 30
+                                            ? Colors.red.shade400
+                                            : Colors.red.shade200)
+                                        : Colors.green.shade200),
+                                width: (isAdvance || (hasDue && daysOverdue >= 30))
+                                    ? 1.5
+                                    : 1,
                               ),
                             ),
                             child: InkWell(
@@ -1188,22 +1213,26 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                       children: [
                                         CircleAvatar(
                                           radius: 20,
-                                          backgroundColor: hasDue
-                                              ? (daysOverdue >= 30
-                                                  ? Colors.red.shade100
-                                                  : Colors.orange.shade100)
-                                              : Colors.green.shade100,
+                                          backgroundColor: isAdvance
+                                              ? const Color(0xFFCCFBF1)
+                                              : (hasDue
+                                                  ? (daysOverdue >= 30
+                                                      ? Colors.red.shade100
+                                                      : Colors.orange.shade100)
+                                                  : Colors.green.shade100),
                                           child: Text(
                                             name.isNotEmpty
                                                 ? name[0].toUpperCase()
                                                 : 'C',
                                             style: TextStyle(
                                               fontWeight: FontWeight.bold,
-                                              color: hasDue
-                                                  ? (daysOverdue >= 30
-                                                      ? Colors.red.shade900
-                                                      : Colors.orange.shade900)
-                                                  : Colors.green.shade900,
+                                              color: isAdvance
+                                                  ? const Color(0xFF0F766E)
+                                                  : (hasDue
+                                                      ? (daysOverdue >= 30
+                                                          ? Colors.red.shade900
+                                                          : Colors.orange.shade900)
+                                                      : Colors.green.shade900),
                                             ),
                                           ),
                                         ),
@@ -1371,28 +1400,45 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                               CrossAxisAlignment.end,
                                           children: [
                                             Text(
-                                              hasDue
-                                                  ? 'BALANCE DUE'
-                                                  : 'SETTLED',
+                                              isAdvance
+                                                  ? 'ADVANCE PAYMENT'
+                                                  : (hasDue
+                                                      ? 'BALANCE DUE'
+                                                      : 'SETTLED'),
                                               style: TextStyle(
                                                 fontSize: 10,
                                                 fontWeight: FontWeight.w800,
-                                                color: hasDue
-                                                    ? Colors.red.shade800
-                                                    : Colors.green.shade800,
+                                                color: isAdvance
+                                                    ? const Color(0xFF0F766E)
+                                                    : (hasDue
+                                                        ? Colors.red.shade800
+                                                        : Colors.green.shade800),
                                               ),
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
-                                              currency.format(balanceDue),
+                                              isAdvance
+                                                  ? currency.format(advanceAmt)
+                                                  : currency.format(balanceDue),
                                               style: TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.w900,
-                                                color: hasDue
-                                                    ? Colors.red.shade800
-                                                    : Colors.green.shade800,
+                                                color: isAdvance
+                                                    ? const Color(0xFF0F766E)
+                                                    : (hasDue
+                                                        ? Colors.red.shade800
+                                                        : Colors.green.shade800),
                                               ),
                                             ),
+                                            if (isAdvance)
+                                              const Text(
+                                                'Advance with shop',
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Color(0xFF0F766E),
+                                                ),
+                                              ),
                                           ],
                                         ),
                                       ],

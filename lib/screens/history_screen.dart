@@ -1027,6 +1027,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                                     ),
                                                   ],
                                                 ),
+                                                if (order.unfulfilledItemNames.isNotEmpty) ...[
+                                                  const SizedBox(height: 6),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(
+                                                        horizontal: 8, vertical: 4),
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(0xFFFEF2F2),
+                                                      borderRadius:
+                                                          BorderRadius.circular(6),
+                                                      border: Border.all(
+                                                          color: const Color(0xFFFECACA)),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        const Icon(
+                                                          Icons.warning_amber_rounded,
+                                                          size: 13,
+                                                          color: Color(0xFFDC2626),
+                                                        ),
+                                                        const SizedBox(width: 4),
+                                                        Expanded(
+                                                          child: Text(
+                                                            'Not Given: ${order.unfulfilledItemNames.join(", ")}',
+                                                            style: const TextStyle(
+                                                              fontSize: 10,
+                                                              fontWeight:
+                                                                  FontWeight.bold,
+                                                              color: Color(0xFF991B1B),
+                                                            ),
+                                                            maxLines: 2,
+                                                            overflow:
+                                                                TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
                                               ],
                                             ),
                                           ),

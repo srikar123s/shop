@@ -781,6 +781,8 @@ class _CustomerKhataPassbookScreenState
     }
 
     final hasDue = _totalDue > 0.01;
+    final isAdvance = _totalDue < -0.01;
+    final advanceAmt = -_totalDue;
 
     return Scaffold(
       appBar: AppBar(
@@ -853,9 +855,11 @@ class _CustomerKhataPassbookScreenState
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: hasDue
-                    ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
-                    : [const Color(0xFF064E3B), const Color(0xFF0F766E)],
+                colors: isAdvance
+                    ? [const Color(0xFF047857), const Color(0xFF0F766E)]
+                    : (hasDue
+                        ? [const Color(0xFF0F172A), const Color(0xFF1E293B)]
+                        : [const Color(0xFF064E3B), const Color(0xFF0F766E)]),
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -869,9 +873,15 @@ class _CustomerKhataPassbookScreenState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          hasDue ? 'NET BALANCE DUE (PENDING)' : 'ACCOUNT STATUS',
-                          style: const TextStyle(
-                            color: Colors.white70,
+                          isAdvance
+                              ? 'ADVANCE BALANCE (CREDIT WITH SHOP)'
+                              : (hasDue
+                                  ? 'NET BALANCE DUE (PENDING)'
+                                  : 'ACCOUNT STATUS'),
+                          style: TextStyle(
+                            color: isAdvance
+                                ? const Color(0xFFCCFBF1)
+                                : Colors.white70,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 0.5,
@@ -879,13 +889,26 @@ class _CustomerKhataPassbookScreenState
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          hasDue ? currency.format(_totalDue) : 'ALL SETTLED (₹0)',
+                          isAdvance
+                              ? currency.format(advanceAmt)
+                              : (hasDue
+                                  ? currency.format(_totalDue)
+                                  : 'ALL SETTLED (₹0)'),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 24,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
+                        if (isAdvance)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2),
+                            child: Text(
+                              'Auto-settles with future orders and bills',
+                              style: TextStyle(
+                                  color: Color(0xFFCCFBF1), fontSize: 11),
+                            ),
+                          ),
                       ],
                     ),
                     if (hasDue)
@@ -1182,6 +1205,7 @@ class _CustomerKhataPassbookScreenState
                                               widget.customerRepository,
                                           productRepository:
                                               widget.productRepository,
+                                          customerBillNumber: item['bill_number'] as int?,
                                         ),
                                       ),
                                     );
@@ -1382,6 +1406,28 @@ class _CustomerKhataPassbookScreenState
                                                         ),
                                                       ),
                                                     ),
+                                                    if (orderId != null &&
+                                                        isDebit &&
+                                                        !subtitle.contains('Manual Udhaar')) ...[
+                                                      const SizedBox(width: 6),
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(
+                                                            horizontal: 5, vertical: 1.5),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.grey.shade100,
+                                                          borderRadius: BorderRadius.circular(4),
+                                                          border: Border.all(color: Colors.grey.shade300),
+                                                        ),
+                                                        child: Text(
+                                                          '#ORD-${orderId.toString().padLeft(4, "0")}',
+                                                          style: TextStyle(
+                                                            fontSize: 9.5,
+                                                            color: Colors.grey.shade700,
+                                                            fontWeight: FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
                                                     if (modeLabel.isNotEmpty &&
                                                         !isDebit) ...[
                                                       const SizedBox(width: 6),

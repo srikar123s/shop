@@ -609,6 +609,7 @@ class OrderSummary {
     this.paidAmount = 0.0,
     this.paymentMode,
     this.paymentStatus,
+    this.unfulfilledItemNames = const [],
   });
 
   final int orderId;
@@ -624,6 +625,7 @@ class OrderSummary {
   final double paidAmount;
   final String? paymentMode;
   final String? paymentStatus;
+  final List<String> unfulfilledItemNames;
 
   double get dueAmount =>
       (estimateTotal - paidAmount).clamp(0.0, double.infinity);

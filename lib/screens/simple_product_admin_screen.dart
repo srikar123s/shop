@@ -80,6 +80,33 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     }
   }
 
+  String _formatProductPrice(Product product) {
+    final vp = product.configuration.variantPrices;
+    if (vp.isNotEmpty) {
+      final validPrices = vp.values.where((p) => p > 0).toList();
+      if (validPrices.isNotEmpty) {
+        validPrices.sort();
+        final minP = validPrices.first;
+        final maxP = validPrices.last;
+        final unit = product.configuration.defaultUnit;
+        if ((minP - maxP).abs() < 0.01) {
+          final pStr = minP % 1 == 0 ? minP.toInt().toString() : minP.toStringAsFixed(2);
+          return '₹$pStr / $unit';
+        }
+        final minStr = minP % 1 == 0 ? minP.toInt().toString() : minP.toStringAsFixed(0);
+        final maxStr = maxP % 1 == 0 ? maxP.toInt().toString() : maxP.toStringAsFixed(0);
+        return '₹$minStr - ₹$maxStr / $unit';
+      }
+    }
+    if (product.configuration.basePrice > 0) {
+      final bp = product.configuration.basePrice;
+      final unit = product.configuration.defaultUnit;
+      final bpStr = bp % 1 == 0 ? bp.toInt().toString() : bp.toStringAsFixed(2);
+      return '₹$bpStr / $unit';
+    }
+    return 'Price Not Set ⚠️';
+  }
+
   List<String> _generateCombinations(List<ProductStep> steps) {
     if (steps.isEmpty) return <String>[];
     List<List<String>> result = [<String>[]];
@@ -1777,14 +1804,48 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                             ],
                           ],
                         ),
-                        subtitle: Text(
-                          product.configuration.steps.isEmpty
-                              ? 'Quantity only • ${product.configuration.defaultUnit}'
-                              : '${product.configuration.steps.map((step) => step.label).join(' → ')} • ${product.configuration.defaultUnit}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              product.configuration.steps.isEmpty
+                                  ? 'Quantity only • '
+                                  : ' • ',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade600),
+                            ),
+                            const SizedBox(height: 3),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isStale
+                                    ? const Color(0xFFFEF3C7)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isStale
+                                      ? const Color(0xFFF59E0B)
+                                      : const Color(0xFFCBD5E1),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Text(
+                                isStale
+                                    ? 'Old Rate: ${_formatProductPrice(product)}'
+                                    : 'Rate: ${_formatProductPrice(product)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: isStale
+                                      ? const Color(0xFFB45309)
+                                      : const Color(0xFF0F766E),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

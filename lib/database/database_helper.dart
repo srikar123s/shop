@@ -874,14 +874,48 @@ class DatabaseHelper {
     // Sort chronologically ascending
     entries.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
 
-    // Compute running balance
+    // Compute running balance & assign sequential customer bill numbers (Bill #1, Bill #2, Bill #3...)
     double running = 0.0;
+    int billSequence = 0;
     for (final entry in entries) {
+      if (entry['type'] == 'debit') {
+        billSequence++;
+        entry['bill_number'] = billSequence;
+        entry['title'] = 'Bill #$billSequence';
+      }
       running += (entry['debit'] as double) - (entry['credit'] as double);
       entry['running_balance'] = running;
     }
 
     return entries;
+  }
+
+  /// Returns the sequential bill number for a specific customer order.
+  /// Customer's first order is Bill 1, second order is Bill 2, etc.
+  Future<int?> getCustomerBillSequence(int orderId) async {
+    final db = await database;
+    final target = await db.query(
+      'orders',
+      columns: ['customer_id'],
+      where: 'id = ?',
+      whereArgs: [orderId],
+      limit: 1,
+    );
+    if (target.isEmpty) return null;
+    final customerId = target.first['customer_id'] as int?;
+    if (customerId == null) return null;
+
+    final customerOrders = await db.query(
+      'orders',
+      columns: ['id'],
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at ASC, id ASC',
+    );
+
+    final idx = customerOrders.indexWhere((r) => r['id'] == orderId);
+    if (idx < 0) return null;
+    return idx + 1;
   }
 
   /// Records a manual Udhaar / Debit entry (e.g. Previous balance, opening balance, or cash lent)

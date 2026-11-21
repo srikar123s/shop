@@ -1,3 +1,4 @@
+import 'package:shop/database/database_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/models/order.dart';
@@ -15,12 +16,14 @@ class OrderReceiptScreen extends StatefulWidget {
     required this.orderRepository,
     required this.customerRepository,
     required this.productRepository,
+    this.customerBillNumber,
   });
 
   final int orderId;
   final OrderRepository orderRepository;
   final CustomerRepository customerRepository;
   final ProductRepository productRepository;
+  final int? customerBillNumber;
 
   @override
   State<OrderReceiptScreen> createState() => _OrderReceiptScreenState();
@@ -30,10 +33,12 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
   OrderDetails? _details;
   bool _loading = true;
   String? _error;
+  int? _customerBillNumber;
 
   @override
   void initState() {
     super.initState();
+    _customerBillNumber = widget.customerBillNumber;
     _loadOrder();
   }
 
@@ -45,6 +50,8 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
     try {
       final details =
           await widget.orderRepository.getOrderDetails(widget.orderId);
+      _customerBillNumber ??=
+          await DatabaseHelper.instance.getCustomerBillSequence(widget.orderId);
       if (!mounted) return;
       setState(() {
         _details = details;
@@ -197,7 +204,9 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
       backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
         title: Text(
-          'Bill #${order.formattedOrderId}',
+          _customerBillNumber != null
+              ? 'Bill #$_customerBillNumber • ${order.formattedOrderId}'
+              : 'Bill ${order.formattedOrderId}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
@@ -206,7 +215,7 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
             icon: const Icon(Icons.share_rounded),
             onPressed: () {
               if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
-              ShareService.shareOrderDetails(details);
+              ShareService.shareOrderDetails(details, customerBillNumber: _customerBillNumber);
             },
           ),
           IconButton(
@@ -217,6 +226,7 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
               InvoicePdfService.instance.printReceipt(
                 details,
                 isThermal58mm: true,
+                customerBillNumber: _customerBillNumber,
               );
             },
           ),
@@ -225,7 +235,7 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
             icon: const Icon(Icons.picture_as_pdf_outlined),
             onPressed: () {
               if (!_ensureAllItemsPriced(details, actionName: 'download/share PDF')) return;
-              InvoicePdfService.instance.sharePdf(details);
+              InvoicePdfService.instance.sharePdf(details, customerBillNumber: _customerBillNumber);
             },
           ),
         ],
@@ -286,7 +296,7 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '${order.formattedOrderId}  •  $dateStr',
+                          '${_customerBillNumber != null ? "Bill #$_customerBillNumber  •  " : ""}${order.formattedOrderId}  •  $dateStr',
                           style: const TextStyle(
                             color: Color(0xFFCCFBF1),
                             fontSize: 13,
