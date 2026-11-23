@@ -474,6 +474,71 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
     }
   }
 
+  Future<void> _closeAllPendingOrders() async {
+    // Check if any pending order has unpriced items before bulk closing
+    final pendingOrders = _orders.where((o) =>
+        o.status == OrderStatus.pending ||
+        o.status == OrderStatus.partiallyCompleted).toList();
+    for (final po in pendingOrders) {
+      final details =
+          await widget.orderRepository.getOrderDetails(po.orderId);
+      if (!mounted) return;
+      if (details != null &&
+          !_ensureAllItemsPriced(details,
+              actionName: 'close order ${po.formattedOrderId}')) {
+        return;
+      }
+    }
+
+    if (!mounted) return;
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Close all pending orders?'),
+        content: const Text(
+          'If any orders have items not fully given, how would you like to close them?',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
+            child: const Text('CANCEL'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'all_given'),
+            child: const Text('MARK ALL GIVEN (FULL BILL)'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () =>
+                Navigator.pop(ctx, 'delivered_only'),
+            child: const Text('ADJUST BILLS TO GIVEN ITEMS'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || choice == 'cancel' || !mounted) {
+      return;
+    }
+    await widget.orderRepository.closePendingOrdersForCustomer(
+      widget.customerId,
+      adjustToGivenOnly: choice == 'delivered_only',
+    );
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(choice == 'delivered_only'
+            ? 'All pending orders closed with bills adjusted for delivered items.'
+            : 'All pending orders marked fully completed.'),
+        backgroundColor: Colors.teal,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   Color _statusColor(OrderStatus status) {
     switch (status) {
       case OrderStatus.completed:
@@ -525,53 +590,7 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
             IconButton(
               tooltip: 'Close all pending orders',
               icon: const Icon(Icons.archive_outlined),
-              onPressed: () async {
-                final choice = await showDialog<String>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Close all pending orders?'),
-                    content: const Text(
-                      'If any orders have items not fully given, how would you like to close them?',
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, 'cancel'),
-                        child: const Text('CANCEL'),
-                      ),
-                      OutlinedButton(
-                        onPressed: () => Navigator.pop(context, 'all_given'),
-                        child: const Text('MARK ALL GIVEN (FULL BILL)'),
-                      ),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0F766E)),
-                        onPressed: () =>
-                            Navigator.pop(context, 'delivered_only'),
-                        child: const Text('ADJUST BILLS TO GIVEN ITEMS'),
-                      ),
-                    ],
-                  ),
-                );
-                if (choice == null || choice == 'cancel' || !context.mounted) {
-                  return;
-                }
-                await widget.orderRepository.closePendingOrdersForCustomer(
-                  widget.customerId,
-                  adjustToGivenOnly: choice == 'delivered_only',
-                );
-                if (!context.mounted) return;
-                await _load();
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(choice == 'delivered_only'
-                        ? 'All pending orders closed with bills adjusted for delivered items.'
-                        : 'All pending orders marked fully completed.'),
-                    backgroundColor: Colors.teal,
-                    duration: const Duration(seconds: 3),
-                  ),
-                );
-              },
+              onPressed: _closeAllPendingOrders,
             ),
 
         ],

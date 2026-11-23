@@ -232,7 +232,11 @@ class OrderRepository {
           .map((e) => _itemStatusFromLabel(e['status'] as String))
           .toList();
       final pendingCount = statuses.where((s) => s != ItemStatus.given).length;
-      final status = _calculateOrderStatus(statuses);
+      final rawDbStatus = row['status'] as String? ?? '';
+      final dbStatus = _orderStatusFromLabel(rawDbStatus);
+      final status = (dbStatus == OrderStatus.completed || dbStatus == OrderStatus.closed)
+          ? dbStatus
+          : _calculateOrderStatus(statuses);
 
       final unfulfilledItems = <String>[];
       for (final item in itemRows) {
@@ -872,10 +876,17 @@ class OrderRepository {
   Future<({int pendingCount, int oldPendingCount, int toProcureCount})>
       getPendingAndProcurementStats() async {
     final db = await _databaseHelper.database;
-    final openOrders = await db.query(
-      'orders',
-      where: "UPPER(status) NOT IN ('COMPLETED', 'CLOSED')",
-    );
+    final openOrders = await db.rawQuery('''
+      SELECT o.id, o.created_at
+      FROM orders o
+      WHERE UPPER(o.status) NOT IN ('COMPLETED', 'CLOSED')
+        AND EXISTS (
+          SELECT 1 FROM order_items oi 
+          WHERE oi.order_id = o.id 
+            AND LOWER(oi.status) != 'given'
+            AND (oi.quantity_ordered - oi.quantity_given) > 0
+        )
+    ''');
 
     int pendingCount = openOrders.length;
     int oldPendingCount = 0;

@@ -41,6 +41,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   bool _loading = true;
   bool _saving = false;
   int? _customerBillNumber;
+  final Map<int, TextEditingController> _itemPriceControllers = {};
+
+  @override
+  void dispose() {
+    for (final c in _itemPriceControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -2201,28 +2210,38 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               const SizedBox(width: 8),
                               SizedBox(
                                 width: 120,
-                                child: TextField(
-                                  enabled: ShopSyncService.instance.canChangePrice,
-                                  controller: TextEditingController(
-                                    text: item.unitPrice > 0
-                                        ? item.unitPrice.toStringAsFixed(2)
-                                        : '',
-                                  ),
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                          decimal: true),
-                                  decoration: const InputDecoration(
-                                    isDense: true,
-                                    labelText: 'Price/Unit ₹',
-                                    prefixText: '₹ ',
-                                  ),
-                                  onChanged: (val) {
-                                    final parsed =
-                                        double.tryParse(val.trim()) ?? 0.0;
-                                    setState(() {
-                                      _details!.items[index] =
-                                          item.copyWith(unitPrice: parsed);
-                                    });
+                                child: Builder(
+                                  builder: (context) {
+                                    final priceCtrl = _itemPriceControllers.putIfAbsent(
+                                      item.id ?? index,
+                                      () => TextEditingController(
+                                        text: item.unitPrice > 0
+                                            ? (item.unitPrice % 1 == 0
+                                                ? item.unitPrice.toInt().toString()
+                                                : item.unitPrice.toStringAsFixed(2))
+                                            : '',
+                                      ),
+                                    );
+                                    return TextField(
+                                      enabled: ShopSyncService.instance.canChangePrice,
+                                      controller: priceCtrl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                              decimal: true),
+                                      decoration: const InputDecoration(
+                                        isDense: true,
+                                        labelText: 'Price/Unit ₹',
+                                        prefixText: '₹ ',
+                                      ),
+                                      onChanged: (val) {
+                                        final parsed =
+                                            double.tryParse(val.trim()) ?? 0.0;
+                                        setState(() {
+                                          _details!.items[index] =
+                                              item.copyWith(unitPrice: parsed);
+                                        });
+                                      },
+                                    );
                                   },
                                 ),
                               ),

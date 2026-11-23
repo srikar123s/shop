@@ -42,6 +42,7 @@ lib/firebase_options.dart
 .vscode/
 
 # OS & Temporary files
+scratch/
 .DS_Store
 Thumbs.db
 *.class

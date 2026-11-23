@@ -536,6 +536,7 @@ class DatabaseHelper {
         await db.query('orders', where: 'id = ?', whereArgs: [orderId]);
     if (order.isEmpty) return;
     final total = (order.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
+    final prevPaid = (order.first['paid_amount'] as num?)?.toDouble() ?? 0.0;
     final status = paidAmount >= total
         ? 'paid'
         : (paidAmount > 0 ? 'partial' : 'unpaid');
@@ -550,6 +551,19 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [orderId],
     );
+
+    final added = paidAmount - prevPaid;
+    final customerId = order.first['customer_id'] as int?;
+    if (added > 0.001 && customerId != null) {
+      final now = DateTime.now().toIso8601String();
+      await db.insert('customer_payments', {
+        'customer_id': customerId,
+        'amount': added,
+        'payment_mode': paymentMode.toLowerCase(),
+        'notes': 'Payment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
+        'created_at': now,
+      });
+    }
   }
 
   Future<void> recordCustomerKhataPayment({
@@ -765,11 +779,13 @@ class DatabaseHelper {
     final limit = (row['credit_limit'] as num?)?.toDouble() ?? 0.0;
     final due = (row['balance_due'] as num?)?.toDouble() ?? 0.0;
     final finalDue = due > 0.01 ? due : 0.0;
+    final advanceCredit = due < -0.01 ? (-due) : 0.0;
     final isOver = limit > 0 && finalDue > limit;
     final available = limit > 0 ? (limit - finalDue) : 0.0;
     return {
       'credit_limit': limit,
       'balance_due': finalDue,
+      'advance_credit': advanceCredit,
       'is_over_limit': isOver,
       'available_credit': available,
     };

@@ -35,6 +35,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   String _discountType = 'flat'; // 'flat' or 'percent'
   double _discountValue = 0.0;
   double _currentCustomerDue = 0.0;
+  double _currentCustomerAdvance = 0.0;
 
   late final TextEditingController _estimateController;
   late final TextEditingController _discountController;
@@ -397,6 +398,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         setState(() {
           _currentCustomerDue =
               (status['balance_due'] as num?)?.toDouble() ?? 0.0;
+          _currentCustomerAdvance =
+              (status['advance_credit'] as num?)?.toDouble() ?? 0.0;
         });
       }
     }
@@ -689,6 +692,47 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                 ],
               ),
             ),
+            if (_currentCustomerAdvance > 0) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_wallet_rounded,
+                        size: 20, color: Color(0xFF047857)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '💳 Advance Credit Available: ₹ ${_currentCustomerAdvance.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                              color: Color(0xFF065F46),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Customer has excess credit with the shop that will auto-settle on their Khata account.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF047857),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (!ShopCustomizationService.instance.isPureOfflineMode &&
                 !const bool.fromEnvironment('STANDALONE_LOCAL',
                     defaultValue: false) &&
