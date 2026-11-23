@@ -147,6 +147,64 @@ class ShareService {
     }
   }
 
+  /// Generates the exact styled image files matching the WhatsApp receipt
+  static Future<List<File>> generateReceiptImages(
+    OrderDetails details, {
+    int? customerBillNumber,
+    String title = 'ORDER RECEIPT',
+  }) async {
+    final order = details.order;
+    var breakdown = order.billBreakdown;
+    final double calculatedTotal = details.items.fold<double>(
+      0.0,
+      (sum, item) => sum + (item.unitPrice * item.quantityOrdered),
+    );
+
+    if (breakdown == null && calculatedTotal > 0) {
+      breakdown = BillBreakdown(
+        subtotal: calculatedTotal,
+        grandTotal: calculatedTotal,
+        applyGst: false,
+        gstRate: 18.0,
+        otherCharges: const [],
+      );
+    }
+
+    final double finalTotal = (breakdown != null && breakdown.grandTotal > 0)
+        ? breakdown.grandTotal
+        : (order.estimateTotal > 0 ? order.estimateTotal : calculatedTotal);
+
+    final billLabel = customerBillNumber != null
+        ? 'Bill #$customerBillNumber (${order.formattedOrderId})'
+        : order.formattedOrderId;
+
+    final itemsData = details.items.map((i) {
+      final opt = i.options
+          .map((o) => '${o.optionName}: ${o.optionValue}')
+          .join(', ');
+      return {
+        'name': i.itemName,
+        'options': opt,
+        'qty': i.quantityOrdered % 1 == 0
+            ? '${i.quantityOrdered.toInt()} ${i.unit}'
+            : '${i.quantityOrdered} ${i.unit}',
+        'rate': i.unitPrice,
+        'amount': i.unitPrice * i.quantityOrdered,
+      };
+    }).toList();
+
+    return _generateEstimateImages(
+      title: title,
+      orderId: billLabel,
+      customerName: order.customerNameSnapshot,
+      phone: '',
+      dateStr: DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt),
+      items: itemsData,
+      grandTotal: finalTotal,
+      billBreakdown: breakdown,
+    );
+  }
+
   static Future<List<File>> _generateEstimateImages({
     required String title,
     required String orderId,

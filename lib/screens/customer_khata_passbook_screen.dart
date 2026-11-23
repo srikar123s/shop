@@ -71,7 +71,7 @@ class _CustomerKhataPassbookScreenState
       _ledgerEntries = entries;
       _totalBilled = billed;
       _totalPaid = paid;
-      _totalDue = (billed - paid) > 0.01 ? (billed - paid) : 0.0;
+      _totalDue = billed - paid;
       _creditLimit = (status['credit_limit'] as num?)?.toDouble() ?? 0.0;
       _loading = false;
     });
@@ -489,8 +489,9 @@ class _CustomerKhataPassbookScreenState
       double amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
       if (amount <= 0) return;
 
-      if (amount > _totalDue && _totalDue > 0) {
-        final advance = amount - _totalDue;
+      final currentPending = _totalDue > 0.01 ? _totalDue : 0.0;
+      if (amount > currentPending) {
+        final advance = amount - currentPending;
         final confirmAdvance = await showDialog<String>(
           context: context,
           builder: (actx) => AlertDialog(
@@ -508,8 +509,12 @@ class _CustomerKhataPassbookScreenState
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Customer\'s balance due is ₹${_totalDue.toStringAsFixed(2)}.'),
-                Text('Entered payment: ₹${amount.toStringAsFixed(2)}.\n'),
+                if (currentPending > 0) ...[
+                  Text('Customer\'s balance due is ₹${currentPending.toStringAsFixed(2)}.'),
+                  Text('Entered payment: ₹${amount.toStringAsFixed(2)}.\n'),
+                ] else ...[
+                  const Text('Customer currently has no pending balance due.\n'),
+                ],
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
@@ -518,7 +523,9 @@ class _CustomerKhataPassbookScreenState
                     border: Border.all(color: Colors.teal.shade200),
                   ),
                   child: Text(
-                    'The remaining amount of ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
+                    currentPending > 0
+                        ? 'The remaining amount of ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.'
+                        : 'The full payment of ₹${advance.toStringAsFixed(2)} will be considered as ADVANCE PAYMENT and will be settled with future bills.',
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -526,8 +533,11 @@ class _CustomerKhataPassbookScreenState
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                    'Would you like to accept this advance or cap at the exact balance due?'),
+                Text(
+                  currentPending > 0
+                      ? 'Would you like to accept this advance or cap at the exact balance due?'
+                      : 'Accept this advance payment for future orders?',
+                ),
               ],
             ),
             actions: [
@@ -535,10 +545,11 @@ class _CustomerKhataPassbookScreenState
                 onPressed: () => Navigator.pop(actx, 'cancel'),
                 child: const Text('Cancel'),
               ),
-              OutlinedButton(
-                onPressed: () => Navigator.pop(actx, 'cap_due'),
-                child: Text('Cap at ₹${_totalDue.toStringAsFixed(2)}'),
-              ),
+              if (currentPending > 0)
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(actx, 'cap_due'),
+                  child: Text('Cap at ₹${currentPending.toStringAsFixed(2)}'),
+                ),
               FilledButton(
                 style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF0F766E)),
@@ -551,12 +562,13 @@ class _CustomerKhataPassbookScreenState
 
         if (confirmAdvance == null || confirmAdvance == 'cancel') return;
         if (confirmAdvance == 'cap_due') {
-          amount = _totalDue;
+          amount = currentPending;
         }
       }
 
-      final advanceNote = amount > _totalDue && _totalDue > 0
-          ? 'Includes ₹${(amount - _totalDue).toStringAsFixed(2)} Advance Payment (to settle with future bills)'
+      final advanceAmt = amount > currentPending ? (amount - currentPending) : 0.0;
+      final advanceNote = advanceAmt > 0
+          ? 'Includes ₹${advanceAmt.toStringAsFixed(2)} Advance Payment (to settle with future bills)'
           : '';
       final finalNotes = [
         if (notesCtrl.text.trim().isNotEmpty) notesCtrl.text.trim(),
@@ -925,6 +937,29 @@ class _CustomerKhataPassbookScreenState
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 12)),
                         onPressed: _showReminderOptions,
+                      ),
+                    if (isAdvance)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white30),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.account_balance_wallet_rounded,
+                                color: Color(0xFFCCFBF1), size: 16),
+                            SizedBox(width: 5),
+                            Text('Advance Credit',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: Colors.white)),
+                          ],
+                        ),
                       ),
                   ],
                 ),

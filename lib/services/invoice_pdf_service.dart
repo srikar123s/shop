@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/models/order.dart';
+import 'package:shop/services/share_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 
 class InvoicePdfService {
@@ -1209,19 +1210,60 @@ class InvoicePdfService {
     );
   }
 
-  /// Prints to thermal printer or system printer
+  /// Generates PDF document bytes embedding the exact high-res WhatsApp receipt image
+  Future<Uint8List> generateReceiptImagePdfBytes(
+    OrderDetails details, {
+    int? customerBillNumber,
+  }) async {
+    final imageFiles = await ShareService.generateReceiptImages(
+      details,
+      customerBillNumber: customerBillNumber,
+    );
+    final doc = pw.Document();
+    for (final file in imageFiles) {
+      final imageBytes = await file.readAsBytes();
+      final pdfImg = pw.MemoryImage(imageBytes);
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat(
+            pdfImg.width!.toDouble(),
+            pdfImg.height!.toDouble(),
+            marginAll: 0,
+          ),
+          build: (pw.Context ctx) {
+            return pw.FullPage(
+              ignoreMargins: true,
+              child: pw.Image(pdfImg, fit: pw.BoxFit.fill),
+            );
+          },
+        ),
+      );
+    }
+    return doc.save();
+  }
+
+  /// Prints to Bluetooth printer, thermal printer, or system printer
+  /// Matching the exact visual layout and colors of the WhatsApp receipt
   Future<void> printReceipt(
     OrderDetails details, {
     bool isDeliveryChallan = false,
     bool isThermal58mm = false,
     int? customerBillNumber,
   }) async {
-    final bytes = await generatePdfBytes(
-      details,
-      isDeliveryChallan: isDeliveryChallan,
-      isThermal58mm: isThermal58mm,
-      customerBillNumber: customerBillNumber,
-    );
+    final Uint8List bytes;
+    if (!isDeliveryChallan) {
+      bytes = await generateReceiptImagePdfBytes(
+        details,
+        customerBillNumber: customerBillNumber,
+      );
+    } else {
+      bytes = await generatePdfBytes(
+        details,
+        isDeliveryChallan: isDeliveryChallan,
+        isThermal58mm: isThermal58mm,
+        customerBillNumber: customerBillNumber,
+      );
+    }
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
       name:

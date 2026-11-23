@@ -113,6 +113,7 @@ class ProductRepository {
           'category': product.category,
           'configuration': mapData['configuration'],
           'price_updated_at': DateTime.now().toIso8601String(),
+          'needs_review': product.needsReview ? 1 : 0,
         },
         where: 'id = ?',
         whereArgs: [matchedId],

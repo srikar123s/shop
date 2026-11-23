@@ -1738,32 +1738,62 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               ShareService.shareOrderDetails(_details!, customerBillNumber: _customerBillNumber);
             },
           ),
-          IconButton(
-            tooltip: 'Add products to order',
-            icon: const Icon(Icons.playlist_add),
-            onPressed: () async {
-              final customer = await widget.customerRepository
-                  .getCustomerById(order.customerId);
-              if (!context.mounted || customer == null) return;
-              await Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => ProductSelectionScreen(
-                    customer: customer,
-                    productRepository: widget.productRepository,
-                    orderRepository: widget.orderRepository,
-                    existingOrderId: order.id,
+          if (order.status != OrderStatus.completed &&
+              order.status != OrderStatus.closed)
+            IconButton(
+              tooltip: 'Add products to order',
+              icon: const Icon(Icons.playlist_add),
+              onPressed: () async {
+                final customer = await widget.customerRepository
+                    .getCustomerById(order.customerId);
+                if (!context.mounted || customer == null) return;
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProductSelectionScreen(
+                      customer: customer,
+                      productRepository: widget.productRepository,
+                      orderRepository: widget.orderRepository,
+                      existingOrderId: order.id,
+                    ),
                   ),
-                ),
-              );
-              await _load();
-            },
-          ),
+                );
+                await _load();
+              },
+            ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
+          if (order.status == OrderStatus.completed ||
+              order.status == OrderStatus.closed)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock_outline_rounded,
+                      color: Color(0xFF15803D), size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Order is Closed & Recorded in Khata. All editing is locked.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                        color: Color(0xFF166534),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // Order Overview Card
           Container(
             padding: const EdgeInsets.all(16),
@@ -2208,60 +2238,84 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              SizedBox(
-                                width: 120,
-                                child: Builder(
-                                  builder: (context) {
-                                    final priceCtrl = _itemPriceControllers.putIfAbsent(
-                                      item.id ?? index,
-                                      () => TextEditingController(
-                                        text: item.unitPrice > 0
-                                            ? (item.unitPrice % 1 == 0
-                                                ? item.unitPrice.toInt().toString()
-                                                : item.unitPrice.toStringAsFixed(2))
-                                            : '',
-                                      ),
-                                    );
-                                    return TextField(
-                                      enabled: ShopSyncService.instance.canChangePrice,
-                                      controller: priceCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      decoration: const InputDecoration(
-                                        isDense: true,
-                                        labelText: 'Price/Unit ₹',
-                                        prefixText: '₹ ',
-                                      ),
-                                      onChanged: (val) {
-                                        final parsed =
-                                            double.tryParse(val.trim()) ?? 0.0;
-                                        setState(() {
-                                          _details!.items[index] =
-                                              item.copyWith(unitPrice: parsed);
-                                        });
-                                      },
-                                    );
-                                  },
+                              if (order.status == OrderStatus.completed ||
+                                  order.status == OrderStatus.closed)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border:
+                                        Border.all(color: Colors.teal.shade200),
+                                  ),
+                                  child: Text(
+                                    '₹ ${item.unitPrice.toStringAsFixed(2)} / ${item.unit}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: Colors.teal.shade900,
+                                    ),
+                                  ),
+                                )
+                              else
+                                SizedBox(
+                                  width: 120,
+                                  child: Builder(
+                                    builder: (context) {
+                                      final priceCtrl = _itemPriceControllers.putIfAbsent(
+                                        item.id ?? index,
+                                        () => TextEditingController(
+                                          text: item.unitPrice > 0
+                                              ? (item.unitPrice % 1 == 0
+                                                  ? item.unitPrice.toInt().toString()
+                                                  : item.unitPrice.toStringAsFixed(2))
+                                              : '',
+                                        ),
+                                      );
+                                      return TextField(
+                                        enabled: ShopSyncService.instance.canChangePrice,
+                                        controller: priceCtrl,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                                decimal: true),
+                                        decoration: const InputDecoration(
+                                          isDense: true,
+                                          labelText: 'Price/Unit ₹',
+                                          prefixText: '₹ ',
+                                        ),
+                                        onChanged: (val) {
+                                          final parsed =
+                                              double.tryParse(val.trim()) ?? 0.0;
+                                          setState(() {
+                                            _details!.items[index] =
+                                                item.copyWith(unitPrice: parsed);
+                                          });
+                                        },
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
 
-                          const SizedBox(height: 12),
-                          // Dual-Linked Fulfillment Controls (Given ⇄ Not Given / Short)
-                          _DualFulfillmentWidget(
-                            ordered: item.quantityOrdered,
-                            given: item.quantityGiven,
-                            unit: item.unit,
-                            onChanged: (newGiven) {
-                              setState(() {
-                                _details!.items[index] =
-                                    item.copyWith(quantityGiven: newGiven);
-                              });
-                            },
-                            onCutShortage: () => _confirmCutShortage(_details!.items[index], index),
-                          ),
+                          if (order.status != OrderStatus.completed &&
+                              order.status != OrderStatus.closed) ...[
+                            const SizedBox(height: 12),
+                            // Dual-Linked Fulfillment Controls (Given ⇄ Not Given / Short)
+                            _DualFulfillmentWidget(
+                              ordered: item.quantityOrdered,
+                              given: item.quantityGiven,
+                              unit: item.unit,
+                              onChanged: (newGiven) {
+                                setState(() {
+                                  _details!.items[index] =
+                                      item.copyWith(quantityGiven: newGiven);
+                                });
+                              },
+                              onCutShortage: () => _confirmCutShortage(_details!.items[index], index),
+                            ),
+                          ],
                         ],
                       ),
                     ),

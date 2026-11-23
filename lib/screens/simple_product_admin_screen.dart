@@ -1544,12 +1544,22 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         icon: const Icon(Icons.check),
                         label: const Text('SAVE PRODUCT'),
                         onPressed: () async {
-                          final parsedPrice =
-                              double.tryParse(price.text.trim()) ?? 0.0;
-                          if (name.text.trim().isEmpty ||
-                              steps.any((step) => step.values.isEmpty)) {
+                          if (name.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a product name.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
                             return;
                           }
+
+                          final parsedPrice =
+                              double.tryParse(price.text.trim()) ?? 0.0;
+
+                          // Clean up steps - filter out any empty steps without values
+                          final validSteps =
+                              steps.where((s) => s.values.isNotEmpty).toList();
 
                           // Ensure all attribute-level prices are mirrored into combinations and attribute keys
                           if (pricingMode == 'by_attribute') {
@@ -1578,8 +1588,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                 : 'General',
                             isActive: product?.isActive ?? true,
                             needsReview: false,
+                            priceUpdatedAt: DateTime.now(),
                             configuration: ProductConfiguration(
-                                steps: steps,
+                                steps: validSteps,
                                 defaultUnit: unit ??
                                     (selectedUnits.isNotEmpty
                                         ? selectedUnits.first
@@ -1606,6 +1617,78 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       ),
     );
     if (saved == true) _load();
+  }
+
+  Future<void> _showQuickPriceDialog(Product product) async {
+    final curPrice = product.configuration.basePrice;
+    final unit = product.configuration.defaultUnit ?? 'Piece';
+    final ctrl = TextEditingController(
+      text: curPrice > 0
+          ? (curPrice % 1 == 0 ? curPrice.toInt().toString() : curPrice.toString())
+          : '',
+    );
+    final newPrice = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Set Rate for "${product.name}"'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Enter current price per $unit:'),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                prefixText: '₹ ',
+                hintText: 'e.g. 150',
+                labelText: 'Price / $unit',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () {
+              final parsed = double.tryParse(ctrl.text.trim());
+              Navigator.pop(ctx, parsed);
+            },
+            child: const Text('Save Rate'),
+          ),
+        ],
+      ),
+    );
+
+    if (newPrice != null && newPrice >= 0 && product.id != null) {
+      final updatedConfig = product.configuration.copyWith(
+        basePrice: newPrice,
+      );
+      await widget.productRepository.upsertProduct(
+        product.copyWith(
+          configuration: updatedConfig,
+          priceUpdatedAt: DateTime.now(),
+          needsReview: false,
+        ),
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Rate updated to ₹$newPrice for "${product.name}".'),
+            backgroundColor: const Color(0xFF0F766E),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -1817,31 +1900,48 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                   fontSize: 12, color: Colors.grey.shade600),
                             ),
                             const SizedBox(height: 3),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: isStale
-                                    ? const Color(0xFFFEF3C7)
-                                    : const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
+                            InkWell(
+                              onTap: () => _showQuickPriceDialog(product),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
                                   color: isStale
-                                      ? const Color(0xFFF59E0B)
-                                      : const Color(0xFFCBD5E1),
-                                  width: 0.8,
+                                      ? const Color(0xFFFEF3C7)
+                                      : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isStale
+                                        ? const Color(0xFFF59E0B)
+                                        : const Color(0xFFCBD5E1),
+                                    width: 0.8,
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                isStale
-                                    ? 'Old Rate: ${_formatProductPrice(product)}'
-                                    : 'Rate: ${_formatProductPrice(product)}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: isStale
-                                      ? const Color(0xFFB45309)
-                                      : const Color(0xFF0F766E),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      isStale
+                                          ? 'Old Rate: ${_formatProductPrice(product)}'
+                                          : 'Rate: ${_formatProductPrice(product)}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isStale
+                                            ? const Color(0xFFB45309)
+                                            : const Color(0xFF0F766E),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.edit,
+                                      size: 11,
+                                      color: isStale
+                                          ? const Color(0xFFB45309)
+                                          : const Color(0xFF0F766E),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1850,6 +1950,12 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            IconButton(
+                              icon: const Icon(Icons.currency_rupee,
+                                  color: Color(0xFF0F766E), size: 20),
+                              tooltip: 'Quick Edit Rate',
+                              onPressed: () => _showQuickPriceDialog(product),
+                            ),
                             if (isStale)
                               IconButton(
                                 icon: const Icon(Icons.price_check,

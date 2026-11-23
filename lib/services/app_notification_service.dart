@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:shop/app_keys.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/repositories/customer_repository.dart';
@@ -83,7 +85,14 @@ class AppNotificationService {
       await androidNotificationDetails.requestNotificationsPermission();
     }
 
-    // Periodic check every 5 minutes to accurately catch scheduled milestones
+    try {
+      tz.initializeTimeZones();
+    } catch (_) {}
+
+    // Schedule Android OS background alarms for all active reminder times
+    unawaited(rescheduleBackgroundNotifications());
+
+    // Periodic check every 5 minutes to accurately catch scheduled milestones while foregrounded
     _periodicTimer?.cancel();
     _periodicTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       checkAndNotify();
@@ -91,6 +100,148 @@ class AppNotificationService {
 
     // Run check on startup
     unawaited(checkAndNotify());
+  }
+
+  /// Registers native Android AlarmManager exact background alarms that fire
+  /// even when the phone is locked or the app process is terminated.
+  Future<void> rescheduleBackgroundNotifications() async {
+    final overallEnabled = await isEnabled();
+    if (!overallEnabled) {
+      for (int id = 200; id <= 299; id++) {
+        await _notificationsPlugin.cancel(id);
+      }
+      return;
+    }
+
+    // Cancel previously scheduled background alarm IDs (200..299)
+    for (int id = 200; id <= 299; id++) {
+      await _notificationsPlugin.cancel(id);
+    }
+
+    const androidPendingDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      color: Color(0xFF0F766E),
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    const androidProcureDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      color: Color(0xFFE11D48),
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    const androidReportDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.high,
+      priority: Priority.high,
+      color: Color(0xFF3B82F6),
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    int notifIdCounter = 200;
+
+    try {
+      // 1. Pending Orders Alarms
+      final pendingEnabled = await isPendingOrdersEnabled();
+      if (pendingEnabled) {
+        final mode = await getPendingOrdersMode();
+        if (mode == 'hourly') {
+          await _notificationsPlugin.periodicallyShow(
+            notifIdCounter++,
+            '📋 Hourly Pending Orders Check',
+            'Check unfulfilled orders and update counter bills.',
+            RepeatInterval.hourly,
+            const NotificationDetails(android: androidPendingDetails),
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            payload: 'pending_orders',
+          );
+        } else {
+          final times = await getPendingOrdersTimes();
+          for (final t in times) {
+            final now = DateTime.now();
+            var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+            if (dt.isBefore(now)) {
+              dt = dt.add(const Duration(days: 1));
+            }
+            final tzDt = tz.TZDateTime.from(dt, tz.local);
+            await _notificationsPlugin.zonedSchedule(
+              notifIdCounter++,
+              '📋 Pending Orders Reminder',
+              'You have open orders to fulfill and close. Tap to view.',
+              tzDt,
+              const NotificationDetails(android: androidPendingDetails),
+              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+              uiLocalNotificationDateInterpretation:
+                  UILocalNotificationDateInterpretation.absoluteTime,
+              matchDateTimeComponents: DateTimeComponents.time,
+              payload: 'pending_orders',
+            );
+          }
+        }
+      }
+
+      // 2. Procurement List Alarms
+      final procureEnabled = await isProcurementEnabled();
+      if (procureEnabled) {
+        final times = await getProcurementTimes();
+        for (final t in times) {
+          final now = DateTime.now();
+          var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+          if (dt.isBefore(now)) {
+            dt = dt.add(const Duration(days: 1));
+          }
+          final tzDt = tz.TZDateTime.from(dt, tz.local);
+          await _notificationsPlugin.zonedSchedule(
+            notifIdCounter++,
+            '📦 Procurement List Reminder',
+            'Items needed for customer orders. Tap to view procurement list.',
+            tzDt,
+            const NotificationDetails(android: androidProcureDetails),
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            uiLocalNotificationDateInterpretation:
+                UILocalNotificationDateInterpretation.absoluteTime,
+            matchDateTimeComponents: DateTimeComponents.time,
+            payload: 'procurement',
+          );
+        }
+      }
+
+      // 3. Daily Sales Report Alarm
+      final reportEnabled = await isDailyReportEnabled();
+      if (reportEnabled) {
+        final t = await getDailyReportTime();
+        final now = DateTime.now();
+        var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+        if (dt.isBefore(now)) {
+          dt = dt.add(const Duration(days: 1));
+        }
+        final tzDt = tz.TZDateTime.from(dt, tz.local);
+        await _notificationsPlugin.zonedSchedule(
+          notifIdCounter++,
+          '📊 Daily Shop Sales Summary',
+          'Review today\'s completed orders, collections, and daily revenue.',
+          tzDt,
+          const NotificationDetails(android: androidReportDetails),
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          matchDateTimeComponents: DateTimeComponents.time,
+          payload: 'daily_report',
+        );
+      }
+    } catch (e) {
+      debugPrint('Background notification scheduling error: $e');
+    }
   }
 
   void _handlePayload(String? payload) {
@@ -159,6 +310,7 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefEnabledKey, enabled);
     if (enabled) {
+      unawaited(rescheduleBackgroundNotifications());
       checkAndNotify(force: true);
     } else {
       await _notificationsPlugin.cancelAll();
@@ -174,6 +326,7 @@ class AppNotificationService {
   Future<void> setPendingOrdersEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefPendingEnabledKey, enabled);
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   Future<String> getPendingOrdersMode() async {
@@ -184,6 +337,7 @@ class AppNotificationService {
   Future<void> setPendingOrdersMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefPendingModeKey, mode);
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   Future<List<TimeOfDay>> getPendingOrdersTimes() async {
@@ -203,6 +357,7 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
         _prefPendingTimesKey, times.map(_formatTimeOfDay).toList());
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   // --- Procurement List Reminder Preferences ---
@@ -214,6 +369,7 @@ class AppNotificationService {
   Future<void> setProcurementEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefProcureEnabledKey, enabled);
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   Future<List<TimeOfDay>> getProcurementTimes() async {
@@ -232,6 +388,7 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
         _prefProcureTimesKey, times.map(_formatTimeOfDay).toList());
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   // --- Daily Report Preferences ---
@@ -243,6 +400,7 @@ class AppNotificationService {
   Future<void> setDailyReportEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefDailyReportEnabledKey, enabled);
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   Future<TimeOfDay> getDailyReportTime() async {
@@ -257,6 +415,7 @@ class AppNotificationService {
   Future<void> setDailyReportTime(TimeOfDay time) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefDailyReportTimeKey, _formatTimeOfDay(time));
+    unawaited(rescheduleBackgroundNotifications());
   }
 
   // --- Legacy Compatibility ---
