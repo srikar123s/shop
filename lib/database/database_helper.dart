@@ -118,10 +118,14 @@ class DatabaseHelper {
     if (oldVersion < 3) {
       try {
         await db.execute('ALTER TABLE orders ADD COLUMN customer_phone TEXT');
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Column customer_phone already exists: $e');
+      }
       try {
         await db.execute('ALTER TABLE orders ADD COLUMN taken_by TEXT');
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Column taken_by already exists: $e');
+      }
     }
     if (oldVersion < 4) {
       try {
@@ -1246,6 +1250,7 @@ class DatabaseHelper {
           topItem = TopProductStat(
             itemName: topRows.first['item_name'] as String? ?? 'None',
             totalQuantity: (topRows.first['total_qty'] as num?)?.toDouble() ?? 0.0,
+            totalRevenue: 0.0,
             unit: topRows.first['unit'] as String? ?? '',
             orderCount: 1,
           );

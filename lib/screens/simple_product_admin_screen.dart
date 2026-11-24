@@ -1281,10 +1281,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                 );
                               }),
                               const SizedBox(height: 8),
-                              Theme(
-                                data: Theme.of(context).copyWith(
-                                    dividerColor: Colors.transparent),
-                                child: ExpansionTile(
+                              ExpansionTile(
+                                shape: const Border(),
+                                collapsedShape: const Border(),
                                   tilePadding: EdgeInsets.zero,
                                   leading: const Icon(Icons.tune,
                                       size: 18, color: Colors.teal),
@@ -1363,7 +1362,6 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                     }),
                                   ],
                                 ),
-                              ),
                             ]
                             // MODE 2: Grouped Combinations with Quick Fill
                             else if (pricingMode == 'matrix' &&

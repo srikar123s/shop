@@ -1602,9 +1602,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   // Top Selling Section (Expandable)
-                  Theme(
-                    data: theme.copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
+                  ExpansionTile(
+                    shape: const Border(),
+                    collapsedShape: const Border(),
                       initiallyExpanded: true,
                       leading: Container(
                         padding: const EdgeInsets.all(8),
@@ -1677,7 +1677,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
-                  ),
 
                   const Divider(),
 

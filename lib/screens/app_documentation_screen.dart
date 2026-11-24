@@ -138,9 +138,9 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
       elevation: 1,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
-      child: Theme(
-        data: theme.copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
+      child: ExpansionTile(
+        shape: const Border(),
+        collapsedShape: const Border(),
           key: PageStorageKey<String>('doc_${sec.title}_${_searchQuery.isNotEmpty}'),
           initiallyExpanded: _searchQuery.isNotEmpty || sec.initiallyExpanded,
           leading: Container(
@@ -258,7 +258,6 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             );
           }).toList(),
         ),
-      ),
     );
   }
 

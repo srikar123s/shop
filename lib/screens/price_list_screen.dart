@@ -76,7 +76,9 @@ class _PriceListScreenState extends State<PriceListScreen> {
       } else if (config.basePrice > 0) {
         variants.add({'label': 'Standard', 'price': config.basePrice});
       }
-    } catch (_) {}
+    } catch (_) {
+      // Safe fallback if configuration has no variants
+    }
     return variants;
   }
 

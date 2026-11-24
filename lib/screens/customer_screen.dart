@@ -950,7 +950,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                                   const Icon(Icons.account_balance_wallet, size: 12, color: Color(0xFF0F766E)),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    'Advance: ₹ ' + ((-balance % 1 == 0) ? (-balance).toInt().toString() : (-balance).toStringAsFixed(2)),
+                                                    'Advance: ₹ ${(-balance % 1 == 0) ? (-balance).toInt() : (-balance).toStringAsFixed(2)}',
                                                     style: const TextStyle(
                                                       fontSize: 11,
                                                       fontWeight: FontWeight.w800,

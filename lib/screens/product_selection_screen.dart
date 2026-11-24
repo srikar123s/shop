@@ -334,12 +334,12 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
     }
 
     if (result != null) {
-      setState(() => _items.add(result));
+      setState(() => _items.add(result!));
       _saveCurrentDraft();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Added "${result.itemName}" to cart & saved to catalog (flagged for review).'),
+            content: Text('Added "${result!.itemName}" to cart & saved to catalog (flagged for review).'),
             backgroundColor: const Color(0xFF0F766E),
             duration: const Duration(seconds: 3),
           ),
@@ -529,7 +529,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
 
     if (added != null && mounted) {
       setState(() {
-        _items.add(added);
+        _items.add(added!);
         _searchController.clear();
       });
       _saveCurrentDraft();

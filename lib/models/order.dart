@@ -246,7 +246,9 @@ class BillBreakdown {
           return BillBreakdown.fromMap(decoded);
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // Safe fallback if bill breakdown JSON is malformed
+    }
     return null;
   }
 }
@@ -541,7 +543,9 @@ class OrderItemEntity {
       if (map.containsKey('unitPrice') && map['unitPrice'] != null) {
         return (map['unitPrice'] as num).toDouble();
       }
-    } catch (_) {}
+    } catch (_) {
+      // Safe fallback if productSnapshot is empty or custom item
+    }
     return 0.0;
   }
 

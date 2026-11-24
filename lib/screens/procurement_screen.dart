@@ -8,6 +8,7 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/services/shop_customization_service.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ProcurementScreen extends StatefulWidget {
@@ -76,7 +77,9 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
         final map = jsonDecode(item.productSnapshot) as Map<String, dynamic>;
         final cat = map['category'] as String?;
         if (cat != null && cat.trim().isNotEmpty) return cat.trim();
-      } catch (_) {}
+      } catch (_) {
+        // Safe fallback if snapshot is not valid JSON
+      }
     }
     return item.itemName.split(' ').first;
   }

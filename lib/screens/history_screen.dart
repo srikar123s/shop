@@ -897,9 +897,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     final formattedId =
                                         '#ORD-${order.orderId.toString().padLeft(4, '0')}';
                                     final displayTakenBy = (order.takenBy != null &&
-                                            order.takenBy!.isNotEmpty &&
-                                            order.takenBy != "Store")
-                                        ? order.takenBy!
+                                            order.takenBy!.trim().isNotEmpty &&
+                                            order.takenBy!.trim() != "Store")
+                                        ? order.takenBy!.trim()
                                         : fallbackUser;
                                     return Padding(
                                       padding:

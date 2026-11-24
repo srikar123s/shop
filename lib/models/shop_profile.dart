@@ -10,7 +10,9 @@ DateTime? _parseDateTime(dynamic val) {
     if (dyn.toDate is Function) {
       return dyn.toDate() as DateTime?;
     }
-  } catch (_) {}
+  } catch (_) {
+    // Ignored: not a Firestore Timestamp
+  }
   return null;
 }
 

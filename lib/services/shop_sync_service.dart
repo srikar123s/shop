@@ -69,6 +69,10 @@ class ShopSyncService extends ChangeNotifier {
       _currentShop!.shopCode.isNotEmpty;
   bool get isFirebaseAvailable => _isFirebaseAvailable;
   String get deviceId => _deviceId ?? 'unknown';
+  bool get isOwner =>
+      ShopCustomizationService.instance.isPureOfflineMode ||
+      _currentShop == null ||
+      _currentShop?.isOwner == true;
 
   bool get canChangePrice =>
       ShopCustomizationService.instance.isPureOfflineMode ||
