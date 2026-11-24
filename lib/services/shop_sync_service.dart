@@ -580,6 +580,29 @@ class ShopSyncService extends ChangeNotifier {
     final productSnaps = await firestore.collection('shops').doc(shopCode).collection('products').get();
     for (final doc in productSnaps.docs) {
       final data = doc.data();
+      final prodId = data['id'];
+      if (prodId != null) {
+        final existingRows = await db.query('products', where: 'id = ?', whereArgs: [prodId]);
+        if (existingRows.isNotEmpty) {
+          final localRow = existingRows.first;
+          final localPriceUpdated = localRow['price_updated_at'] as String?;
+          final cloudPriceUpdated = data['price_updated_at'] as String?;
+
+          if (localPriceUpdated != null) {
+            final localTime = DateTime.tryParse(localPriceUpdated);
+            final cloudTime = cloudPriceUpdated != null ? DateTime.tryParse(cloudPriceUpdated) : null;
+
+            // If local was updated more recently than cloud (or cloud has no timestamp),
+            // preserve local prices and push up to cloud!
+            if (cloudTime == null || (localTime != null && localTime.isAfter(cloudTime))) {
+              final localProd = Product.fromMap(localRow);
+              unawaited(syncProduct(localProd));
+              continue;
+            }
+          }
+        }
+      }
+
       await db.insert('products', {
         'id': data['id'],
         'name': data['name'],
@@ -1076,6 +1099,29 @@ class ShopSyncService extends ChangeNotifier {
           final data = change.doc.data();
           if (data == null) continue;
           if (data['lastUpdatedByDevice'] == _deviceId) continue;
+
+          final prodId = data['id'];
+          if (prodId != null) {
+            final existingRows = await db.query('products', where: 'id = ?', whereArgs: [prodId]);
+            if (existingRows.isNotEmpty) {
+              final localRow = existingRows.first;
+              final localPriceUpdated = localRow['price_updated_at'] as String?;
+              final cloudPriceUpdated = data['price_updated_at'] as String?;
+
+              if (localPriceUpdated != null) {
+                final localTime = DateTime.tryParse(localPriceUpdated);
+                final cloudTime = cloudPriceUpdated != null ? DateTime.tryParse(cloudPriceUpdated) : null;
+
+                // If local product was updated more recently than cloud (or cloud has no timestamp),
+                // do NOT overwrite local prices! Push the newer local product back up to the cloud!
+                if (cloudTime == null || (localTime != null && localTime.isAfter(cloudTime))) {
+                  final localProd = Product.fromMap(localRow);
+                  unawaited(syncProduct(localProd));
+                  continue;
+                }
+              }
+            }
+          }
 
           await db.insert('products', {
             'id': data['id'],

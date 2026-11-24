@@ -137,11 +137,11 @@ class ProductConfiguration {
       unitConversions: ((map['unitConversions'] as Map<dynamic, dynamic>?) ??
               <dynamic, dynamic>{})
           .map((key, value) =>
-              MapEntry(key.toString(), (value as num).toDouble())),
+              MapEntry(key.toString(), (value as num?)?.toDouble() ?? double.tryParse(value?.toString() ?? '') ?? 0.0)),
       variantPrices: ((map['variantPrices'] as Map<dynamic, dynamic>?) ??
               <dynamic, dynamic>{})
           .map((key, value) =>
-              MapEntry(key.toString(), (value as num).toDouble())),
+              MapEntry(key.toString(), (value as num?)?.toDouble() ?? double.tryParse(value?.toString() ?? '') ?? 0.0)),
     );
   }
 }

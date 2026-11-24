@@ -150,12 +150,15 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
                         .toList();
                     final defaultUnit = defaultUnitCtrl.text.trim();
 
+                    final existingConfig = product?.configuration;
                     final next = Product(
                       id: product?.id,
                       name: nameCtrl.text.trim(),
                       category: categoryCtrl.text.trim(),
                       isActive: product?.isActive ?? true,
-                      configuration: ProductConfiguration(
+                      priceUpdatedAt: product?.priceUpdatedAt,
+                      needsReview: product?.needsReview ?? false,
+                      configuration: (existingConfig ?? const ProductConfiguration(steps: [])).copyWith(
                         steps: steps,
                         defaultUnit: defaultUnit.isEmpty ? null : defaultUnit,
                         unitOptions: units,

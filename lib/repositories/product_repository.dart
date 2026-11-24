@@ -72,14 +72,17 @@ class ProductRepository {
 
     // 1. If product ID is explicitly specified, update by ID
     if (product.id != null) {
+      final nowIso = DateTime.now().toIso8601String();
       final mapData = product.toMap();
-      mapData['price_updated_at'] = DateTime.now().toIso8601String();
+      mapData['price_updated_at'] = nowIso;
       await db.update(
         'products',
         mapData,
         where: 'id = ?',
         whereArgs: [product.id],
       );
+      final updatedProduct = product.copyWith(priceUpdatedAt: DateTime.tryParse(nowIso));
+      unawaited(ShopSyncService.instance.syncProduct(updatedProduct));
       return product.id!;
     }
 
