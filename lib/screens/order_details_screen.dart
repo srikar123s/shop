@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+import 'package:shop/screens/order_packing_slip_screen.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -42,9 +44,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   bool _saving = false;
   int? _customerBillNumber;
   final Map<int, TextEditingController> _itemPriceControllers = {};
+  final ScrollController _scrollController = ScrollController();
+  double _customerAdvanceBalance = 0.0;
 
   @override
   void dispose() {
+    _scrollController.dispose();
     for (final c in _itemPriceControllers.values) {
       c.dispose();
     }
@@ -57,16 +62,35 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    final prevOffset = _scrollController.hasClients ? _scrollController.offset : null;
+    if (!silent && _details == null) {
+      setState(() => _loading = true);
+    }
     final details =
         await widget.orderRepository.getOrderDetails(widget.orderId);
     final seq = await DatabaseHelper.instance.getCustomerBillSequence(widget.orderId);
+    double advBalance = 0.0;
+    if (details != null) {
+      final netBal = await DatabaseHelper.instance.getCustomerKhataBalance(details.order.customerId);
+      if (netBal < -0.01) {
+        advBalance = -netBal;
+      }
+    }
+    if (!mounted) return;
     setState(() {
       _details = details;
       _customerBillNumber = seq;
+      _customerAdvanceBalance = advBalance;
       _loading = false;
     });
+    if (prevOffset != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(prevOffset);
+        }
+      });
+    }
   }
 
   Color _itemStatusColor(ItemStatus status) {
@@ -132,75 +156,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     await _load();
   }
 
-  Future<void> _confirmCutShortage(OrderItemEntity passedItem, int index) async {
-    final currentItem = (_details != null && index < _details!.items.length)
-        ? _details!.items[index]
-        : passedItem;
-    final given = currentItem.quantityGiven;
-    final ordered = currentItem.quantityOrdered;
-    final unit = currentItem.unit;
-    final fmtGiven = given % 1 == 0 ? given.toInt().toString() : given.toString();
-    final fmtOrdered = ordered % 1 == 0 ? ordered.toInt().toString() : ordered.toString();
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Cut Shortage for "${currentItem.itemName}"?'),
-        content: Text(
-          'Customer was given $fmtGiven $unit out of $fmtOrdered $unit ordered.\n\n'
-          'Finalizing at $fmtGiven $unit will:\n'
-          '• Remove remaining shortage from Procurement\n'
-          '• Recalculate bill total for only the delivered items\n'
-          '• Mark this item as fully satisfied',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('CANCEL'),
-          ),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
-            onPressed: () => Navigator.pop(ctx, true),
-            icon: const Icon(Icons.content_cut_rounded, size: 16),
-            label: Text('Finalize at $fmtGiven $unit'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && mounted) {
-      if (currentItem.id != null && _details?.order.id != null) {
-        // First sync current on-screen fulfillment for all items
-        await widget.orderRepository.updateOrderFulfillment(
-          orderId: _details!.order.id!,
-          items: _details!.items,
-        );
-        await widget.orderRepository.cancelItemShortage(
-          itemId: currentItem.id!,
-          orderId: _details!.order.id!,
-          targetGiven: given,
-        );
-        await _load();
-      } else {
-        setState(() {
-          _details!.items[index] = currentItem.copyWith(
-            quantityOrdered: given,
-            quantityGiven: given,
-          );
-        });
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✂️ "${currentItem.itemName}" finalized at $fmtGiven $unit. Shortage dropped.'),
-            backgroundColor: const Color(0xFF0F766E),
-          ),
-        );
-      }
-    }
-  }
-
-  bool _ensureAllItemsPriced({required String actionName}) {
+    bool _ensureAllItemsPriced({required String actionName}) {
     if (_details == null) return false;
     final unpricedItems =
         _details!.items.where((i) => i.unitPrice <= 0).toList();
@@ -325,379 +281,118 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           )
         : BillBreakdown.calculate(subtotal: orderedSubtotal);
 
-    final Map<int, bool> itemProcureMap = {
-      for (final item in unfulfilled)
-        if (item.id != null) item.id!: true,
-    };
-
-    final choice = await showDialog<String>(
+        final choice = await showDialog<String>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final procureCount = itemProcureMap.values.where((v) => v).length;
-          final dropCount = itemProcureMap.values.where((v) => !v).length;
-
-          return AlertDialog(
-            titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-            actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade100,
-                    borderRadius: BorderRadius.circular(10),
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.inventory_2_outlined,
+                  color: Colors.orange.shade900, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Close ${order.formattedOrderId}',
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.bold),
                   ),
-                  child: Icon(Icons.inventory_2_outlined,
-                      color: Colors.orange.shade900, size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  Text(
+                    '${unfulfilled.length} item(s) out of stock',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.deepOrange.shade800,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Customer is billed ONLY for items actually delivered.',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.teal.shade900),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDFA),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF99F6E4)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
+                      const Text('Delivered Items Bill:',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
                       Text(
-                        'Close ${order.formattedOrderId}',
+                        '₹ ${deliveredBreakdown.grandTotal.toStringAsFixed(2)}',
                         style: const TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        '${unfulfilled.length} item(s) partially given',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.deepOrange.shade800,
-                            fontWeight: FontWeight.w600),
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF0F766E)),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 6),
-                    Text(
-                      'Choose what to do with remaining unfulfilled items:',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade800,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Quick Bulk Selection
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              setDialogState(() {
-                                for (final k in itemProcureMap.keys) {
-                                  itemProcureMap[k] = true;
-                                }
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              decoration: BoxDecoration(
-                                color: procureCount == unfulfilled.length
-                                    ? Colors.orange.shade100
-                                    : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: procureCount == unfulfilled.length
-                                      ? Colors.orange.shade400
-                                      : Colors.grey.shade300,
-                                ),
-                              ),
-                              child: const Text(
-                                '📦 All Out of Stock\n(Procure All - 90%)',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () {
-                              setDialogState(() {
-                                for (final k in itemProcureMap.keys) {
-                                  itemProcureMap[k] = false;
-                                }
-                              });
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              decoration: BoxDecoration(
-                                color: dropCount == unfulfilled.length
-                                    ? Colors.amber.shade100
-                                    : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: dropCount == unfulfilled.length
-                                      ? Colors.amber.shade400
-                                      : Colors.grey.shade300,
-                                ),
-                              ),
-                              child: const Text(
-                                '✂️ All Gave Less\n(Drop All - 10%)',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Per-item list
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey.shade300),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Original Order Total:',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                      Text(
+                        '₹ ${fullBreakdown.grandTotal.toStringAsFixed(2)}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade600,
+                            decoration: TextDecoration.lineThrough),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ...unfulfilled.map((item) {
-                            final pending =
-                                item.quantityOrdered - item.quantityGiven;
-                            final ordStr = item.quantityOrdered % 1 == 0
-                                ? item.quantityOrdered.toInt().toString()
-                                : item.quantityOrdered.toString();
-                            final gvnStr = item.quantityGiven % 1 == 0
-                                ? item.quantityGiven.toInt().toString()
-                                : item.quantityGiven.toString();
-                            final pndStr = pending % 1 == 0
-                                ? pending.toInt().toString()
-                                : pending.toString();
-                            final shouldProcure =
-                                itemProcureMap[item.id] ?? true;
-
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                      color: shouldProcure
-                                          ? Colors.orange.shade200
-                                          : Colors.teal.shade200),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            item.itemName,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 13),
-                                          ),
-                                        ),
-                                        Text(
-                                          'Given $gvnStr / $ordStr',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey.shade700,
-                                              fontWeight: FontWeight.w600),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () {
-                                              if (item.id != null) {
-                                                setDialogState(() {
-                                                  itemProcureMap[item.id!] = true;
-                                                });
-                                              }
-                                            },
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                  vertical: 5, horizontal: 6),
-                                              decoration: BoxDecoration(
-                                                color: shouldProcure
-                                                    ? Colors.orange.shade600
-                                                    : Colors.grey.shade100,
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(
-                                                '📦 Procure ($pndStr)',
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: shouldProcure
-                                                      ? Colors.white
-                                                      : Colors.grey.shade800,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: InkWell(
-                                            onTap: () {
-                                              if (item.id != null) {
-                                                setDialogState(() {
-                                                  itemProcureMap[item.id!] = false;
-                                                });
-                                              }
-                                            },
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                  vertical: 5, horizontal: 6),
-                                              decoration: BoxDecoration(
-                                                color: !shouldProcure
-                                                    ? const Color(0xFF0F766E)
-                                                    : Colors.grey.shade100,
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(
-                                                '✂️ Gave less (Drop)',
-                                                textAlign: TextAlign.center,
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: !shouldProcure
-                                                      ? Colors.white
-                                                      : Colors.grey.shade800,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Bill Summary Card
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.teal.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.teal.shade200),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('Customer Bill (Delivered Goods):',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12)),
-                              Text(
-                                '₹ ${deliveredBreakdown.grandTotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF0F766E),
-                                    fontSize: 15),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('Original Ordered Total:',
-                                  style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 11)),
-                              Text(
-                                '₹ ${fullBreakdown.grandTotal.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                    color: Colors.grey.shade600,
-                                    decoration: TextDecoration.lineThrough,
-                                    fontSize: 11),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Customer is billed strictly for delivered items (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)}).',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.teal.shade900,
-                                fontStyle: FontStyle.italic),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, 'cancel'),
-                child: const Text('CANCEL'),
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.done_all, size: 18),
-                  label: Text(
-                    'Deliver All 100% (₹${fullBreakdown.grandTotal.toStringAsFixed(2)}) & Close',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () => Navigator.pop(context, 'all_given'),
-                ),
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F766E)),
-                  icon: const Icon(Icons.receipt_long, size: 18),
-                  label: Text(
-                    'Close & Bill Given (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)})',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  onPressed: () => Navigator.pop(context, 'delivered_only'),
-                ),
-              ),
-            ],
-          );
-        },
+            const SizedBox(height: 10),
+            Text(
+              '📦 ${unfulfilled.length} out-of-stock item(s) will be added to the Procurement List.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('CANCEL'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context, 'all_given'),
+            child: Text('Deliver All 100% (₹${fullBreakdown.grandTotal.toStringAsFixed(2)})'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(context, 'delivered_only'),
+            child: Text('Close & Bill Delivered (₹${deliveredBreakdown.grandTotal.toStringAsFixed(2)})'),
+          ),
+        ],
       ),
     );
 
@@ -711,7 +406,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       );
       await widget.orderRepository.closeOrderWithDeliveredItemsOnly(
         orderId: order.id!,
-        itemProcureMap: itemProcureMap,
       );
       await _load();
       if (mounted) {
@@ -1258,13 +952,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           builder: (ctx, setModalState) {
             final subtotal = _details!.items.fold<double>(
               0.0,
-              (sum, i) =>
-                  sum +
-                  (i.unitPrice *
-                      (order.status == OrderStatus.completed &&
-                              i.quantityGiven > 0
-                          ? i.quantityGiven
-                          : i.quantityOrdered)),
+              (sum, i) => sum + (i.unitPrice * i.quantityGiven),
             );
 
             double discountAmount = 0.0;
@@ -1621,6 +1309,66 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                         ],
                       ),
                     ),
+                    if (_customerAdvanceBalance > 0.01 && previewGrandTotal > 0) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFCCFBF1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF0F766E)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Advance Credit Deduction:',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12.5,
+                                    color: Color(0xFF0F766E),
+                                  ),
+                                ),
+                                Text(
+                                  '- ₹ ${math.min(previewGrandTotal, _customerAdvanceBalance).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Color(0xFF0F766E),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '₹ ${math.min(previewGrandTotal, _customerAdvanceBalance).toStringAsFixed(2)} reduced from current bill (Customer advance: ₹ ${_customerAdvanceBalance.toStringAsFixed(2)})',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF115E59), fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Net Payable after Advance:',
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                                ),
+                                Text(
+                                  '₹ ${(previewGrandTotal - math.min(previewGrandTotal, _customerAdvanceBalance)).clamp(0.0, double.infinity).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 15,
+                                    color: Color(0xFF0F766E),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
 
                     // Save Button
@@ -1721,6 +1469,21 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ),
         actions: <Widget>[
           IconButton(
+            tooltip: 'Order Packing Preview / Slip',
+            icon: const Icon(Icons.inventory_2_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => OrderPackingSlipScreen(
+                    details: _details!,
+                    customerBillNumber: _customerBillNumber,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
             tooltip: '1-Tap Repeat Order',
             icon: const Icon(Icons.repeat_rounded),
             onPressed: _repeatOrder,
@@ -1764,6 +1527,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ],
       ),
       body: ListView(
+        controller: _scrollController,
         padding: const EdgeInsets.all(16),
         children: <Widget>[
           if (order.status == OrderStatus.completed ||
@@ -1926,6 +1690,75 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 fontSize: 16)),
                       ],
                     ),
+
+                  if (_customerAdvanceBalance > 0.01 && order.estimateTotal > 0) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFCCFBF1).withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.4)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Advance Credit Adjusted:',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
+                              Text(
+                                '- ₹ ${math.min(order.estimateTotal, _customerAdvanceBalance).toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '₹ ${math.min(order.estimateTotal, _customerAdvanceBalance).toStringAsFixed(2)} reduced from current bill since customer has advance credit of ₹ ${_customerAdvanceBalance.toStringAsFixed(2)}.',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF115E59),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Divider(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Net Due / Payable after Advance:',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              Text(
+                                '₹ ${(order.estimateTotal - math.min(order.estimateTotal, _customerAdvanceBalance)).clamp(0.0, double.infinity).toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   ],
                   const SizedBox(height: 6),
                   if (order.status != OrderStatus.completed &&
@@ -2111,13 +1944,40 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'ITEMS TO FULFILL',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 13,
-                      color: Colors.grey,
-                      letterSpacing: 0.5),
+                Row(
+                  children: [
+                    const Text(
+                      'ITEMS TO FULFILL',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                          color: Colors.grey,
+                          letterSpacing: 0.5),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        foregroundColor: const Color(0xFF0F766E),
+                        side: const BorderSide(color: Color(0xFF0F766E), width: 1),
+                      ),
+                      icon: const Icon(Icons.inventory_2_outlined, size: 14),
+                      label: const Text('📦 Packing Slip',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => OrderPackingSlipScreen(
+                              details: _details!,
+                              customerBillNumber: _customerBillNumber,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
                 if (order.status != OrderStatus.completed &&
                     order.status != OrderStatus.closed)
@@ -2157,6 +2017,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   jsonDecode(item.productSnapshot) as Map<String, dynamic>;
               final detailsText =
                   item.description ?? snapshot['description'] as String?;
+              final isOrderClosed = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
+              final isProcuredShortage = isOrderClosed && item.quantityGiven < item.quantityOrdered && item.procurementStatus == ProcurementStatus.notRequired;
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -2219,7 +2081,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               const SizedBox(width: 8),
                               _QtyBadge(label: 'Given', qty: item.quantityGiven, unit: item.unit, color: Colors.teal),
                               const SizedBox(width: 8),
-                              _QtyBadge(label: 'Pending', qty: pending.toDouble(), unit: item.unit, color: pending > 0 ? Colors.deepOrange : Colors.grey),
+                              if (isProcuredShortage)
+                                _QtyBadge(
+                                  label: 'Procured (In Stock)',
+                                  qty: (item.quantityOrdered - item.quantityGiven).clamp(0, item.quantityOrdered),
+                                  unit: item.unit,
+                                  color: const Color(0xFF0F766E),
+                                )
+                              else
+                                _QtyBadge(
+                                  label: item.procurementStatus == ProcurementStatus.toProcure ? 'To Procure' : 'Pending',
+                                  qty: pending.toDouble(),
+                                  unit: item.unit,
+                                  color: pending > 0 ? Colors.deepOrange : Colors.grey,
+                                ),
                             ],
                           ),
                           const SizedBox(height: 10),
@@ -2228,7 +2103,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  'Item Total: ₹${(item.unitPrice * item.quantityOrdered).toStringAsFixed(2)}',
+                                  'Item Total: ₹${(item.unitPrice * item.quantityGiven).toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -2313,7 +2188,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                       item.copyWith(quantityGiven: newGiven);
                                 });
                               },
-                              onCutShortage: () => _confirmCutShortage(_details!.items[index], index),
                             ),
                           ],
                         ],
@@ -2455,14 +2329,12 @@ class _DualFulfillmentWidget extends StatelessWidget {
     required this.given,
     required this.unit,
     required this.onChanged,
-    this.onCutShortage,
   });
 
   final double ordered;
   final double given;
   final String unit;
   final ValueChanged<double> onChanged;
-  final VoidCallback? onCutShortage;
 
   String _format(double v) => v % 1 == 0 ? v.toInt().toString() : v.toString();
 
@@ -2672,7 +2544,7 @@ class _DualFulfillmentWidget extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '${_format(notGiven)} $unit not delivered yet',
+                      '${_format(notGiven)} $unit out of stock (need to procure)',
                       style: const TextStyle(
                         color: Color(0xFF991B1B),
                         fontWeight: FontWeight.w600,
@@ -2683,38 +2555,6 @@ class _DualFulfillmentWidget extends StatelessWidget {
                 ],
               ),
             ),
-            if (onCutShortage != null) ...[
-              const SizedBox(height: 6),
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: onCutShortage,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFF59E0B)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.content_cut_rounded,
-                          size: 14, color: Color(0xFFB45309)),
-                      const SizedBox(width: 6),
-                      Text(
-                        '10% Case: Intentionally Give Less (Drop Shortage)',
-                        style: const TextStyle(
-                          color: Color(0xFF92400E),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
           ],
         ],
       ),

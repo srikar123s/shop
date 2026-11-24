@@ -406,13 +406,10 @@ class OrderRepository {
   }
 
   /// Closes an order billing ONLY the items that were actually given.
-  /// Handles the 90/10 fulfillment cases:
-  /// - 90% Case (itemProcureMap[itemId] == true, default): Out of stock -> Shortage goes to Procurement List.
-  /// - 10% Case (itemProcureMap[itemId] == false): Intentionally gave less -> Shortage cancelled/dropped.
+  /// Any unfulfilled shortage remains out of stock and goes to the Procurement List.
   /// Customer is billed strictly for delivered goods.
   Future<void> closeOrderWithDeliveredItemsOnly({
     required int orderId,
-    Map<int, bool>? itemProcureMap,
     String? note,
   }) async {
     final db = await _databaseHelper.database;
@@ -425,7 +422,6 @@ class OrderRepository {
 
       double deliveredSubtotal = 0;
       final procuredParts = <String>[];
-      final droppedParts = <String>[];
 
       for (final row in itemRows) {
         final itemId = row['id'] as int;
@@ -450,39 +446,19 @@ class OrderRepository {
           final gvnStr = given % 1 == 0 ? given.toInt().toString() : given.toString();
           final ordStr = ordered % 1 == 0 ? ordered.toInt().toString() : ordered.toString();
 
-          final shouldProcure = itemProcureMap?[itemId] ?? true;
-
-          if (shouldProcure) {
-            // 90% Case: Shortage due to not enough products -> GOES TO PROCUREMENT
-            procuredParts.add('$itemName ($shortStr to procure)');
-            final itemStatus = given > 0 ? ItemStatus.partial : ItemStatus.notGiven;
-            await txn.update(
-              'order_items',
-              {
-                'status': itemStatusLabel(itemStatus),
-                'procurement_status': ProcurementStatus.toProcure.name,
-                'notes': 'Given $gvnStr of $ordStr. Remaining $shortStr in procurement list.',
-              },
-              where: 'id = ?',
-              whereArgs: [itemId],
-            );
-          } else {
-            // 10% Case: Intentionally gave less -> SHORTAGE DROPPED
-            droppedParts.add('$itemName ($gvnStr of $ordStr, shortage dropped)');
-            final itemStatus = given > 0 ? ItemStatus.given : ItemStatus.notGiven;
-            await txn.update(
-              'order_items',
-              {
-                'quantity_ordered': given,
-                'quantity_given': given,
-                'status': itemStatusLabel(itemStatus),
-                'procurement_status': ProcurementStatus.notRequired.name,
-                'notes': 'Intentionally gave less: $gvnStr fulfilled (shortage dropped).',
-              },
-              where: 'id = ?',
-              whereArgs: [itemId],
-            );
-          }
+          // Out of stock shortage strictly goes to procurement
+          procuredParts.add('$itemName ($shortStr to procure)');
+          final itemStatus = given > 0 ? ItemStatus.partial : ItemStatus.notGiven;
+          await txn.update(
+            'order_items',
+            {
+              'status': itemStatusLabel(itemStatus),
+              'procurement_status': ProcurementStatus.toProcure.name,
+              'notes': 'Given $gvnStr of $ordStr. Remaining $shortStr in procurement list.',
+            },
+            where: 'id = ?',
+            whereArgs: [itemId],
+          );
         } else {
           // Fully delivered
           await txn.update(
@@ -509,9 +485,6 @@ class OrderRepository {
       final auditList = <String>[];
       if (procuredParts.isNotEmpty) {
         auditList.add('To Procure: ${procuredParts.join(', ')}');
-      }
-      if (droppedParts.isNotEmpty) {
-        auditList.add('Shortage Dropped: ${droppedParts.join(', ')}');
       }
 
       final fullNote = note ?? (auditList.isNotEmpty
@@ -725,10 +698,11 @@ class OrderRepository {
       for (final item in items) {
         final status =
             _statusFromGiven(item.quantityOrdered, item.quantityGiven);
-        final procurement = item.quantityGiven >= item.quantityOrdered
-            ? ProcurementStatus.notRequired
-            : item.procurementStatus;
-        newEstimateTotal += item.unitPrice * item.quantityOrdered;
+        final notGiven = item.quantityOrdered - item.quantityGiven;
+        final procurement = notGiven > 0.001
+            ? ProcurementStatus.toProcure
+            : ProcurementStatus.notRequired;
+        newEstimateTotal += item.unitPrice * item.quantityGiven;
         await txn.update(
           'order_items',
           {
@@ -918,8 +892,9 @@ class OrderRepository {
     );
   }
 
-  /// Marks a specific order item as procured and delivered (quantityGiven = quantityOrdered).
-  /// Automatically updates order estimate total and status.
+  /// Marks a specific order item as procured in the procurement list.
+  /// Customer's existing bill is strictly NOT modified and out-of-stock items are NOT added to the bill.
+  /// If needed, the merchant will add a new bill when delivering procured items.
   Future<void> markItemAsProcured({
     required int itemId,
     required int orderId,
@@ -927,203 +902,19 @@ class OrderRepository {
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
-      final rows = await txn.query(
-        'order_items',
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-      if (rows.isEmpty) return;
-
-      final ordered = (rows.first['quantity_ordered'] as num).toDouble();
-      final targetGiven = customQuantityGiven ?? ordered;
-      final status = _statusFromGiven(ordered, targetGiven);
-      final procurement = targetGiven >= ordered
-          ? ProcurementStatus.notRequired
-          : ProcurementStatus.toProcure;
-
       await txn.update(
         'order_items',
         {
-          'quantity_given': targetGiven,
-          'status': itemStatusLabel(status),
-          'procurement_status': procurement.name,
-        },
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-
-      // Recalculate delivered subtotal for all fulfilled items in this order
-      final allItems = await txn.query(
-        'order_items',
-        where: 'order_id = ?',
-        whereArgs: [orderId],
-      );
-
-      double newDeliveredSubtotal = 0;
-      for (final itemRow in allItems) {
-        final g = (itemRow['quantity_given'] as num).toDouble();
-        double unitPrice = 0.0;
-        final snapRaw = itemRow['product_snapshot'] as String?;
-        if (snapRaw != null && snapRaw.isNotEmpty) {
-          try {
-            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-          } catch (_) {}
-        }
-        newDeliveredSubtotal += unitPrice * g;
-      }
-
-      final orderRows = await txn.query('orders',
-          columns: ['notes'], where: 'id = ?', whereArgs: [orderId]);
-      final existingNotes =
-          orderRows.isNotEmpty ? orderRows.first['notes'] as String? : null;
-      final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
-
-      BillBreakdown newBreakdown;
-      if (existingBreakdown != null) {
-        newBreakdown = BillBreakdown.calculate(
-          subtotal: newDeliveredSubtotal,
-          applyGst: existingBreakdown.applyGst,
-          gstRate: existingBreakdown.gstRate,
-          otherCharges: existingBreakdown.otherCharges,
-          applyDiscount: existingBreakdown.applyDiscount,
-          discountType: existingBreakdown.discountType,
-          discountValue: existingBreakdown.discountValue,
-          note: 'Procured item fulfilled & delivered.',
-        );
-      } else {
-        newBreakdown = BillBreakdown.calculate(
-          subtotal: newDeliveredSubtotal,
-          note: 'Procured item fulfilled & delivered.',
-        );
-      }
-
-      final statuses = allItems
-          .map((e) => _itemStatusFromLabel(e['status'] as String))
-          .toList();
-      final newOrderStatus = _calculateOrderStatus(statuses);
-
-      await txn.update(
-        'orders',
-        {
-          'status': orderStatusLabel(newOrderStatus),
-          'estimate_total': newBreakdown.grandTotal,
-          'notes': jsonEncode(newBreakdown.toMap()),
-        },
-        where: 'id = ?',
-        whereArgs: [orderId],
-      );
-    });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
-  }
-
-  /// Cancels remaining shortage for an item (e.g. customer cut / intentionally gave less).
-  /// Sets quantity_ordered to quantity_given, removes procurement requirement,
-  /// recalculates order bill breakdown and updates overall order status.
-  Future<void> cancelItemShortage({
-    required int itemId,
-    required int orderId,
-    double? targetGiven,
-  }) async {
-    final db = await _databaseHelper.database;
-    await db.transaction((txn) async {
-      final rows = await txn.query(
-        'order_items',
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-      if (rows.isEmpty) return;
-
-      final ordered = (rows.first['quantity_ordered'] as num).toDouble();
-      final currentDbGiven = (rows.first['quantity_given'] as num).toDouble();
-      final finalGiven = targetGiven ?? currentDbGiven;
-      final itemName = rows.first['item_name'] as String;
-
-      // Update this item so quantity_ordered matches finalGiven and quantity_given matches finalGiven
-      await txn.update(
-        'order_items',
-        {
-          'quantity_ordered': finalGiven,
-          'quantity_given': finalGiven,
-          'status': itemStatusLabel(finalGiven > 0 ? ItemStatus.given : ItemStatus.notGiven),
           'procurement_status': ProcurementStatus.notRequired.name,
-          'notes': 'Intentionally gave less: $finalGiven of $ordered fulfilled (shortage dropped).',
         },
         where: 'id = ?',
         whereArgs: [itemId],
-      );
-
-      // Recalculate order subtotal across all items
-      final allItems = await txn.query(
-        'order_items',
-        where: 'order_id = ?',
-        whereArgs: [orderId],
-      );
-
-      double newSubtotal = 0.0;
-      for (final itemRow in allItems) {
-        final itemOrdered = (itemRow['quantity_ordered'] as num).toDouble();
-        double unitPrice = 0.0;
-        final snapRaw = itemRow['product_snapshot'] as String?;
-        if (snapRaw != null && snapRaw.isNotEmpty) {
-          try {
-            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-          } catch (_) {}
-        }
-        newSubtotal += unitPrice * itemOrdered;
-      }
-
-      // Update bill breakdown
-      final orderRows = await txn.query(
-        'orders',
-        columns: ['notes'],
-        where: 'id = ?',
-        whereArgs: [orderId],
-      );
-      final existingNotes = orderRows.isNotEmpty ? orderRows.first['notes'] as String? : null;
-      final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
-
-      BillBreakdown newBreakdown;
-      if (existingBreakdown != null) {
-        newBreakdown = BillBreakdown.calculate(
-          subtotal: newSubtotal,
-          applyGst: existingBreakdown.applyGst,
-          gstRate: existingBreakdown.gstRate,
-          otherCharges: existingBreakdown.otherCharges,
-          applyDiscount: existingBreakdown.applyDiscount,
-          discountType: existingBreakdown.discountType,
-          discountValue: existingBreakdown.discountValue,
-          note: existingBreakdown.note ?? 'Shortage cancelled for $itemName',
-        );
-      } else {
-        newBreakdown = BillBreakdown.calculate(
-          subtotal: newSubtotal,
-          note: 'Shortage cancelled for $itemName',
-        );
-      }
-
-      // Check new order status
-      final statuses = allItems
-          .map((e) => _itemStatusFromLabel(e['status'] as String))
-          .toList();
-      final newOrderStatus = _calculateOrderStatus(statuses);
-
-      await txn.update(
-        'orders',
-        {
-          'status': orderStatusLabel(newOrderStatus),
-          'estimate_total': newBreakdown.grandTotal,
-          'notes': jsonEncode(newBreakdown.toMap()),
-        },
-        where: 'id = ?',
-        whereArgs: [orderId],
       );
     });
     unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
-  /// Marks ALL currently pending items across all open orders as procured and delivered.
+  /// Marks ALL currently pending items across all open orders as procured in the procurement list.
   Future<void> markAllItemsAsProcured() async {
     final items = await getProcurementItems();
     for (final item in items) {

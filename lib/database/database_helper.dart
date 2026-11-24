@@ -425,7 +425,11 @@ class DatabaseHelper {
     ];
 
     for (final product in sampleProducts) {
-      await db.insert('products', product);
+      await db.insert('products', {
+        ...product,
+        'price_updated_at': now,
+        'needs_review': 0,
+      });
     }
   }
 
@@ -709,7 +713,8 @@ class DatabaseHelper {
       final map = Map<String, dynamic>.from(r);
       final billed = (map['total_billed'] as num?)?.toDouble() ?? 0.0;
       final paid = (map['total_paid'] as num?)?.toDouble() ?? 0.0;
-      final due = (billed - paid) > 0.01 ? (billed - paid) : 0.0;
+      final diff = billed - paid;
+      final due = (diff.abs() > 0.01) ? diff : 0.0;
       map['balance_due'] = due;
 
       final oldestDateStr = map['oldest_unpaid_date'] as String?;
@@ -729,6 +734,31 @@ class DatabaseHelper {
       map['available_credit'] = limit > 0 ? (limit - due) : 0.0;
       return map;
     }).toList();
+  }
+
+  /// Returns customer's net Khata balance (billed - paid).
+  /// > 0: customer owes money to shop (due).
+  /// < 0: customer has advance credit deposited with shop (-balance).
+  Future<double> getCustomerKhataBalance(int customerId) async {
+    final db = await database;
+    final res = await db.rawQuery('''
+      SELECT 
+        COALESCE((
+          SELECT SUM(o.estimate_total) 
+          FROM orders o 
+          WHERE o.customer_id = ? 
+            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        ), 0.0) - 
+        COALESCE((
+          SELECT SUM(p.amount) 
+          FROM customer_payments p 
+          WHERE p.customer_id = ?
+        ), 0.0) AS net_balance
+    ''', [customerId, customerId]);
+    if (res.isNotEmpty) {
+      return (res.first['net_balance'] as num?)?.toDouble() ?? 0.0;
+    }
+    return 0.0;
   }
 
   /// Updates a customer's maximum credit limit (Khata limit)

@@ -1143,6 +1143,46 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                     },
                   ),
                 ),
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.alarm, color: Colors.teal.shade700),
+                  ),
+                  title: const Text('Test Closed-App Alarm (30s delay)',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  subtitle: const Text(
+                    'Schedules native OS alarm in 30 seconds. Close or lock app to verify!',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  trailing: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Test 30s'),
+                    onPressed: () async {
+                      await AppNotificationService.instance
+                          .scheduleTestBackgroundAlarm();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                '⏰ Alarm scheduled for 30s from now! Close the app or lock your phone to test.'),
+                            backgroundColor: Color(0xFF0F766E),
+                            duration: Duration(seconds: 4),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
               ],
             ),
           ),

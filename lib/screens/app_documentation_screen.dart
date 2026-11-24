@@ -423,10 +423,10 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
         ],
       ),
 
-      // Section 5: Fulfillment & 90/10 Shortage Cutting
+      // Section 5: Fulfillment & Out-of-Stock Tracking
       _DocSection(
-        title: '5. Fulfillment & Intentional Less Stock (90/10 Case)',
-        subtitle: 'Dual-linked counters, shortage cutting, partial closing & repeat orders',
+        title: '5. Fulfillment & Out-of-Stock Tracking',
+        subtitle: 'Dual-linked counters, out-of-stock items, partial closing & repeat orders',
         icon: Icons.fact_check_outlined,
         color: const Color(0xFFEC4899),
         items: [
@@ -449,19 +449,19 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
                 '• [None Given]: Sets given to 0 when item is completely out of stock.',
           ),
           _DocItem(
-            topic: '90/10 Case: "✂ Finalize at X (Don\'t Procure / Cut Shortage)"',
-            tag: 'SHORTAGE CUTTING',
+            topic: 'Out of Stock (Need to Procure) Handling',
+            tag: 'STOCK SHORTAGE',
             details:
-                'Solves the practical scenario where the shop intentionally delivers fewer items (e.g. customer ordered 12, but you only give 7 and agree not to supply the rest):\n'
-                '• Tapping "✂ Finalize at 7 (Don\'t Procure / Cut Shortage)" prompts a confirmation dialog.\n'
-                '• Automatically adjusts quantity ordered to 7, quantity given to 7, and drops the 5-item shortage from Procurement.\n'
-                '• Recalculates the bill total strictly for the 7 delivered units and marks the item satisfied.',
+                'When an order cannot be 100% fulfilled immediately:\n'
+                '• Enter the quantity given to the customer.\n'
+                '• The pending quantity is automatically marked as "Out of stock (need to procure)".\n'
+                '• Closing the order bills the customer ONLY for items actually delivered. Out-of-stock items remain in your shop Procurement List.',
           ),
           _DocItem(
-            topic: 'Order Closing Partial Settlement ("Adjust Bill for Given Items & Close")',
+            topic: 'Order Closing Partial Settlement',
             tag: 'ORDER CLOSING',
             details:
-                'When closing an order with unfulfilled items, tapping "Adjust Bill for Given Items & Close" automatically commits current counter values, adjusts item quantities to match what was given, cancels pending godown shortages, and produces a finalized bill with zero discrepancies.',
+                'When closing an order with unfulfilled items, tapping "Close & Bill Delivered" closes the order, bills the customer strictly for the delivered units, and sends all unsupplied quantities to the shop Procurement List.',
           ),
           _DocItem(
             topic: '1-Tap "Repeat Order" (Duplicate Past Bill)',
@@ -532,7 +532,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
       // Section 7: Procurement Management & Godown Workflow
       _DocSection(
         title: '7. Procurement Management & Godown System',
-        subtitle: 'Item shortages, mark as procured, godown buying list & shortage cancel',
+        subtitle: 'Out-of-stock items, mark as procured & godown purchasing list',
         icon: Icons.inventory_2_outlined,
         color: const Color(0xFF0284C7),
         items: [
@@ -550,15 +550,9 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             tag: 'STOCK REPLENISHMENT',
             details:
                 'When goods arrive from the distributor or warehouse:\n'
-                '• Tap "Mark as Procured" on any item to instantly mark it delivered.\n'
-                '• Tap "Mark All as Procured" in the top bar to fulfill all pending shortages in one tap.\n'
-                '• If all items of an order are fulfilled, the order automatically transitions to Completed.',
-          ),
-          _DocItem(
-            topic: '✂ Cut Shortage Directly from Procurement',
-            tag: 'SUPPLIER UNAVAILABLE',
-            details:
-                'If a distributor no longer has an item in stock, tap "✂ Cut Shortage" directly inside the Procurement List. The item is removed from the procurement list and the customer\'s bill is automatically adjusted.',
+                '• Tap "Mark Procured" on any item to clear it from the procurement list.\n'
+                '• Customer existing bills are strictly preserved and never inflated.\n'
+                '• When newly procured goods are given to the customer, you can create a fresh bill for those items as needed.',
           ),
         ],
       ),

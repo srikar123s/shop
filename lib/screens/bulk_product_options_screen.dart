@@ -120,6 +120,13 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
         }
       }
     }
+
+    // Ensure all prefix steps have an initial side-by-side selection if available
+    for (final step in _prefixSteps) {
+      if (!_prefixSelections.containsKey(step.key) && step.values.isNotEmpty) {
+        _prefixSelections[step.key] = step.values.first;
+      }
+    }
   }
 
   List<ProductStep> get _prefixSteps => _steps
@@ -341,39 +348,84 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
-                if (widget.product.configuration.unitOptions.isNotEmpty)
-                  DropdownButtonFormField<String>(
-                    initialValue: _unit,
-                    decoration: const InputDecoration(labelText: 'Unit'),
-                    items: widget.product.configuration.unitOptions
-                        .map((value) => DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(value),
-                            ))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value != null) setState(() => _unit = value);
-                    },
+                if (widget.product.configuration.unitOptions.isNotEmpty) ...[
+                  const Text(
+                    'Unit',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: Color(0xFF1E293B),
+                    ),
                   ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: widget.product.configuration.unitOptions.map((value) {
+                      final isSelected = _unit == value;
+                      return ChoiceChip(
+                        label: Text(value),
+                        selected: isSelected,
+                        selectedColor: const Color(0xFF0F766E),
+                        backgroundColor: Colors.grey.shade100,
+                        labelStyle: TextStyle(
+                          color: isSelected ? Colors.white : const Color(0xFF334155),
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 13,
+                        ),
+                        side: BorderSide(
+                          color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade300,
+                        ),
+                        onSelected: (selected) {
+                          if (selected) setState(() => _unit = value);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 ..._prefixSteps.map(
                   (step) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _prefixSelections[step.key],
-                      decoration:
-                          InputDecoration(labelText: s.catalog(step.label)),
-                      items: step.values
-                          .map((value) => DropdownMenuItem<String>(
-                                value: value,
-                                child: Text(s.catalog(value)),
-                              ))
-                          .toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => _prefixSelections[step.key] = value);
-                        }
-                      },
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.catalog(step.label),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: step.values.map((value) {
+                            final isSelected = _prefixSelections[step.key] == value;
+                            return ChoiceChip(
+                              label: Text(s.catalog(value)),
+                              selected: isSelected,
+                              selectedColor: const Color(0xFF0F766E),
+                              backgroundColor: Colors.grey.shade100,
+                              labelStyle: TextStyle(
+                                color: isSelected ? Colors.white : const Color(0xFF334155),
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                fontSize: 13,
+                              ),
+                              side: BorderSide(
+                                color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade300,
+                              ),
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(() => _prefixSelections[step.key] = value);
+                                }
+                              },
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ),
                   ),
                 ),

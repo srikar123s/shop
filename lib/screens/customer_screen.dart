@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:shop/database/database_helper.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/customer_repository.dart';
@@ -50,13 +51,25 @@ class _CustomerScreenState extends State<CustomerScreen> {
     super.dispose();
   }
 
+  Map<int, double> _customerBalances = {};
+
   Future<void> _loadCustomers() async {
     setState(() => _loading = true);
     final data =
         await widget.customerRepository.searchCustomers(_searchController.text);
+    final khataList = await DatabaseHelper.instance.getCustomerKhataList();
+    final balances = <int, double>{};
+    for (final item in khataList) {
+      final cid = item['customer_id'] as int?;
+      final bal = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
+      if (cid != null) {
+        balances[cid] = bal;
+      }
+    }
     if (!mounted) return;
     setState(() {
       _customers = data;
+      _customerBalances = balances;
       _loading = false;
     });
   }
@@ -880,6 +893,65 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                         ),
                                       ),
                                     ],
+                                      Builder(
+                                        builder: (_) {
+                                          final balance = customer.id != null
+                                              ? (_customerBalances[customer.id!] ?? 0.0)
+                                              : 0.0;
+                                          if (balance < -0.01) {
+                                            return Container(
+                                              margin: const EdgeInsets.only(top: 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFCCFBF1),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: const Color(0xFF0F766E), width: 0.8),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.account_balance_wallet, size: 12, color: Color(0xFF0F766E)),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'Advance: ₹ ',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w800,
+                                                      color: Color(0xFF0F766E),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          } else if (balance > 0.01) {
+                                            return Container(
+                                              margin: const EdgeInsets.only(top: 4),
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red.shade50,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: Colors.red.shade300, width: 0.8),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.warning_amber_rounded, size: 12, color: Colors.red.shade800),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'Khata Due: ₹ ',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w800,
+                                                      color: Colors.red.shade900,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }
+                                          return const SizedBox.shrink();
+                                        },
+                                      ),
                                   ],
                                 ),
                                 trailing: Row(

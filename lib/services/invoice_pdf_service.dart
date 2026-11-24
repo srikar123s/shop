@@ -197,18 +197,21 @@ class InvoicePdfService {
                 ],
                 data: List.generate(items.length, (i) {
                   final item = items[i];
+                  final hasFulfillmentActivity = items.any((it) => it.quantityGiven > 0);
+                  final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
+                  final effectiveQty = (isFinalized || hasFulfillmentActivity) ? item.quantityGiven : item.quantityOrdered;
                   final details = item.description?.isNotEmpty == true
                       ? '\n${item.description}'
                       : '';
                   return [
                     '${i + 1}',
                     '${item.itemName}$details',
-                    '${item.quantityOrdered % 1 == 0 ? item.quantityOrdered.toInt() : item.quantityOrdered}',
+                    '${effectiveQty % 1 == 0 ? effectiveQty.toInt() : effectiveQty}',
                     item.unit,
                     if (!isDeliveryChallan)
                       item.unitPrice.toStringAsFixed(2),
                     if (!isDeliveryChallan)
-                      (item.unitPrice * item.quantityOrdered)
+                      (item.unitPrice * effectiveQty)
                           .toStringAsFixed(2),
                   ];
                 }),
@@ -434,11 +437,14 @@ class InvoicePdfService {
 
         // Item List
         ...items.map((item) {
+          final hasFulfillmentActivity = items.any((it) => it.quantityGiven > 0);
+          final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
+          final effectiveQty = (isFinalized || hasFulfillmentActivity) ? item.quantityGiven : item.quantityOrdered;
           final opts = item.options.map((o) => '${o.optionName}: ${o.optionValue}').join(', ');
-          final qtyStr = item.quantityOrdered % 1 == 0
-              ? item.quantityOrdered.toInt().toString()
-              : item.quantityOrdered.toString();
-          final lineTotal = item.unitPrice * item.quantityOrdered;
+          final qtyStr = effectiveQty % 1 == 0
+              ? effectiveQty.toInt().toString()
+              : effectiveQty.toString();
+          final lineTotal = item.unitPrice * effectiveQty;
 
           return pw.Padding(
             padding: const pw.EdgeInsets.symmetric(vertical: 2),
@@ -1251,23 +1257,41 @@ class InvoicePdfService {
     int? customerBillNumber,
   }) async {
     final Uint8List bytes;
-    if (!isDeliveryChallan) {
+    final PdfPageFormat pageFormat;
+
+    if (isThermal58mm) {
+      pageFormat = const PdfPageFormat(
+        58 * PdfPageFormat.mm,
+        double.infinity,
+        marginAll: 2 * PdfPageFormat.mm,
+      );
+      bytes = await generatePdfBytes(
+        details,
+        isDeliveryChallan: isDeliveryChallan,
+        isThermal58mm: true,
+        customerBillNumber: customerBillNumber,
+      );
+    } else if (!isDeliveryChallan) {
+      pageFormat = PdfPageFormat.a4;
       bytes = await generateReceiptImagePdfBytes(
         details,
         customerBillNumber: customerBillNumber,
       );
     } else {
+      pageFormat = PdfPageFormat.a4;
       bytes = await generatePdfBytes(
         details,
         isDeliveryChallan: isDeliveryChallan,
-        isThermal58mm: isThermal58mm,
+        isThermal58mm: false,
         customerBillNumber: customerBillNumber,
       );
     }
+
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
+      format: pageFormat,
       name:
-          '${details.order.formattedOrderId}_${isDeliveryChallan ? "Challan" : "Invoice"}',
+          '${details.order.formattedOrderId}_${isThermal58mm ? "Thermal" : (isDeliveryChallan ? "Challan" : "Invoice")}',
     );
   }
 

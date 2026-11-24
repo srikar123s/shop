@@ -401,6 +401,8 @@ class ShopSyncService extends ChangeNotifier {
         'is_active': p['is_active'],
         'configuration': p['configuration'],
         'created_at': p['created_at'],
+        'price_updated_at': p['price_updated_at'],
+        'needs_review': p['needs_review'] ?? 0,
         'updatedAt': FieldValue.serverTimestamp(),
         'lastUpdatedByDevice': _deviceId,
       }, SetOptions(merge: true));
@@ -521,6 +523,8 @@ class ShopSyncService extends ChangeNotifier {
         'is_active': data['is_active'] ?? 1,
         'configuration': data['configuration'],
         'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+        'price_updated_at': data['price_updated_at'],
+        'needs_review': data['needs_review'] ?? 0,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
 
@@ -893,6 +897,8 @@ class ShopSyncService extends ChangeNotifier {
             'is_active': data['is_active'] ?? 1,
             'configuration': data['configuration'],
             'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+            'price_updated_at': data['price_updated_at'],
+            'needs_review': data['needs_review'] ?? 0,
           }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }

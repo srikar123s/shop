@@ -155,24 +155,38 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
                 onSelected: (value) => setState(() => _quantity = value),
               ),
               const SizedBox(height: 16),
-              if (unitOptions.isNotEmpty)
-                DropdownButtonFormField<String>(
-                  initialValue: _unit,
-                  decoration: InputDecoration(labelText: s.t('unit')),
-                  items: unitOptions
-                      .map(
-                        (e) => DropdownMenuItem<String>(
-                          value: e,
-                          child: Text(e),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() => _unit = value);
-                    }
-                  },
+              if (unitOptions.isNotEmpty) ...[
+                Text(
+                  s.t('unit'),
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                 ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: unitOptions.map((e) {
+                    final isSelected = _unit == e;
+                    return ChoiceChip(
+                      label: Text(e),
+                      selected: isSelected,
+                      selectedColor: const Color(0xFF0F766E),
+                      backgroundColor: Colors.grey.shade100,
+                      labelStyle: TextStyle(
+                        color: isSelected ? Colors.white : const Color(0xFF334155),
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        fontSize: 13,
+                      ),
+                      side: BorderSide(
+                        color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade300,
+                      ),
+                      onSelected: (selected) {
+                        if (selected) setState(() => _unit = e);
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+              ],
               const Spacer(),
               LargeActionButton(
                 label: s.t('addItem'),

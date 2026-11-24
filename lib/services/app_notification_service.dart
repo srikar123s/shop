@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
@@ -76,18 +77,19 @@ class AppNotificationService {
           _channelId,
           _channelName,
           description: _channelDesc,
-          importance: Importance.high,
+          importance: Importance.max,
           playSound: true,
           enableVibration: true,
         ),
       );
       // Request notification permissions for Android 13+
       await androidNotificationDetails.requestNotificationsPermission();
+      try {
+        await androidNotificationDetails.requestExactAlarmsPermission();
+      } catch (_) {}
     }
 
-    try {
-      tz.initializeTimeZones();
-    } catch (_) {}
+    await _configureLocalTimeZone();
 
     // Schedule Android OS background alarms for all active reminder times
     unawaited(rescheduleBackgroundNotifications());
@@ -102,6 +104,129 @@ class AppNotificationService {
     unawaited(checkAndNotify());
   }
 
+  /// Configures the native local timezone so that alarms match the phone's wall-clock time
+  Future<void> _configureLocalTimeZone() async {
+    try {
+      tz.initializeTimeZones();
+      final info = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = info.identifier;
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+      debugPrint('[AppNotificationService] Local timezone configured: $timeZoneName');
+    } catch (e) {
+      debugPrint('[AppNotificationService] FlutterTimezone lookup error: $e');
+      try {
+        final offset = DateTime.now().timeZoneOffset;
+        for (final loc in tz.timeZoneDatabase.locations.values) {
+          if (loc.currentTimeZone.offset == offset.inMilliseconds) {
+            tz.setLocalLocation(loc);
+            debugPrint('[AppNotificationService] Matched fallback timezone: ${loc.name}');
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// Calculates the next occurrence of a given hour and minute in the device's local timezone
+  tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduledDate = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      hour,
+      minute,
+    );
+    if (scheduledDate.isBefore(now)) {
+      scheduledDate = scheduledDate.add(const Duration(days: 1));
+    }
+    return scheduledDate;
+  }
+
+  /// Safely registers an alarm with Android AlarmManager, falling back to inexactAllowWhileIdle
+  /// if exact alarms are disallowed by the OS or battery optimization.
+  Future<void> _safeZonedSchedule({
+    required int id,
+    required String title,
+    required String body,
+    required tz.TZDateTime scheduledDate,
+    required NotificationDetails notificationDetails,
+    required String payload,
+    DateTimeComponents? matchDateTimeComponents,
+  }) async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    bool canExact = false;
+    try {
+      canExact = (await androidDetails?.canScheduleExactNotifications()) ?? false;
+    } catch (_) {}
+
+    final primaryMode = canExact
+        ? AndroidScheduleMode.exactAllowWhileIdle
+        : AndroidScheduleMode.inexactAllowWhileIdle;
+
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id,
+        title,
+        body,
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: primaryMode,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: matchDateTimeComponents,
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('[AppNotificationService] Primary schedule error ($primaryMode): $e. Retrying with inexactAllowWhileIdle...');
+      try {
+        await _notificationsPlugin.zonedSchedule(
+          id,
+          title,
+          body,
+          scheduledDate,
+          notificationDetails,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          matchDateTimeComponents: matchDateTimeComponents,
+          payload: payload,
+        );
+      } catch (err) {
+        debugPrint('[AppNotificationService] Inexact schedule fallback failed: $err');
+      }
+    }
+  }
+
+  /// Schedule a 30-second test alarm to verify background alarm delivery when app is closed
+  Future<void> scheduleTestBackgroundAlarm() async {
+    await _configureLocalTimeZone();
+    final now = tz.TZDateTime.now(tz.local);
+    final scheduledDate = now.add(const Duration(seconds: 30));
+
+    const testDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF0F766E),
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    await _safeZonedSchedule(
+      id: 999,
+      title: '⏰ Background Alarm Test SUCCESS!',
+      body: 'This notification fired on time even while the app was closed/locked!',
+      scheduledDate: scheduledDate,
+      notificationDetails: const NotificationDetails(android: testDetails),
+      payload: 'test_alarm',
+    );
+  }
+
   /// Registers native Android AlarmManager exact background alarms that fire
   /// even when the phone is locked or the app process is terminated.
   Future<void> rescheduleBackgroundNotifications() async {
@@ -113,6 +238,8 @@ class AppNotificationService {
       return;
     }
 
+    await _configureLocalTimeZone();
+
     // Cancel previously scheduled background alarm IDs (200..299)
     for (int id = 200; id <= 299; id++) {
       await _notificationsPlugin.cancel(id);
@@ -122,7 +249,7 @@ class AppNotificationService {
       _channelId,
       _channelName,
       channelDescription: _channelDesc,
-      importance: Importance.high,
+      importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF0F766E),
       styleInformation: BigTextStyleInformation(''),
@@ -132,7 +259,7 @@ class AppNotificationService {
       _channelId,
       _channelName,
       channelDescription: _channelDesc,
-      importance: Importance.high,
+      importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFFE11D48),
       styleInformation: BigTextStyleInformation(''),
@@ -142,7 +269,7 @@ class AppNotificationService {
       _channelId,
       _channelName,
       channelDescription: _channelDesc,
-      importance: Importance.high,
+      importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF3B82F6),
       styleInformation: BigTextStyleInformation(''),
@@ -162,27 +289,19 @@ class AppNotificationService {
             'Check unfulfilled orders and update counter bills.',
             RepeatInterval.hourly,
             const NotificationDetails(android: androidPendingDetails),
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
             payload: 'pending_orders',
           );
         } else {
           final times = await getPendingOrdersTimes();
           for (final t in times) {
-            final now = DateTime.now();
-            var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-            if (dt.isBefore(now)) {
-              dt = dt.add(const Duration(days: 1));
-            }
-            final tzDt = tz.TZDateTime.from(dt, tz.local);
-            await _notificationsPlugin.zonedSchedule(
-              notifIdCounter++,
-              '📋 Pending Orders Reminder',
-              'You have open orders to fulfill and close. Tap to view.',
-              tzDt,
-              const NotificationDetails(android: androidPendingDetails),
-              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-              uiLocalNotificationDateInterpretation:
-                  UILocalNotificationDateInterpretation.absoluteTime,
+            final tzDt = _nextInstanceOfTime(t.hour, t.minute);
+            await _safeZonedSchedule(
+              id: notifIdCounter++,
+              title: '📋 Pending Orders Reminder',
+              body: 'You have open orders to fulfill and close. Tap to view.',
+              scheduledDate: tzDt,
+              notificationDetails: const NotificationDetails(android: androidPendingDetails),
               matchDateTimeComponents: DateTimeComponents.time,
               payload: 'pending_orders',
             );
@@ -195,21 +314,13 @@ class AppNotificationService {
       if (procureEnabled) {
         final times = await getProcurementTimes();
         for (final t in times) {
-          final now = DateTime.now();
-          var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-          if (dt.isBefore(now)) {
-            dt = dt.add(const Duration(days: 1));
-          }
-          final tzDt = tz.TZDateTime.from(dt, tz.local);
-          await _notificationsPlugin.zonedSchedule(
-            notifIdCounter++,
-            '📦 Procurement List Reminder',
-            'Items needed for customer orders. Tap to view procurement list.',
-            tzDt,
-            const NotificationDetails(android: androidProcureDetails),
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-            uiLocalNotificationDateInterpretation:
-                UILocalNotificationDateInterpretation.absoluteTime,
+          final tzDt = _nextInstanceOfTime(t.hour, t.minute);
+          await _safeZonedSchedule(
+            id: notifIdCounter++,
+            title: '📦 Procurement List Reminder',
+            body: 'Items needed for customer orders. Tap to view procurement list.',
+            scheduledDate: tzDt,
+            notificationDetails: const NotificationDetails(android: androidProcureDetails),
             matchDateTimeComponents: DateTimeComponents.time,
             payload: 'procurement',
           );
@@ -220,27 +331,19 @@ class AppNotificationService {
       final reportEnabled = await isDailyReportEnabled();
       if (reportEnabled) {
         final t = await getDailyReportTime();
-        final now = DateTime.now();
-        var dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
-        if (dt.isBefore(now)) {
-          dt = dt.add(const Duration(days: 1));
-        }
-        final tzDt = tz.TZDateTime.from(dt, tz.local);
-        await _notificationsPlugin.zonedSchedule(
-          notifIdCounter++,
-          '📊 Daily Shop Sales Summary',
-          'Review today\'s completed orders, collections, and daily revenue.',
-          tzDt,
-          const NotificationDetails(android: androidReportDetails),
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-          uiLocalNotificationDateInterpretation:
-              UILocalNotificationDateInterpretation.absoluteTime,
+        final tzDt = _nextInstanceOfTime(t.hour, t.minute);
+        await _safeZonedSchedule(
+          id: notifIdCounter++,
+          title: '📊 Daily Shop Sales Summary',
+          body: 'Review today\'s completed orders, collections, and daily revenue.',
+          scheduledDate: tzDt,
+          notificationDetails: const NotificationDetails(android: androidReportDetails),
           matchDateTimeComponents: DateTimeComponents.time,
           payload: 'daily_report',
         );
       }
     } catch (e) {
-      debugPrint('Background notification scheduling error: $e');
+      debugPrint('[AppNotificationService] Background notification scheduling error: $e');
     }
   }
 
@@ -688,8 +791,16 @@ class AppNotificationService {
           final prodRepo = ProductRepository(DatabaseHelper.instance);
           final staleCount =
               await prodRepo.getStalePriceCount(thresholdDays: cautionDays);
-          if (staleCount > 0) {
+          final priceCautionSlot = '$dayPrefix-price-caution';
+          if (staleCount > 0 &&
+              (force ||
+                  prefs.getString('${_prefLastNotifiedKey}_price_caution') !=
+                      priceCautionSlot)) {
             await _showStalePriceNotification(staleCount, cautionDays);
+            await prefs.setString(
+                '${_prefLastNotifiedKey}_price_caution', priceCautionSlot);
+          } else if (staleCount == 0) {
+            await _notificationsPlugin.cancel(104);
           }
         }
       }

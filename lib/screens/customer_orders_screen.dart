@@ -1,3 +1,5 @@
+import 'package:shop/database/database_helper.dart';
+import 'package:shop/screens/order_packing_slip_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/models/customer.dart';
@@ -307,7 +309,9 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                       color: Colors.red.shade200),
                                 ),
                                 child: Text(
-                                  'Given $gvnStr of $ordStr ($pndStr not given)',
+                                  item.procurementStatus == ProcurementStatus.notRequired
+                                      ? 'Given $gvnStr of $ordStr ($pndStr dropped)'
+                                      : 'Given $gvnStr of $ordStr ($pndStr not given)',
                                   style: TextStyle(
                                       fontSize: 11,
                                       color: Colors.red.shade900,
@@ -881,6 +885,32 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                                 onPressed: () =>
                                                     _closeSingleOrder(order),
                                               ),
+                                            IconButton(
+                                              tooltip: 'Packing Slip / Preview',
+                                              icon: const Icon(Icons.inventory_2_outlined,
+                                                  size: 18),
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              onPressed: () async {
+                                                final details = await widget
+                                                    .orderRepository
+                                                    .getOrderDetails(
+                                                        order.orderId);
+                                                if (details != null && context.mounted) {
+                                                  final seq = await DatabaseHelper.instance
+                                                      .getCustomerBillSequence(order.orderId);
+                                                  Navigator.push(
+                                                    context,
+                                                    MaterialPageRoute<void>(
+                                                      builder: (_) => OrderPackingSlipScreen(
+                                                        details: details,
+                                                        customerBillNumber: seq,
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              },
+                                            ),
                                             IconButton(
                                               tooltip: 'Share Estimate',
                                               icon: const Icon(Icons.share,
