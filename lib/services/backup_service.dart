@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shop/database/database_helper.dart';
 
 class BackupService {
@@ -10,7 +11,13 @@ class BackupService {
 
   final DatabaseHelper _databaseHelper;
 
-  Future<String> createBackup() async {
+  Future<String> createBackup({bool shareImmediately = false}) async {
+    // 1. Force WAL checkpoint to ensure all uncommitted journal transactions are written to main DB file
+    try {
+      final db = await _databaseHelper.database;
+      await db.rawQuery('PRAGMA wal_checkpoint(FULL);');
+    } catch (_) {}
+
     final sourcePath = await _databaseHelper.getDatabaseFullPath();
     final source = File(sourcePath);
     if (!await source.exists()) {
@@ -21,6 +28,13 @@ class BackupService {
         'hardware_shop_backup_${DateTime.now().millisecondsSinceEpoch}.db';
     final backupPath = p.join(directory.path, backupName);
     await source.copy(backupPath);
+
+    if (shareImmediately) {
+      await Share.shareXFiles(
+        [XFile(backupPath)],
+        text: 'Shop Database Backup ($backupName)',
+      );
+    }
     return backupPath;
   }
 
@@ -42,6 +56,15 @@ class BackupService {
 
     final targetPath = await _databaseHelper.getDatabaseFullPath();
     await _databaseHelper.close();
+
+    // Clean up any existing WAL journal and shared-memory files from old database to avoid corruption
+    try {
+      final walFile = File('$targetPath-wal');
+      if (await walFile.exists()) await walFile.delete();
+      final shmFile = File('$targetPath-shm');
+      if (await shmFile.exists()) await shmFile.delete();
+    } catch (_) {}
+
     await backupFile.copy(targetPath);
     await _databaseHelper.reopen();
     return true;

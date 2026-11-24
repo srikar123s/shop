@@ -92,12 +92,13 @@ class ProductRepository {
         matchedId = row['id'] as int;
         break;
       }
-      // Check singular/plural match (e.g., Paint vs Paints, Welding Rod vs Welding Rods)
+      // Check clean singular/plural match (e.g., Paint vs Paints, Box vs Boxes, Battery vs Batteries)
       if ('${dbName}s' == lowerName ||
           '${lowerName}s' == dbName ||
-          (dbName.length > 3 &&
-              lowerName.length > 3 &&
-              dbName.replaceAll('s', '') == lowerName.replaceAll('s', ''))) {
+          '${dbName}es' == lowerName ||
+          '${lowerName}es' == dbName ||
+          (dbName.endsWith('ies') && lowerName == '${dbName.substring(0, dbName.length - 3)}y') ||
+          (lowerName.endsWith('ies') && dbName == '${lowerName.substring(0, lowerName.length - 3)}y')) {
         matchedId = row['id'] as int;
         break;
       }

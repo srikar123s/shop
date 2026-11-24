@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -164,16 +165,38 @@ class ShopCustomizationService extends ChangeNotifier {
     return _globalShortcuts;
   }
 
-  String get upiId => _upiId;
-  String get shopPhone => _shopPhone;
-  String get shopAddress => _shopAddress;
-  String get gstin => _gstin;
-  String get digitalStamp => _digitalStamp;
+  String get upiId {
+    if (_upiId.isNotEmpty) return _upiId;
+    return ShopSyncService.instance.currentShop?.upiId ?? '';
+  }
+
+  String get shopPhone {
+    if (_shopPhone.isNotEmpty) return _shopPhone;
+    return ShopSyncService.instance.currentShop?.ownerPhone ?? '';
+  }
+
+  String get shopAddress {
+    if (_shopAddress.isNotEmpty) return _shopAddress;
+    return ShopSyncService.instance.currentShop?.address ?? '';
+  }
+
+  String get gstin {
+    if (_gstin.isNotEmpty) return _gstin;
+    return ShopSyncService.instance.currentShop?.gstin ?? '';
+  }
+
+  String get digitalStamp {
+    if (_digitalStamp.isNotEmpty) return _digitalStamp;
+    return ShopSyncService.instance.currentShop?.digitalStamp ?? '';
+  }
 
   Future<void> setUpiId(String val) async {
     _upiId = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyUpiId, _upiId);
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(upiId: _upiId));
+    }
     notifyListeners();
   }
 
@@ -181,6 +204,9 @@ class ShopCustomizationService extends ChangeNotifier {
     _shopPhone = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopPhone, _shopPhone);
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(phone: _shopPhone));
+    }
     notifyListeners();
   }
 
@@ -188,6 +214,9 @@ class ShopCustomizationService extends ChangeNotifier {
     _shopAddress = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopAddress, _shopAddress);
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(address: _shopAddress));
+    }
     notifyListeners();
   }
 
@@ -195,6 +224,9 @@ class ShopCustomizationService extends ChangeNotifier {
     _gstin = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyGstin, _gstin);
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(gstin: _gstin));
+    }
     notifyListeners();
   }
 
@@ -202,6 +234,9 @@ class ShopCustomizationService extends ChangeNotifier {
     _digitalStamp = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyDigitalStamp, _digitalStamp);
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(digitalStamp: _digitalStamp));
+    }
     notifyListeners();
   }
 

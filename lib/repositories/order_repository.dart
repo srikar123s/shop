@@ -75,6 +75,7 @@ class OrderRepository {
           'quantity_ordered': item.quantity,
           'quantity_given': 0,
           'unit': item.unit,
+          'unit_price': item.unitPrice ?? 0.0,
           'status': itemStatusLabel(itemStatus),
           'is_other_item': item.isOtherItem ? 1 : 0,
           'procurement_status': procurementStatus.name,
@@ -121,6 +122,7 @@ class OrderRepository {
           'quantity_ordered': item.quantity,
           'quantity_given': 0,
           'unit': item.unit,
+          'unit_price': item.unitPrice ?? 0.0,
           'status': itemStatusLabel(ItemStatus.notGiven),
           'is_other_item': item.isOtherItem ? 1 : 0,
           'procurement_status': ProcurementStatus.notRequired.name,
@@ -153,13 +155,15 @@ class OrderRepository {
       double combinedSubtotal = 0.0;
       for (final row in allItemRows) {
         final qty = (row['quantity_ordered'] as num).toDouble();
-        double uPrice = 0.0;
-        final snapRaw = row['product_snapshot'] as String?;
-        if (snapRaw != null && snapRaw.isNotEmpty) {
-          try {
-            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-            uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-          } catch (_) {}
+        double uPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        if (uPrice <= 0.0) {
+          final snapRaw = row['product_snapshot'] as String?;
+          if (snapRaw != null && snapRaw.isNotEmpty) {
+            try {
+              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+              uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+            } catch (_) {}
+          }
         }
         combinedSubtotal += uPrice * qty;
       }
@@ -344,13 +348,15 @@ class OrderRepository {
       for (final row in itemRows) {
         final itemId = row['id'] as int;
         final ordered = (row['quantity_ordered'] as num).toDouble();
-        double unitPrice = 0.0;
-        final snapRaw = row['product_snapshot'] as String?;
-        if (snapRaw != null && snapRaw.isNotEmpty) {
-          try {
-            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-          } catch (_) {}
+        double unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        if (unitPrice <= 0.0) {
+          final snapRaw = row['product_snapshot'] as String?;
+          if (snapRaw != null && snapRaw.isNotEmpty) {
+            try {
+              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+              unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+            } catch (_) {}
+          }
         }
         fullSubtotal += unitPrice * ordered;
 
@@ -427,13 +433,15 @@ class OrderRepository {
         final itemId = row['id'] as int;
         final ordered = (row['quantity_ordered'] as num).toDouble();
         final given = (row['quantity_given'] as num).toDouble();
-        double unitPrice = 0.0;
-        final snapRaw = row['product_snapshot'] as String?;
-        if (snapRaw != null && snapRaw.isNotEmpty) {
-          try {
-            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-          } catch (_) {}
+        double unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        if (unitPrice <= 0.0) {
+          final snapRaw = row['product_snapshot'] as String?;
+          if (snapRaw != null && snapRaw.isNotEmpty) {
+            try {
+              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+              unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+            } catch (_) {}
+          }
         }
         final itemName = row['item_name'] as String;
 
@@ -807,9 +815,9 @@ class OrderRepository {
           .map((o) => '${o['option_name']}: ${o['option_value']}')
           .toList();
 
-      double unitPrice = 0.0;
       final snapRaw = row['product_snapshot'] as String?;
-      if (snapRaw != null && snapRaw.isNotEmpty) {
+      double unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+      if (unitPrice <= 0.0 && snapRaw != null && snapRaw.isNotEmpty) {
         try {
           final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
           unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
@@ -893,8 +901,7 @@ class OrderRepository {
   }
 
   /// Marks a specific order item as procured in the procurement list.
-  /// Customer's existing bill is strictly NOT modified and out-of-stock items are NOT added to the bill.
-  /// If needed, the merchant will add a new bill when delivering procured items.
+  /// Automatically updates line item to delivered and marks order completed when all items arrive.
   Future<void> markItemAsProcured({
     required int itemId,
     required int orderId,
@@ -902,14 +909,44 @@ class OrderRepository {
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
+      final itemRows = await txn.query(
+        'order_items',
+        where: 'id = ?',
+        whereArgs: [itemId],
+        limit: 1,
+      );
+      final ordered = itemRows.isNotEmpty
+          ? (itemRows.first['quantity_ordered'] as num).toDouble()
+          : 0.0;
+      final effectiveGiven = customQuantityGiven ?? ordered;
+
       await txn.update(
         'order_items',
         {
           'procurement_status': ProcurementStatus.notRequired.name,
+          'quantity_given': effectiveGiven,
+          'status': itemStatusLabel(ItemStatus.given),
         },
         where: 'id = ?',
         whereArgs: [itemId],
       );
+
+      // Check if all items in the order are now fulfilled
+      final allItems = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
+      );
+      final allGiven = allItems.every((i) =>
+          (i['status'] as String?) == itemStatusLabel(ItemStatus.given));
+      if (allGiven && allItems.isNotEmpty) {
+        await txn.update(
+          'orders',
+          {'status': orderStatusLabel(OrderStatus.completed)},
+          where: 'id = ?',
+          whereArgs: [orderId],
+        );
+      }
     });
     unawaited(ShopSyncService.instance.syncOrder(orderId));
   }

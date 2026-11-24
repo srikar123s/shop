@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to verify if request is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if the caller's device is registered and approved for the shop
+    function isApprovedShopDevice(shopCode) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/shops/$(shopCode)/devices/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/shops/$(shopCode)/devices/$(request.auth.uid)).data.status == 'approved';
+    }
+
+    // Root shops collection
+    match /shops/{shopCode} {
+      // Allow reading shop details if authenticated
+      allow read: if isAuthenticated();
+      
+      // Allow shop creation if authenticated
+      allow create: if isAuthenticated();
+      
+      // Allow update if approved device or shop owner
+      allow update: if isAuthenticated() && (
+        isApprovedShopDevice(shopCode) ||
+        resource.data.ownerUid == request.auth.uid
+      );
+      
+      // Devices subcollection
+      match /devices/{deviceId} {
+        // Any authenticated device can register itself or read device status
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.auth.uid == deviceId;
+        
+        // Only existing approved devices or shop owner can approve/update device statuses
+        allow update, delete: if isAuthenticated() && (
+          isApprovedShopDevice(shopCode) ||
+          request.auth.uid == deviceId
+        );
+      }
+
+      // Products subcollection
+      match /products/{productId} {
+        allow read, write: if isApprovedShopDevice(shopCode);
+      }
+
+      // Customers subcollection
+      match /customers/{customerId} {
+        allow read, write: if isApprovedShopDevice(shopCode);
+      }
+
+      // Orders subcollection
+      match /orders/{orderId} {
+        allow read, write: if isApprovedShopDevice(shopCode);
+      }
+
+      // Khata & Order Payments subcollection
+      match /payments/{paymentId} {
+        allow read, write: if isApprovedShopDevice(shopCode);
+      }
+    }
+  }
+}

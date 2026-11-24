@@ -1,0 +1,8 @@
+# Release keystore configuration template
+# Copy this file to 'key.properties' in this directory and populate with your production credentials.
+# Do NOT commit 'key.properties' to version control!
+
+storePassword=your-keystore-password
+keyPassword=your-key-password
+keyAlias=your-key-alias
+storeFile=C:\\path\\to\\upload-keystore.jks

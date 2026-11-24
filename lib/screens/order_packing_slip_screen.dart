@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/share_service.dart';

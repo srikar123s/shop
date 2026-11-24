@@ -899,6 +899,7 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                                 if (details != null && context.mounted) {
                                                   final seq = await DatabaseHelper.instance
                                                       .getCustomerBillSequence(order.orderId);
+                                                  if (!context.mounted) return;
                                                   Navigator.push(
                                                     context,
                                                     MaterialPageRoute<void>(

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:csv/csv.dart';
+import 'package:excel/excel.dart' as xl;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/models/product.dart';
@@ -94,6 +95,24 @@ class ExcelProductService {
   }
 
   static List<List<String>> parseXlsxArchive(List<int> bytes) {
+    try {
+      final excel = xl.Excel.decodeBytes(bytes);
+      final List<List<String>> xlRows = [];
+      for (final table in excel.tables.keys) {
+        final sheet = excel.tables[table];
+        if (sheet == null) continue;
+        for (final row in sheet.rows) {
+          final rowStrings =
+              row.map((cell) => cell?.value?.toString().trim() ?? '').toList();
+          if (rowStrings.any((c) => c.isNotEmpty)) {
+            xlRows.add(rowStrings);
+          }
+        }
+        if (xlRows.isNotEmpty) break;
+      }
+      if (xlRows.isNotEmpty) return xlRows;
+    } catch (_) {}
+
     final archive = ZipDecoder().decodeBytes(bytes);
     final sharedStrings = <String>[];
     final ssFile = archive.findFile('xl/sharedStrings.xml');

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -44,6 +45,7 @@ class ShopSyncService extends ChangeNotifier {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _productsSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _ordersSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _customersSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _paymentsSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _deviceSub;
 
   StaffDevice? _myDevicePermissions;
@@ -129,12 +131,36 @@ class ShopSyncService extends ChangeNotifier {
           );
         }
         _isFirebaseAvailable = true;
+        try {
+          final auth = FirebaseAuth.instance;
+          if (auth.currentUser == null) {
+            await auth.signInAnonymously();
+          }
+          if (auth.currentUser != null) {
+            _deviceId = auth.currentUser!.uid;
+            await prefs.setString(_prefKeyDeviceId, _deviceId!);
+          }
+        } catch (authErr) {
+          debugPrint('Firebase Auth anonymous sign-in: $authErr');
+        }
       } catch (fbErr) {
         try {
           if (Firebase.apps.isEmpty) {
             await Firebase.initializeApp();
           }
           _isFirebaseAvailable = true;
+        try {
+          final auth = FirebaseAuth.instance;
+          if (auth.currentUser == null) {
+            await auth.signInAnonymously();
+          }
+          if (auth.currentUser != null) {
+            _deviceId = auth.currentUser!.uid;
+            await prefs.setString(_prefKeyDeviceId, _deviceId!);
+          }
+        } catch (authErr) {
+          debugPrint('Firebase Auth anonymous sign-in: $authErr');
+        }
         } catch (e2) {
           _isFirebaseAvailable = false;
           debugPrint('Firebase not initialized yet: $e2');
@@ -193,7 +219,7 @@ class ShopSyncService extends ChangeNotifier {
   String _cleanErrorMessage(dynamic e) {
     final str = e.toString();
     if (str.contains('permission-denied')) {
-      return 'Firebase Rules locked: In Firebase Console -> Firestore Database -> Rules tab, change to "allow read, write: if true;" and click Publish.';
+      return 'Firebase Rules locked: Please ensure the Firestore rules from firestore.rules are published in your Firebase Console.';
     }
     if (str.contains('unavailable') || str.contains('network')) {
       return 'Network offline. Please check your internet connection.';
@@ -475,8 +501,14 @@ class ShopSyncService extends ChangeNotifier {
       final takenBy =
           (o['taken_by'] as String?) ?? breakdown?.takenBy ?? 'Store';
 
-      await firestore.collection('shops').doc(shopCode).collection('orders').doc('$orderId').set({
+      final cloudDocId = (o['cloud_order_id'] as String?) ?? '${_deviceId}_$orderId';
+      if (o['cloud_order_id'] == null) {
+        await db.update('orders', {'cloud_order_id': cloudDocId}, where: 'id = ?', whereArgs: [orderId]);
+      }
+
+      await firestore.collection('shops').doc(shopCode).collection('orders').doc(cloudDocId).set({
         'id': o['id'],
+        'cloud_order_id': cloudDocId,
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
         'customer_phone': customerPhone,
@@ -485,11 +517,38 @@ class ShopSyncService extends ChangeNotifier {
         'status': o['status'],
         'notes': o['notes'],
         'estimate_total': o['estimate_total'],
+        'paid_amount': o['paid_amount'] ?? 0.0,
+        'payment_mode': o['payment_mode'] ?? 'unpaid',
+        'payment_status': o['payment_status'] ?? 'unpaid',
         'items': itemsPayload,
         'updatedAt': FieldValue.serverTimestamp(),
         'lastUpdatedByDevice': _deviceId,
       }, SetOptions(merge: true));
     }
+
+    // 4. Payments
+    final payments = await db.query('customer_payments');
+    final payBatch = firestore.batch();
+    for (final p in payments) {
+      final payId = p['id'] as int;
+      final cloudDocId = (p['cloud_payment_id'] as String?) ?? '${_deviceId}_$payId';
+      if (p['cloud_payment_id'] == null) {
+        await db.update('customer_payments', {'cloud_payment_id': cloudDocId}, where: 'id = ?', whereArgs: [payId]);
+      }
+      final docRef = firestore.collection('shops').doc(shopCode).collection('payments').doc(cloudDocId);
+      payBatch.set(docRef, {
+        'id': p['id'],
+        'cloud_payment_id': cloudDocId,
+        'customer_id': p['customer_id'],
+        'amount': p['amount'],
+        'payment_mode': p['payment_mode'],
+        'notes': p['notes'],
+        'created_at': p['created_at'],
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastUpdatedByDevice': _deviceId,
+      }, SetOptions(merge: true));
+    }
+    await payBatch.commit();
 
       _lastSyncTime = DateTime.now();
       _status = SyncStatus.connected;
@@ -545,7 +604,6 @@ class ShopSyncService extends ChangeNotifier {
     final orderSnaps = await firestore.collection('shops').doc(shopCode).collection('orders').get();
     for (final doc in orderSnaps.docs) {
       final data = doc.data();
-      final orderId = data['id'] as int;
       final rawNotes = data['notes'] as String?;
       final incomingBreakdown = BillBreakdown.fromJsonString(rawNotes);
       final incomingPhone = (data['customer_phone'] as String?) ??
@@ -577,43 +635,67 @@ class ShopSyncService extends ChangeNotifier {
         }
       }
 
-      await db.insert('orders', {
-        'id': orderId,
-        'customer_id': localCustId,
-        'customer_name_snapshot': custName,
-        'customer_phone': incomingPhone,
-        'taken_by': incomingTakenBy,
-        'created_at': data['created_at'],
-        'status': data['status'],
-        'notes': data['notes'],
-        'estimate_total': data['estimate_total'],
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      final cloudDocId = doc.id;
+      final existingOrder = await db.query('orders', where: 'cloud_order_id = ?', whereArgs: [cloudDocId]);
+      int targetOrderId;
+      if (existingOrder.isNotEmpty) {
+        targetOrderId = existingOrder.first['id'] as int;
+        await db.update('orders', {
+          'customer_id': localCustId,
+          'customer_name_snapshot': custName,
+          'customer_phone': incomingPhone,
+          'taken_by': incomingTakenBy,
+          'status': data['status'],
+          'notes': data['notes'],
+          'estimate_total': data['estimate_total'],
+          'paid_amount': data['paid_amount'] ?? 0.0,
+          'payment_mode': data['payment_mode'] ?? 'unpaid',
+          'payment_status': data['payment_status'] ?? 'unpaid',
+        }, where: 'id = ?', whereArgs: [targetOrderId]);
+      } else {
+        targetOrderId = await db.insert('orders', {
+          'cloud_order_id': cloudDocId,
+          'customer_id': localCustId,
+          'customer_name_snapshot': custName,
+          'customer_phone': incomingPhone,
+          'taken_by': incomingTakenBy,
+          'created_at': data['created_at'],
+          'status': data['status'],
+          'notes': data['notes'],
+          'estimate_total': data['estimate_total'],
+          'paid_amount': data['paid_amount'] ?? 0.0,
+          'payment_mode': data['payment_mode'] ?? 'unpaid',
+          'payment_status': data['payment_status'] ?? 'unpaid',
+        });
+      }
 
       // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
-      final existingItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [orderId]);
+      final existingItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [targetOrderId]);
       for (final ei in existingItems) {
         final eid = ei['id'] as int;
         await db.delete('order_item_options', where: 'order_item_id = ?', whereArgs: [eid]);
       }
-      await db.delete('order_items', where: 'order_id = ?', whereArgs: [orderId]);
+      await db.delete('order_items', where: 'order_id = ?', whereArgs: [targetOrderId]);
 
       final rawItems = data['items'] as List<dynamic>? ?? [];
       for (final rawItem in rawItems) {
         final item = rawItem as Map<String, dynamic>;
         final itemId = item['id'] as int? ?? Random().nextInt(1000000);
+        final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
         final snapString = item['product_snapshot'] as String? ?? jsonEncode({
           'itemName': item['item_name'],
-          'unitPrice': item['unit_price'] ?? 0.0,
+          'unitPrice': unitPrice,
           'options': item['options'] ?? {},
         });
         await db.insert('order_items', {
           'id': itemId,
-          'order_id': orderId,
+          'order_id': targetOrderId,
           'product_id': item['product_id'],
           'item_name': item['item_name'],
           'quantity_ordered': item['quantity_ordered'],
           'quantity_given': item['quantity_given'] ?? 0,
           'unit': item['unit'],
+          'unit_price': unitPrice,
           'status': item['status'],
           'is_other_item': item['is_other_item'] ?? 0,
           'procurement_status': item['procurement_status'],
@@ -630,6 +712,32 @@ class ShopSyncService extends ChangeNotifier {
             'option_value': optEntry.value.toString(),
           }, conflictAlgorithm: ConflictAlgorithm.replace);
         }
+      }
+    }
+
+    // 4. Sync Payments
+    final paySnaps = await firestore.collection('shops').doc(shopCode).collection('payments').get();
+    for (final doc in paySnaps.docs) {
+      final data = doc.data();
+      final cloudDocId = doc.id;
+      final existingPay = await db.query('customer_payments', where: 'cloud_payment_id = ?', whereArgs: [cloudDocId]);
+      if (existingPay.isNotEmpty) {
+        await db.update('customer_payments', {
+          'customer_id': data['customer_id'],
+          'amount': data['amount'],
+          'payment_mode': data['payment_mode'] ?? 'cash',
+          'notes': data['notes'],
+          'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+        }, where: 'id = ?', whereArgs: [existingPay.first['id']]);
+      } else {
+        await db.insert('customer_payments', {
+          'cloud_payment_id': cloudDocId,
+          'customer_id': data['customer_id'],
+          'amount': data['amount'],
+          'payment_mode': data['payment_mode'] ?? 'cash',
+          'notes': data['notes'],
+          'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+        });
       }
     }
 
@@ -702,8 +810,14 @@ class ShopSyncService extends ChangeNotifier {
       final takenBy =
           (o['taken_by'] as String?) ?? breakdown?.takenBy ?? 'Store';
 
-      await firestore.collection('shops').doc(shopCode).collection('orders').doc('$orderId').set({
+      final cloudDocId = (o['cloud_order_id'] as String?) ?? '${_deviceId}_$orderId';
+      if (o['cloud_order_id'] == null) {
+        await db.update('orders', {'cloud_order_id': cloudDocId}, where: 'id = ?', whereArgs: [orderId]);
+      }
+
+      await firestore.collection('shops').doc(shopCode).collection('orders').doc(cloudDocId).set({
         'id': o['id'],
+        'cloud_order_id': cloudDocId,
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
         'customer_phone': customerPhone,
@@ -712,6 +826,9 @@ class ShopSyncService extends ChangeNotifier {
         'status': o['status'],
         'notes': o['notes'],
         'estimate_total': o['estimate_total'],
+        'paid_amount': o['paid_amount'] ?? 0.0,
+        'payment_mode': o['payment_mode'] ?? 'unpaid',
+        'payment_status': o['payment_status'] ?? 'unpaid',
         'items': itemsPayload,
         'updatedAt': FieldValue.serverTimestamp(),
         'lastUpdatedByDevice': _deviceId,
@@ -721,6 +838,42 @@ class ShopSyncService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Error syncing order $orderId: $e');
+    }
+  }
+
+  /// Push a single customer payment to cloud
+  Future<void> syncPayment(int paymentId) async {
+    if (_currentShop == null || !_isFirebaseAvailable) return;
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final shopCode = _currentShop!.shopCode;
+      final db = await _dbHelper.database;
+
+      final pRows = await db.query('customer_payments', where: 'id = ?', whereArgs: [paymentId]);
+      if (pRows.isEmpty) return;
+      final p = pRows.first;
+
+      final cloudDocId = (p['cloud_payment_id'] as String?) ?? '${_deviceId}_$paymentId';
+      if (p['cloud_payment_id'] == null) {
+        await db.update('customer_payments', {'cloud_payment_id': cloudDocId}, where: 'id = ?', whereArgs: [paymentId]);
+      }
+
+      await firestore.collection('shops').doc(shopCode).collection('payments').doc(cloudDocId).set({
+        'id': p['id'],
+        'cloud_payment_id': cloudDocId,
+        'customer_id': p['customer_id'],
+        'amount': p['amount'],
+        'payment_mode': p['payment_mode'],
+        'notes': p['notes'],
+        'created_at': p['created_at'],
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastUpdatedByDevice': _deviceId,
+      }, SetOptions(merge: true));
+
+      _lastSyncTime = DateTime.now();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error syncing payment $paymentId: $e');
     }
   }
 
@@ -783,7 +936,6 @@ class ShopSyncService extends ChangeNotifier {
           // Ignore echo if we just pushed it from this device
           if (data['lastUpdatedByDevice'] == _deviceId) continue;
 
-          final orderId = data['id'] as int;
           final rawNotes = data['notes'] as String?;
           final incomingBreakdown = BillBreakdown.fromJsonString(rawNotes);
           final incomingPhone = (data['customer_phone'] as String?) ??
@@ -816,25 +968,47 @@ class ShopSyncService extends ChangeNotifier {
             }
           }
 
-          await db.insert('orders', {
-            'id': orderId,
-            'customer_id': localCustId,
-            'customer_name_snapshot': custName,
-            'customer_phone': incomingPhone,
-            'taken_by': incomingTakenBy,
-            'created_at': data['created_at'],
-            'status': data['status'],
-            'notes': data['notes'],
-            'estimate_total': data['estimate_total'],
-          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          final cloudDocId = change.doc.id;
+          final existing = await db.query('orders', where: 'cloud_order_id = ?', whereArgs: [cloudDocId]);
+          int targetOrderId;
+          if (existing.isNotEmpty) {
+            targetOrderId = existing.first['id'] as int;
+            await db.update('orders', {
+              'customer_id': localCustId,
+              'customer_name_snapshot': custName,
+              'customer_phone': incomingPhone,
+              'taken_by': incomingTakenBy,
+              'status': data['status'],
+              'notes': data['notes'],
+              'estimate_total': data['estimate_total'],
+              'paid_amount': data['paid_amount'] ?? 0.0,
+              'payment_mode': data['payment_mode'] ?? 'unpaid',
+              'payment_status': data['payment_status'] ?? 'unpaid',
+            }, where: 'id = ?', whereArgs: [targetOrderId]);
+          } else {
+            targetOrderId = await db.insert('orders', {
+              'cloud_order_id': cloudDocId,
+              'customer_id': localCustId,
+              'customer_name_snapshot': custName,
+              'customer_phone': incomingPhone,
+              'taken_by': incomingTakenBy,
+              'created_at': data['created_at'],
+              'status': data['status'],
+              'notes': data['notes'],
+              'estimate_total': data['estimate_total'],
+              'paid_amount': data['paid_amount'] ?? 0.0,
+              'payment_mode': data['payment_mode'] ?? 'unpaid',
+              'payment_status': data['payment_status'] ?? 'unpaid',
+            });
+          }
 
           // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
-          final existingStreamItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [orderId]);
+          final existingStreamItems = await db.query('order_items', columns: ['id'], where: 'order_id = ?', whereArgs: [targetOrderId]);
           for (final ei in existingStreamItems) {
             final eid = ei['id'] as int;
             await db.delete('order_item_options', where: 'order_item_id = ?', whereArgs: [eid]);
           }
-          await db.delete('order_items', where: 'order_id = ?', whereArgs: [orderId]);
+          await db.delete('order_items', where: 'order_id = ?', whereArgs: [targetOrderId]);
 
           final rawItems = data['items'] as List<dynamic>? ?? [];
           for (final rawItem in rawItems) {
@@ -847,12 +1021,13 @@ class ShopSyncService extends ChangeNotifier {
             });
             await db.insert('order_items', {
               'id': itemId,
-              'order_id': orderId,
+              'order_id': targetOrderId,
               'product_id': item['product_id'],
               'item_name': item['item_name'],
               'quantity_ordered': item['quantity_ordered'],
               'quantity_given': item['quantity_given'] ?? 0,
               'unit': item['unit'],
+              'unit_price': (item['unit_price'] as num?)?.toDouble() ?? 0.0,
               'status': item['status'],
               'is_other_item': item['is_other_item'] ?? 0,
               'procurement_status': item['procurement_status'],
@@ -933,7 +1108,47 @@ class ShopSyncService extends ChangeNotifier {
       notifyListeners();
     });
 
-    // 4. Device permissions live stream (for staff devices)
+    // 4. Payments live stream
+    _paymentsSub = firestore
+        .collection('shops')
+        .doc(shopCode)
+        .collection('payments')
+        .snapshots()
+        .listen((snapshot) async {
+      final db = await _dbHelper.database;
+      for (final change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added || change.type == DocumentChangeType.modified) {
+          final data = change.doc.data();
+          if (data == null) continue;
+          if (data['lastUpdatedByDevice'] == _deviceId) continue;
+
+          final cloudDocId = change.doc.id;
+          final existingPay = await db.query('customer_payments', where: 'cloud_payment_id = ?', whereArgs: [cloudDocId]);
+          if (existingPay.isNotEmpty) {
+            await db.update('customer_payments', {
+              'customer_id': data['customer_id'],
+              'amount': data['amount'],
+              'payment_mode': data['payment_mode'] ?? 'cash',
+              'notes': data['notes'],
+              'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+            }, where: 'id = ?', whereArgs: [existingPay.first['id']]);
+          } else {
+            await db.insert('customer_payments', {
+              'cloud_payment_id': cloudDocId,
+              'customer_id': data['customer_id'],
+              'amount': data['amount'],
+              'payment_mode': data['payment_mode'] ?? 'cash',
+              'notes': data['notes'],
+              'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+            });
+          }
+        }
+      }
+      _lastSyncTime = DateTime.now();
+      notifyListeners();
+    });
+
+    // 5. Device permissions live stream (for staff devices)
     if (_currentShop?.isOwner == false && _deviceId != null) {
       _deviceSub = firestore
           .collection('shops')
@@ -1130,25 +1345,50 @@ class ShopSyncService extends ChangeNotifier {
     }
   }
 
-  Future<void> updateShopName(String newName) async {
+  Future<void> updateShopProfileDetails({
+    String? shopName,
+    String? phone,
+    String? address,
+    String? gstin,
+    String? upiId,
+    String? digitalStamp,
+  }) async {
     if (_currentShop == null) return;
-    _currentShop = _currentShop!.copyWith(shopName: newName.trim());
+    _currentShop = _currentShop!.copyWith(
+      shopName: shopName?.trim() ?? _currentShop!.shopName,
+      ownerPhone: phone?.trim() ?? _currentShop!.ownerPhone,
+      address: address?.trim() ?? _currentShop!.address,
+      gstin: gstin?.trim() ?? _currentShop!.gstin,
+      upiId: upiId?.trim() ?? _currentShop!.upiId,
+      digitalStamp: digitalStamp?.trim() ?? _currentShop!.digitalStamp,
+    );
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopProfile, _currentShop!.toJson());
     if (_isFirebaseAvailable) {
       try {
+        final updateMap = <String, dynamic>{
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        if (shopName != null) updateMap['shopName'] = shopName.trim();
+        if (phone != null) updateMap['ownerPhone'] = phone.trim();
+        if (address != null) updateMap['address'] = address.trim();
+        if (gstin != null) updateMap['gstin'] = gstin.trim();
+        if (upiId != null) updateMap['upiId'] = upiId.trim();
+        if (digitalStamp != null) updateMap['digitalStamp'] = digitalStamp.trim();
+
         await FirebaseFirestore.instance
             .collection('shops')
             .doc(_currentShop!.shopCode)
-            .set({
-          'shopName': _currentShop!.shopName,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+            .set(updateMap, SetOptions(merge: true));
       } catch (e) {
-        debugPrint('Error updating shop name online: $e');
+        debugPrint('Error updating shop profile details online: $e');
       }
     }
     notifyListeners();
+  }
+
+  Future<void> updateShopName(String newName) async {
+    await updateShopProfileDetails(shopName: newName);
   }
 
   void _stopRealtimeListeners() {
@@ -1158,6 +1398,8 @@ class ShopSyncService extends ChangeNotifier {
     _productsSub = null;
     _customersSub?.cancel();
     _customersSub = null;
+    _paymentsSub?.cancel();
+    _paymentsSub = null;
     _deviceSub?.cancel();
     _deviceSub = null;
   }

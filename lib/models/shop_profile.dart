@@ -22,6 +22,8 @@ class ShopProfile {
     this.ownerName = '',
     this.address = '',
     this.gstin = '',
+    this.upiId = '',
+    this.digitalStamp = '',
     this.defaultGstRate = 18.0,
     this.role = 'owner', // 'owner' or 'staff'
     this.staffName = 'Counter 1',
@@ -37,6 +39,8 @@ class ShopProfile {
   final String ownerName;
   final String address;
   final String gstin;
+  final String upiId;
+  final String digitalStamp;
   final double defaultGstRate;
   final String role; // 'owner' or 'staff'
   final String staffName;
@@ -57,6 +61,8 @@ class ShopProfile {
     String? ownerName,
     String? address,
     String? gstin,
+    String? upiId,
+    String? digitalStamp,
     double? defaultGstRate,
     String? role,
     String? staffName,
@@ -72,6 +78,8 @@ class ShopProfile {
       ownerName: ownerName ?? this.ownerName,
       address: address ?? this.address,
       gstin: gstin ?? this.gstin,
+      upiId: upiId ?? this.upiId,
+      digitalStamp: digitalStamp ?? this.digitalStamp,
       defaultGstRate: defaultGstRate ?? this.defaultGstRate,
       role: role ?? this.role,
       staffName: staffName ?? this.staffName,
@@ -90,6 +98,8 @@ class ShopProfile {
       'ownerName': ownerName,
       'address': address,
       'gstin': gstin,
+      'upiId': upiId,
+      'digitalStamp': digitalStamp,
       'defaultGstRate': defaultGstRate,
       'role': role,
       'staffName': staffName,
@@ -108,6 +118,8 @@ class ShopProfile {
       ownerName: map['ownerName'] as String? ?? '',
       address: map['address'] as String? ?? '',
       gstin: map['gstin'] as String? ?? '',
+      upiId: map['upiId'] as String? ?? '',
+      digitalStamp: map['digitalStamp'] as String? ?? '',
       defaultGstRate: (map['defaultGstRate'] as num?)?.toDouble() ?? 18.0,
       role: map['role'] as String? ?? 'owner',
       staffName: map['staffName'] as String? ?? 'Counter 1',

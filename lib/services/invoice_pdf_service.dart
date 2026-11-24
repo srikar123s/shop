@@ -49,11 +49,11 @@ class InvoicePdfService {
           )
         : PdfPageFormat.a4;
 
-    pdf.addPage(
-      pw.Page(
-        pageFormat: pageFormat,
-        build: (pw.Context context) {
-          if (isThermal58mm) {
+    if (isThermal58mm) {
+      pdf.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          build: (pw.Context context) {
             return _buildThermalLayout(
               shopName: shopName,
               shopPhone: shopPhone,
@@ -69,11 +69,14 @@ class InvoicePdfService {
               digitalStamp: digitalStamp,
               customerBillNumber: customerBillNumber,
             );
-          }
-
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
+          },
+        ),
+      );
+    } else {
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: pageFormat,
+          build: (pw.Context context) => [
               // Header
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -282,7 +285,7 @@ class InvoicePdfService {
                 ),
               ],
 
-              pw.Spacer(),
+              pw.SizedBox(height: 20),
               pw.Divider(color: PdfColors.grey300),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -306,11 +309,19 @@ class InvoicePdfService {
                   ),
                 ],
               ),
+          ],
+          footer: (pw.Context context) => pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Page ${context.pageNumber} of ${context.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+              pw.Text('$shopName - $docTitle',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
             ],
-          );
-        },
-      ),
-    );
+          ),
+        ),
+      );
+    }
 
     return pdf.save();
   }

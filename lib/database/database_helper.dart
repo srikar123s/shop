@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -12,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 3;
+  static const int dbVersion = 4;
 
   Database? _database;
 
@@ -77,42 +78,6 @@ class DatabaseHelper {
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
         try {
-          await db.execute('ALTER TABLE orders ADD COLUMN customer_phone TEXT');
-        } catch (_) {}
-        try {
-          await db.execute('ALTER TABLE orders ADD COLUMN taken_by TEXT');
-        } catch (_) {}
-        try {
-          await db.execute('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
-        } catch (_) {}
-        try {
-          await db.execute("ALTER TABLE orders ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'unpaid'");
-        } catch (_) {}
-        try {
-          await db.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid'");
-        } catch (_) {}
-        try {
-          await db.execute("ALTER TABLE customers ADD COLUMN credit_limit REAL NOT NULL DEFAULT 0.0");
-        } catch (_) {}
-        try {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS customer_payments (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              customer_id INTEGER NOT NULL,
-              amount REAL NOT NULL,
-              payment_mode TEXT NOT NULL,
-              notes TEXT,
-              created_at TEXT NOT NULL,
-              FOREIGN KEY(customer_id) REFERENCES customers(id)
-            )
-          ''');
-        } catch (_) {}
-        try {
-          await db.execute(
-            "UPDATE orders SET taken_by = 'Srikar' WHERE taken_by IS NULL OR taken_by = '' OR taken_by = 'Store'",
-          );
-        } catch (_) {}
-        try {
           // Deduplicate order_item_options
           await db.execute('''
             DELETE FROM order_item_options
@@ -129,12 +94,6 @@ class DatabaseHelper {
             DELETE FROM order_item_options
             WHERE order_item_id NOT IN (SELECT id FROM order_items)
           ''');
-        } catch (_) {}
-        try {
-          await db.execute('ALTER TABLE products ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0');
-        } catch (_) {}
-        try {
-          await db.execute('ALTER TABLE products ADD COLUMN price_updated_at TEXT');
         } catch (_) {}
         await _seedInitialProducts(db);
       },
@@ -153,6 +112,72 @@ class DatabaseHelper {
       } catch (_) {}
       try {
         await db.execute('ALTER TABLE orders ADD COLUMN taken_by TEXT');
+      } catch (_) {}
+    }
+    if (oldVersion < 4) {
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE orders ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'unpaid'");
+      } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid'");
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE customers ADD COLUMN credit_limit REAL NOT NULL DEFAULT 0.0');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE products ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE products ADD COLUMN price_updated_at TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE order_items ADD COLUMN unit_price REAL NOT NULL DEFAULT 0.0');
+      } catch (_) {}
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS customer_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            payment_mode TEXT NOT NULL,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(customer_id) REFERENCES customers(id)
+          )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN cloud_order_id TEXT');
+        await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_cloud_id ON orders(cloud_order_id)');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE customer_payments ADD COLUMN cloud_payment_id TEXT');
+        await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_cloud_id ON customer_payments(cloud_payment_id)');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_order_items_unit_price ON order_items(unit_price)');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_customer_payments_customer_id ON customer_payments(customer_id)');
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id)');
+      } catch (_) {}
+      try {
+        final items = await db.query('order_items', columns: ['id', 'product_snapshot'], where: 'unit_price = 0');
+        for (final item in items) {
+          final snapRaw = item['product_snapshot'] as String?;
+          if (snapRaw != null && snapRaw.isNotEmpty) {
+            try {
+              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+              final price = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+              if (price > 0) {
+                await db.update('order_items', {'unit_price': price}, where: 'id = ?', whereArgs: [item['id']]);
+              }
+            } catch (_) {}
+          }
+        }
       } catch (_) {}
     }
   }
@@ -196,6 +221,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cloud_order_id TEXT UNIQUE,
         customer_id INTEGER NOT NULL,
         customer_name_snapshot TEXT NOT NULL,
         customer_phone TEXT,
@@ -204,6 +230,9 @@ class DatabaseHelper {
         status TEXT NOT NULL,
         notes TEXT,
         estimate_total REAL NOT NULL DEFAULT 0,
+        paid_amount REAL NOT NULL DEFAULT 0,
+        payment_mode TEXT NOT NULL DEFAULT 'unpaid',
+        payment_status TEXT NOT NULL DEFAULT 'unpaid',
         FOREIGN KEY(customer_id) REFERENCES customers(id)
       )
     ''');
@@ -217,6 +246,7 @@ class DatabaseHelper {
         quantity_ordered REAL NOT NULL,
         quantity_given REAL NOT NULL,
         unit TEXT NOT NULL,
+        unit_price REAL NOT NULL DEFAULT 0.0,
         status TEXT NOT NULL,
         is_other_item INTEGER NOT NULL DEFAULT 0,
         procurement_status TEXT NOT NULL,
@@ -237,6 +267,19 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE customer_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cloud_payment_id TEXT UNIQUE,
+        customer_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_mode TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(customer_id) REFERENCES customers(id)
+      )
+    ''');
+
     await db.execute(
       'CREATE INDEX idx_customers_name ON customers(name COLLATE NOCASE)',
     );
@@ -246,9 +289,17 @@ class DatabaseHelper {
     await db
         .execute('CREATE INDEX idx_orders_created_at ON orders(created_at)');
     await db.execute(
+      'CREATE INDEX idx_orders_customer_id ON orders(customer_id)',
+    );
+    await db.execute(
         'CREATE INDEX idx_order_items_order_id ON order_items(order_id)');
     await db.execute(
+        'CREATE INDEX idx_order_items_unit_price ON order_items(unit_price)');
+    await db.execute(
       'CREATE INDEX idx_order_item_options_item_id ON order_item_options(order_item_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_customer_payments_customer_id ON customer_payments(customer_id)',
     );
   }
 
@@ -459,6 +510,7 @@ class DatabaseHelper {
         oi.unit,
         oi.quantity_given,
         oi.quantity_ordered,
+        oi.unit_price,
         oi.product_snapshot,
         oi.order_id
       FROM order_items oi
@@ -478,13 +530,15 @@ class DatabaseHelper {
       final orderId = row['order_id'] as int?;
       final prodId = row['product_id'] as int?;
 
-      double unitPrice = 0.0;
-      final snapRaw = row['product_snapshot'] as String?;
-      if (snapRaw != null && snapRaw.isNotEmpty) {
-        try {
-          final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-          unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-        } catch (_) {}
+      double unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+      if (unitPrice == 0.0) {
+        final snapRaw = row['product_snapshot'] as String?;
+        if (snapRaw != null && snapRaw.isNotEmpty) {
+          try {
+            final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
       }
       final revenue = qty * unitPrice;
 
@@ -560,14 +614,16 @@ class DatabaseHelper {
     final customerId = order.first['customer_id'] as int?;
     if (added > 0.001 && customerId != null) {
       final now = DateTime.now().toIso8601String();
-      await db.insert('customer_payments', {
+      final pId = await db.insert('customer_payments', {
         'customer_id': customerId,
         'amount': added,
         'payment_mode': paymentMode.toLowerCase(),
         'notes': 'Payment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
         'created_at': now,
       });
+      unawaited(ShopSyncService.instance.syncPayment(pId));
     }
+    unawaited(ShopSyncService.instance.syncOrder(orderId));
   }
 
   Future<void> recordCustomerKhataPayment({
@@ -577,9 +633,10 @@ class DatabaseHelper {
     String? notes,
   }) async {
     final db = await database;
+    int? createdPaymentId;
     await db.transaction((txn) async {
       final now = DateTime.now().toIso8601String();
-      await txn.insert('customer_payments', {
+      createdPaymentId = await txn.insert('customer_payments', {
         'customer_id': customerId,
         'amount': amount,
         'payment_mode': paymentMode,
@@ -620,9 +677,13 @@ class DatabaseHelper {
             whereArgs: [orderId],
           );
           remainingToApply -= payingForThis;
+          unawaited(ShopSyncService.instance.syncOrder(orderId));
         }
       }
     });
+    if (createdPaymentId != null) {
+      unawaited(ShopSyncService.instance.syncPayment(createdPaymentId!));
+    }
   }
 
   Future<List<Map<String, dynamic>>> getCustomerKhataList() async {
@@ -633,78 +694,38 @@ class DatabaseHelper {
         c.name as customer_name,
         c.phone as customer_phone,
         COALESCE(c.credit_limit, 0.0) as credit_limit,
-        COALESCE((
-          SELECT SUM(o.estimate_total) 
-          FROM orders o 
-          WHERE o.customer_id = c.id 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-        ), 0.0) as total_billed,
-        COALESCE((
-          SELECT SUM(p.amount) 
-          FROM customer_payments p 
-          WHERE p.customer_id = c.id
-        ), 0.0) as total_paid,
-        (
-          SELECT COUNT(o.id) 
-          FROM orders o 
-          WHERE o.customer_id = c.id 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-        ) as order_count,
-        (
-          SELECT MAX(o.created_at) 
-          FROM orders o 
-          WHERE o.customer_id = c.id 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-        ) as last_order_date,
-        (
-          SELECT MAX(p.created_at) 
-          FROM customer_payments p 
-          WHERE p.customer_id = c.id
-        ) as last_payment_date,
-        (
-          SELECT p.payment_mode 
-          FROM customer_payments p 
-          WHERE p.customer_id = c.id 
-          ORDER BY p.created_at DESC 
-          LIMIT 1
-        ) as last_payment_mode,
-        MIN(CASE WHEN o.estimate_total > (o.paid_amount + 0.01) AND (LOWER(o.status) IN ('completed', 'closed')) THEN o.created_at ELSE NULL END) as oldest_unpaid_date
+        COALESCE(b.total_billed, 0.0) as total_billed,
+        COALESCE(p.total_paid, 0.0) as total_paid,
+        COALESCE(b.order_count, 0) as order_count,
+        b.last_order_date,
+        p.last_payment_date,
+        p.last_payment_mode,
+        b.oldest_unpaid_date
       FROM customers c
-      LEFT JOIN orders o ON c.id = o.customer_id
-      GROUP BY c.id
-      HAVING (
-        COALESCE((
-          SELECT SUM(o.estimate_total) 
-          FROM orders o 
-          WHERE o.customer_id = c.id 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-        ), 0.0) - 
-        COALESCE((
-          SELECT SUM(p.amount) 
-          FROM customer_payments p 
-          WHERE p.customer_id = c.id
-        ), 0.0)
-      ) > 0.01 
-      OR (
-        SELECT SUM(o.estimate_total) 
-        FROM orders o 
-        WHERE o.customer_id = c.id 
-          AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-      ) > 0 
-      OR credit_limit > 0
-      ORDER BY (
-        COALESCE((
-          SELECT SUM(o.estimate_total) 
-          FROM orders o 
-          WHERE o.customer_id = c.id 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
-        ), 0.0) - 
-        COALESCE((
-          SELECT SUM(p.amount) 
-          FROM customer_payments p 
-          WHERE p.customer_id = c.id
-        ), 0.0)
-      ) DESC, c.name ASC
+      LEFT JOIN (
+        SELECT 
+          customer_id,
+          SUM(estimate_total) as total_billed,
+          COUNT(id) as order_count,
+          MAX(created_at) as last_order_date,
+          MIN(CASE WHEN estimate_total > (paid_amount + 0.01) AND (LOWER(status) IN ('completed', 'closed')) THEN created_at ELSE NULL END) as oldest_unpaid_date
+        FROM orders
+        WHERE (LOWER(status) IN ('completed', 'closed') OR notes LIKE '%khata_debit%')
+        GROUP BY customer_id
+      ) b ON c.id = b.customer_id
+      LEFT JOIN (
+        SELECT 
+          p1.customer_id,
+          SUM(p1.amount) as total_paid,
+          MAX(p1.created_at) as last_payment_date,
+          (SELECT payment_mode FROM customer_payments p2 WHERE p2.customer_id = p1.customer_id ORDER BY p2.created_at DESC LIMIT 1) as last_payment_mode
+        FROM customer_payments p1
+        GROUP BY p1.customer_id
+      ) p ON c.id = p.customer_id
+      WHERE (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01 
+         OR COALESCE(b.total_billed, 0.0) > 0 
+         OR c.credit_limit > 0
+      ORDER BY (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) DESC, c.name ASC
     ''';
     final rows = await db.rawQuery(query);
     final now = DateTime.now();
@@ -973,17 +994,54 @@ class DatabaseHelper {
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
-    return await db.insert('orders', {
+    final customer = await db.query(
+      'customers',
+      where: 'id = ?',
+      whereArgs: [customerId],
+      limit: 1,
+    );
+    final customerName = customer.isNotEmpty
+        ? (customer.first['name'] as String? ?? 'Customer')
+        : 'Customer';
+    final customerPhone =
+        customer.isNotEmpty ? customer.first['phone'] as String? : null;
+    final effectiveTakenBy =
+        takenBy ?? ShopSyncService.instance.currentUserOrDeviceName;
+
+    final breakdownMap = {
+      'subtotal': amount,
+      'grandTotal': amount,
+      'applyGst': false,
+      'gstRate': 0.0,
+      'gstAmount': 0.0,
+      'otherCharges': <Map<String, dynamic>>[],
+      'otherChargesTotal': 0.0,
+      'applyDiscount': false,
+      'discountType': 'flat',
+      'discountValue': 0.0,
+      'discountAmount': 0.0,
+      'note': description,
+      'customerPhone': customerPhone,
+      'takenBy': effectiveTakenBy,
+      'type': 'khata_debit',
+      'description': description,
+    };
+
+    final newOrderId = await db.insert('orders', {
       'customer_id': customerId,
+      'customer_name_snapshot': customerName,
+      'customer_phone': customerPhone,
       'status': 'COMPLETED',
       'created_at': now,
-      'notes': jsonEncode({'type': 'khata_debit', 'description': description}),
-      'taken_by': takenBy ?? ShopSyncService.instance.currentUserOrDeviceName,
+      'notes': jsonEncode(breakdownMap),
+      'taken_by': effectiveTakenBy,
       'estimate_total': amount,
       'paid_amount': 0.0,
       'payment_mode': 'Khata',
       'payment_status': 'unpaid',
     });
+    unawaited(ShopSyncService.instance.syncOrder(newOrderId));
+    return newOrderId;
   }
 
   /// Calculates aggregated Khata metrics for the business dashboard

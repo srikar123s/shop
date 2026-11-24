@@ -37,6 +37,7 @@ class VoiceSearchService {
     BuildContext context, {
     String title = 'Voice Search',
     String hint = 'Say product or customer name...',
+    String initialLocale = 'en_IN',
   }) async {
     final available = await initialize();
     if (!context.mounted) return null;
@@ -53,6 +54,11 @@ class VoiceSearchService {
       return null;
     }
 
+    final currentLang = Localizations.localeOf(context).languageCode;
+    final defaultLocale = initialLocale != 'en_IN'
+        ? initialLocale
+        : (currentLang == 'te' ? 'te_IN' : 'en_IN');
+
     return showDialog<String>(
       context: context,
       barrierDismissible: true,
@@ -60,6 +66,7 @@ class VoiceSearchService {
         speech: _speech,
         title: title,
         hint: hint,
+        initialLocale: defaultLocale,
       ),
     );
   }
@@ -70,11 +77,13 @@ class _VoiceSearchDialog extends StatefulWidget {
     required this.speech,
     required this.title,
     required this.hint,
+    this.initialLocale = 'en_IN',
   });
 
   final stt.SpeechToText speech;
   final String title;
   final String hint;
+  final String initialLocale;
 
   @override
   State<_VoiceSearchDialog> createState() => _VoiceSearchDialogState();
@@ -87,10 +96,12 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
   String _recognizedText = '';
   bool _isListening = false;
   Timer? _silenceTimer;
+  late String _selectedLocale;
 
   @override
   void initState() {
     super.initState();
+    _selectedLocale = widget.initialLocale;
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -111,6 +122,16 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
     super.dispose();
   }
 
+  Future<void> _changeLocale(String loc) async {
+    _silenceTimer?.cancel();
+    await widget.speech.stop();
+    setState(() {
+      _selectedLocale = loc;
+      _recognizedText = '';
+    });
+    await _startListening();
+  }
+
   Future<void> _startListening() async {
     setState(() {
       _isListening = true;
@@ -119,6 +140,8 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
 
     try {
       await widget.speech.listen(
+        // ignore: deprecated_member_use
+        localeId: _selectedLocale,
         onResult: (result) {
           if (!mounted) return;
           setState(() {
@@ -190,7 +213,34 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              children: [
+                ChoiceChip(
+                  label: const Text('English', style: TextStyle(fontSize: 11)),
+                  selected: _selectedLocale == 'en_IN',
+                  onSelected: (val) {
+                    if (val) _changeLocale('en_IN');
+                  },
+                ),
+                ChoiceChip(
+                  label: const Text('తెలుగు', style: TextStyle(fontSize: 11)),
+                  selected: _selectedLocale == 'te_IN',
+                  onSelected: (val) {
+                    if (val) _changeLocale('te_IN');
+                  },
+                ),
+                ChoiceChip(
+                  label: const Text('हिन्दी', style: TextStyle(fontSize: 11)),
+                  selected: _selectedLocale == 'hi_IN',
+                  onSelected: (val) {
+                    if (val) _changeLocale('hi_IN');
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             ScaleTransition(
               scale: _pulseAnimation,
               child: GestureDetector(
