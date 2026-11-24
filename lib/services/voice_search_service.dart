@@ -125,6 +125,7 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
   Future<void> _changeLocale(String loc) async {
     _silenceTimer?.cancel();
     await widget.speech.stop();
+    if (!mounted) return;
     setState(() {
       _selectedLocale = loc;
       _recognizedText = '';

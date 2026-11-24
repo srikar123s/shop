@@ -53,7 +53,7 @@ class ShopProfile {
 
   bool get isOwner => role == 'owner';
   bool get isPending => status == 'pending';
-  bool get isApproved => status == 'approved' || status.isEmpty;
+  bool get isApproved => status.trim().toLowerCase() == 'approved';
   bool get isRejected => status == 'rejected';
 
   ShopProfile copyWith({
@@ -147,7 +147,7 @@ class StaffDevice {
     required this.deviceId,
     required this.staffName,
     this.role = 'staff',
-    this.status = 'approved', // 'pending', 'approved', 'rejected'
+    this.status = 'pending', // 'pending', 'approved', 'rejected'
     this.canChangePrice = true,
     this.canManageProducts = true,
     this.canCloseOrders = true,
@@ -171,7 +171,7 @@ class StaffDevice {
 
   bool get isOwner => role == 'owner';
   bool get isPending => status == 'pending';
-  bool get isApproved => status == 'approved' || status.isEmpty;
+  bool get isApproved => status.trim().toLowerCase() == 'approved';
   bool get isRejected => status == 'rejected';
 
   StaffDevice copyWith({

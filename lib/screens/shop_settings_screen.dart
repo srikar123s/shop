@@ -95,6 +95,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       context: context,
       initialTime: current,
     );
+    if (!mounted) return;
     if (picked != null) {
       onSaved(picked);
       setState(() {});
@@ -106,10 +107,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       context: context,
       initialTime: const TimeOfDay(hour: 12, minute: 0),
     );
+    if (!mounted) return;
     if (picked != null) {
       _pendingTimes.add(picked);
       _pendingTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      if (!mounted) return;
       setState(() {});
     }
   }
@@ -118,6 +121,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (index >= 0 && index < _pendingTimes.length) {
       _pendingTimes.removeAt(index);
       await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      if (!mounted) return;
       setState(() {});
     }
   }
@@ -127,10 +131,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       context: context,
       initialTime: const TimeOfDay(hour: 16, minute: 0),
     );
+    if (!mounted) return;
     if (picked != null) {
       _procurementTimes.add(picked);
       _procurementTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      if (!mounted) return;
       setState(() {});
     }
   }
@@ -139,6 +145,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (index >= 0 && index < _procurementTimes.length) {
       _procurementTimes.removeAt(index);
       await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      if (!mounted) return;
       setState(() {});
     }
   }
@@ -161,57 +168,62 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
 
   Future<void> _editShopNameDialog() async {
     final controller = TextEditingController(text: _customService.shopName);
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Change Shop Name',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This shop name will appear on the top bar, WhatsApp shares, and printed/image receipts.',
-              style: TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Shop Name',
-                hintText: 'e.g. Sri Sai Hardware, YKR Traders',
-                border: OutlineInputBorder(),
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Change Shop Name',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This shop name will appear on the top bar, WhatsApp shares, and printed/image receipts.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
               ),
-              autofocus: true,
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Shop Name',
+                  hintText: 'e.g. Sri Sai Hardware, YKR Traders',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('SAVE'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('CANCEL'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
+      );
+
+      final text = controller.text.trim();
+      if (saved == true && text.isNotEmpty) {
+        await _customService.setShopName(text);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Shop name updated to "$text"!'),
               backgroundColor: const Color(0xFF0F766E),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('SAVE'),
-          ),
-        ],
-      ),
-    );
-
-    if (saved == true && controller.text.trim().isNotEmpty) {
-      await _customService.setShopName(controller.text.trim());
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Shop name updated to "${controller.text.trim()}"!'),
-            backgroundColor: const Color(0xFF0F766E),
-          ),
-        );
+          );
+        }
       }
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -224,46 +236,51 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     TextInputType? keyboardType,
   }) async {
     final controller = TextEditingController(text: initialValue);
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          decoration: InputDecoration(
-            labelText: label,
-            hintText: hint,
-            border: const OutlineInputBorder(),
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            decoration: InputDecoration(
+              labelText: label,
+              hintText: hint,
+              border: const OutlineInputBorder(),
+            ),
+            autofocus: true,
           ),
-          autofocus: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('SAVE'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('CANCEL'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
+      );
+
+      final text = controller.text.trim();
+      if (saved == true) {
+        await onSave(text);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$title updated!'),
               backgroundColor: const Color(0xFF0F766E),
             ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('SAVE'),
-          ),
-        ],
-      ),
-    );
-
-    if (saved == true) {
-      await onSave(controller.text.trim());
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$title updated!'),
-            backgroundColor: const Color(0xFF0F766E),
-          ),
-        );
+          );
+        }
       }
+    } finally {
+      controller.dispose();
     }
   }
 
@@ -508,13 +525,24 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                             : Colors.grey),
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => _editFieldDialog(
-                    title: 'UPI ID for Scan & Pay',
-                    label: 'UPI ID (e.g. 9392449356@ybl)',
-                    hint: 'merchant@oksbi or 9876543210@paytm',
-                    initialValue: _customService.upiId,
-                    onSave: _customService.setUpiId,
-                  ),
+                  onTap: () {
+                    if (!ShopSyncService.instance.isOwner) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Permission Denied: Only Shop Owner can edit UPI Payment settings.'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+                    _editFieldDialog(
+                      title: 'UPI ID for Scan & Pay',
+                      label: 'UPI ID (e.g. 9392449356@ybl)',
+                      hint: 'merchant@oksbi or 9876543210@paytm',
+                      initialValue: _customService.upiId,
+                      onSave: _customService.setUpiId,
+                    );
+                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -724,6 +752,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   value: _remindersEnabled,
                   onChanged: (val) async {
                     await AppNotificationService.instance.setEnabled(val);
+                    if (!mounted) return;
                     setState(() => _remindersEnabled = val);
                   },
                 ),
@@ -757,6 +786,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setPendingOrdersEnabled(val);
+                                if (!mounted) return;
                                 setState(() => _pendingOrdersEnabled = val);
                               },
                             ),
@@ -783,6 +813,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('scheduled');
+                                    if (!mounted) return;
                                     setState(() => _pendingMode = 'scheduled');
                                   }
                                 },
@@ -794,6 +825,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('hourly');
+                                    if (!mounted) return;
                                     setState(() => _pendingMode = 'hourly');
                                   }
                                 },
@@ -805,6 +837,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('two_hours');
+                                    if (!mounted) return;
                                     setState(() => _pendingMode = 'two_hours');
                                   }
                                 },
@@ -844,6 +877,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                         await AppNotificationService.instance
                                             .setPendingOrdersTimes(
                                                 _pendingTimes);
+                                        if (!mounted) return;
                                         setState(() {});
                                       },
                                     ),
@@ -899,6 +933,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setProcurementEnabled(val);
+                                if (!mounted) return;
                                 setState(() => _procurementEnabled = val);
                               },
                             ),
@@ -937,6 +972,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                       await AppNotificationService.instance
                                           .setProcurementTimes(
                                               _procurementTimes);
+                                      if (!mounted) return;
                                       setState(() {});
                                     },
                                   ),
@@ -983,6 +1019,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setDailyReportEnabled(val);
+                                if (!mounted) return;
                                 setState(() => _dailyReportEnabled = val);
                               },
                             ),
@@ -1006,6 +1043,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                 _dailyReportTime = t;
                                 await AppNotificationService.instance
                                     .setDailyReportTime(t);
+                                if (!mounted) return;
                                 setState(() {});
                               },
                             ),
@@ -1042,6 +1080,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                       onChanged: (val) async {
                         await AppNotificationService.instance
                             .setPriceCautionEnabled(val);
+                        if (!mounted) return;
                         setState(() => _priceCautionEnabled = val);
                       },
                     ),
@@ -1094,6 +1133,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPriceCautionDays(d);
+                                    if (!mounted) return;
                                     setState(() => _priceCautionDays = d);
                                   }
                                 },

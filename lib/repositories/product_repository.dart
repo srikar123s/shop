@@ -9,6 +9,18 @@ class ProductRepository {
 
   final DatabaseHelper _databaseHelper;
 
+  /// Evaluates singular/plural and root word equivalence between product names.
+  static bool isProductMatch(String dbName, String searchName) {
+    final a = dbName.trim().toLowerCase();
+    final b = searchName.trim().toLowerCase();
+    if (a == b) return true;
+    if ('${a}s' == b || '${b}s' == a) return true;
+    if ('${a}es' == b || '${b}es' == a) return true;
+    if (a.endsWith('ies') && b == '${a.substring(0, a.length - 3)}y') return true;
+    if (b.endsWith('ies') && a == '${b.substring(0, b.length - 3)}y') return true;
+    return false;
+  }
+
   Future<List<Product>> searchProducts(String query) async {
     final db = await _databaseHelper.database;
     final normalized = query.trim().toLowerCase();
@@ -75,37 +87,30 @@ class ProductRepository {
       final nowIso = DateTime.now().toIso8601String();
       final mapData = product.toMap();
       mapData['price_updated_at'] = nowIso;
-      await db.update(
+      final affected = await db.update(
         'products',
         mapData,
         where: 'id = ?',
         whereArgs: [product.id],
       );
+      if (affected == 0) {
+        await db.insert('products', mapData);
+      }
       final updatedProduct = product.copyWith(priceUpdatedAt: DateTime.tryParse(nowIso));
-      unawaited(ShopSyncService.instance.syncProduct(updatedProduct));
+      unawaited(ShopSyncService.instance.syncProduct(updatedProduct).catchError((e) {
+        debugPrint('Error syncing product: $e');
+      }));
       return product.id!;
     }
 
-    // 2. Check if product with same or singular/plural name already exists
-    final existingRows = await db.query('products');
-    int? matchedId;
-    for (final row in existingRows) {
-      final dbName = (row['name'] as String).trim().toLowerCase();
-      if (dbName == lowerName) {
-        matchedId = row['id'] as int;
-        break;
-      }
-      // Check clean singular/plural match (e.g., Paint vs Paints, Box vs Boxes, Battery vs Batteries)
-      if ('${dbName}s' == lowerName ||
-          '${lowerName}s' == dbName ||
-          '${dbName}es' == lowerName ||
-          '${lowerName}es' == dbName ||
-          (dbName.endsWith('ies') && lowerName == '${dbName.substring(0, dbName.length - 3)}y') ||
-          (lowerName.endsWith('ies') && dbName == '${lowerName.substring(0, lowerName.length - 3)}y')) {
-        matchedId = row['id'] as int;
-        break;
-      }
-    }
+    // 2. Check if product with same name already exists using fast query
+    final exactMatch = await db.query(
+      'products',
+      where: 'LOWER(TRIM(name)) = ?',
+      whereArgs: [lowerName],
+      limit: 1,
+    );
+    int? matchedId = exactMatch.isNotEmpty ? (exactMatch.first['id'] as int) : null;
 
     int savedId;
     if (matchedId != null) {
@@ -115,6 +120,7 @@ class ProductRepository {
         {
           'name': trimmedName,
           'category': product.category,
+          'is_active': product.isActive ? 1 : 0,
           'configuration': mapData['configuration'],
           'price_updated_at': DateTime.now().toIso8601String(),
           'needs_review': product.needsReview ? 1 : 0,
@@ -134,7 +140,13 @@ class ProductRepository {
     }
 
     unawaited(getProductById(savedId).then((p) {
-      if (p != null) ShopSyncService.instance.syncProduct(p);
+      if (p != null) {
+        ShopSyncService.instance.syncProduct(p).catchError((e) {
+          debugPrint('Error syncing product $savedId: $e');
+        });
+      }
+    }).catchError((e) {
+      debugPrint('Error loading product $savedId for sync: $e');
     }));
 
     return savedId;
@@ -160,13 +172,31 @@ class ProductRepository {
       whereArgs: [id],
     );
     unawaited(getProductById(id).then((p) {
-      if (p != null) ShopSyncService.instance.syncProduct(p);
+      if (p != null) {
+        ShopSyncService.instance.syncProduct(p).catchError((e) {
+          debugPrint('Error syncing reviewed product: $e');
+        });
+      }
+    }).catchError((e) {
+      debugPrint('Error getting reviewed product: $e');
     }));
   }
 
   Future<int> getStalePriceCount({int thresholdDays = 30}) async {
-    final products = await getStalePricedProducts(thresholdDays: thresholdDays);
-    return products.length;
+    final db = await _databaseHelper.database;
+    final cutoff = DateTime.now().subtract(Duration(days: thresholdDays)).toIso8601String();
+    final res = await db.rawQuery('''
+      SELECT COUNT(*) as count FROM products
+      WHERE is_active = 1
+        AND (
+          COALESCE(price_updated_at, created_at) < ?
+          OR (price_updated_at IS NULL AND created_at IS NULL)
+        )
+    ''', [cutoff]);
+    if (res.isNotEmpty && res.first['count'] != null) {
+      return (res.first['count'] as num).toInt();
+    }
+    return 0;
   }
 
   Future<List<Product>> getStalePricedProducts({int thresholdDays = 30}) async {
@@ -189,7 +219,13 @@ class ProductRepository {
       whereArgs: [id],
     );
     unawaited(getProductById(id).then((p) {
-      if (p != null) ShopSyncService.instance.syncProduct(p);
+      if (p != null) {
+        ShopSyncService.instance.syncProduct(p).catchError((e) {
+          debugPrint('Error syncing confirmed product: $e');
+        });
+      }
+    }).catchError((e) {
+      debugPrint('Error fetching product for confirm sync: $e');
     }));
   }
 
@@ -202,21 +238,37 @@ class ProductRepository {
       whereArgs: [id],
     );
     unawaited(getProductById(id).then((p) {
-      if (p != null) ShopSyncService.instance.syncProduct(p);
+      if (p != null) {
+        ShopSyncService.instance.syncProduct(p).catchError((e) {
+          debugPrint('Error syncing active product: $e');
+        });
+      }
+    }).catchError((e) {
+      debugPrint('Error fetching product for active sync: $e');
     }));
   }
 
   Future<void> deleteProduct(int id) async {
     final db = await _databaseHelper.database;
-    await db.delete(
-      'products',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.transaction((txn) async {
+      await txn.delete(
+        'product_options',
+        where: 'product_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'products',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
   }
 
   Future<void> deleteAllProducts() async {
     final db = await _databaseHelper.database;
-    await db.delete('products');
+    await db.transaction((txn) async {
+      await txn.delete('product_options');
+      await txn.delete('products');
+    });
   }
 }

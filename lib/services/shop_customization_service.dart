@@ -62,6 +62,7 @@ class ShopCustomizationService extends ChangeNotifier {
     if (_isInitialized) return;
     try {
       final prefs = await SharedPreferences.getInstance();
+      _pureOfflineMode = prefs.getBool(_prefKeyOfflineMode) ?? false;
       _shopName = prefs.getString(_prefKeyShopName) ??
           ShopSyncService.instance.currentShop?.shopName ??
           (isPureOfflineMode ? 'Shop Retail' : 'Shop Wholesale');
@@ -195,7 +196,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyUpiId, _upiId);
     if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
-      unawaited(ShopSyncService.instance.updateShopProfileDetails(upiId: _upiId));
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(upiId: _upiId).catchError((e) {
+        debugPrint('Error updating shop UPI ID: $e');
+      }));
     }
     notifyListeners();
   }
@@ -205,7 +208,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopPhone, _shopPhone);
     if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
-      unawaited(ShopSyncService.instance.updateShopProfileDetails(phone: _shopPhone));
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(phone: _shopPhone).catchError((e) {
+        debugPrint('Error updating shop phone: $e');
+      }));
     }
     notifyListeners();
   }
@@ -215,7 +220,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopAddress, _shopAddress);
     if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
-      unawaited(ShopSyncService.instance.updateShopProfileDetails(address: _shopAddress));
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(address: _shopAddress).catchError((e) {
+        debugPrint('Error updating shop address: $e');
+      }));
     }
     notifyListeners();
   }
@@ -225,7 +232,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyGstin, _gstin);
     if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
-      unawaited(ShopSyncService.instance.updateShopProfileDetails(gstin: _gstin));
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(gstin: _gstin).catchError((e) {
+        debugPrint('Error updating shop GSTIN: $e');
+      }));
     }
     notifyListeners();
   }
@@ -235,7 +244,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyDigitalStamp, _digitalStamp);
     if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
-      unawaited(ShopSyncService.instance.updateShopProfileDetails(digitalStamp: _digitalStamp));
+      unawaited(ShopSyncService.instance.updateShopProfileDetails(digitalStamp: _digitalStamp).catchError((e) {
+        debugPrint('Error updating shop digital stamp: $e');
+      }));
     }
     notifyListeners();
   }

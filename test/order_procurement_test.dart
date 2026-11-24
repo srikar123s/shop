@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shop/models/order.dart';
+import 'package:shop/repositories/product_repository.dart';
 
 void main() {
   group('OrderItemEntity & Procurement Tests', () {
@@ -54,29 +55,18 @@ void main() {
       expect(order.isFullyPaid, isTrue);
     });
 
-    test('Singular / plural word matching preserves root letters in words like Brass, Glass, Steel', () {
-      bool isProductMatch(String dbName, String searchName) {
-        final a = dbName.trim().toLowerCase();
-        final b = searchName.trim().toLowerCase();
-        if (a == b) return true;
-        if ('${a}s' == b || '${b}s' == a) return true;
-        if ('${a}es' == b || '${b}es' == a) return true;
-        if (a.endsWith('ies') && b == '${a.substring(0, a.length - 3)}y') return true;
-        if (b.endsWith('ies') && a == '${b.substring(0, b.length - 3)}y') return true;
-        return false;
-      }
-
+    test('ProductRepository.isProductMatch preserves root letters in words like Brass, Glass, Steel', () {
       // Plurals with -s and -es
-      expect(isProductMatch('screw', 'screws'), isTrue);
-      expect(isProductMatch('pipe', 'pipes'), isTrue);
-      expect(isProductMatch('box', 'boxes'), isTrue);
-      expect(isProductMatch('battery', 'batteries'), isTrue);
+      expect(ProductRepository.isProductMatch('screw', 'screws'), isTrue);
+      expect(ProductRepository.isProductMatch('pipe', 'pipes'), isTrue);
+      expect(ProductRepository.isProductMatch('box', 'boxes'), isTrue);
+      expect(ProductRepository.isProductMatch('battery', 'batteries'), isTrue);
 
       // Root words ending in 's' should never falsely match stripped words
-      expect(isProductMatch('brass', 'bra'), isFalse);
-      expect(isProductMatch('glass', 'gla'), isFalse);
-      expect(isProductMatch('brass', 'brass'), isTrue);
-      expect(isProductMatch('stainless steel', 'stainless steel'), isTrue);
+      expect(ProductRepository.isProductMatch('brass', 'bra'), isFalse);
+      expect(ProductRepository.isProductMatch('glass', 'gla'), isFalse);
+      expect(ProductRepository.isProductMatch('brass', 'brass'), isTrue);
+      expect(ProductRepository.isProductMatch('stainless steel', 'stainless steel'), isTrue);
     });
   });
 }

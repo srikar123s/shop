@@ -52,6 +52,9 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
       if (!mounted) return;
       setState(() {
         _items = items;
+        if (_selectedCategory != 'ALL' && !_categories.contains(_selectedCategory)) {
+          _selectedCategory = 'ALL';
+        }
         _loading = false;
       });
     } catch (e, stack) {
@@ -190,11 +193,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
     } else if (await canLaunchUrl(webUrl)) {
       await launchUrl(webUrl, mode: LaunchMode.externalApplication);
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open WhatsApp.')),
-        );
-      }
+      await Share.share(sb.toString(), subject: 'Procurement List');
     }
   }
 

@@ -33,6 +33,9 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
     _selected =
         Map<String, String>.from(widget.initial?.options ?? <String, String>{});
     _quantity = widget.initial?.quantity ?? 1;
+    _step = (widget.initial != null && widget.initial!.options.isNotEmpty)
+        ? _steps.length
+        : 0;
     _unit = widget.initial?.unit ??
         widget.product.configuration.defaultUnit ??
         (widget.product.configuration.unitOptions.isNotEmpty
@@ -53,7 +56,14 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
   }
 
   double _calculateUnitPrice() {
-    final factor = widget.product.configuration.unitConversions[_unit] ?? 1.0;
+    final config = widget.product.configuration;
+    final defaultUnit = config.defaultUnit;
+    final baseFactor = (defaultUnit != null && defaultUnit.isNotEmpty)
+        ? (config.unitConversions[defaultUnit] ?? 1.0)
+        : 1.0;
+    final currentFactor = config.unitConversions[_unit] ?? 1.0;
+    final factor = currentFactor / (baseFactor <= 0 ? 1.0 : baseFactor);
+
     final comboKey = _selected.values.where((v) => v.isNotEmpty).join(' • ');
     final variantPrices = widget.product.configuration.variantPrices;
 

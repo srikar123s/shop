@@ -219,8 +219,19 @@ class ExcelProductService {
     final rawHeaders = rows[headerRowIndex].map((h) => h.trim().toLowerCase()).toList();
 
     int findHeaderIndex(List<String> variants) {
+      // 1. Try exact match first
       for (final v in variants) {
-        final idx = rawHeaders.indexWhere((h) => h == v || h.contains(v));
+        final idx = rawHeaders.indexWhere((h) => h == v);
+        if (idx != -1) return idx;
+      }
+      // 2. Try contains, avoiding 'unit' matching 'unit price', 'unit conversion', etc.
+      for (final v in variants) {
+        final idx = rawHeaders.indexWhere((h) {
+          if (v == 'unit' && (h.contains('price') || h.contains('conversion') || h.contains('factor'))) {
+            return false;
+          }
+          return h.contains(v);
+        });
         if (idx != -1) return idx;
       }
       return -1;
@@ -340,8 +351,13 @@ class ExcelProductService {
               unitOptionsSet.add(uLeft);
               unitOptionsSet.add(uRight);
 
-              unitConversions[uLeft] = factor;
-              unitConversions.putIfAbsent(uRight, () => 1.0);
+              if (defaultUnit.isNotEmpty && normalizeUnit(defaultUnit) == uLeft) {
+                unitConversions[uLeft] = 1.0;
+                unitConversions[uRight] = 1.0 / (factor > 0 ? factor : 1.0);
+              } else {
+                unitConversions[uLeft] = factor;
+                unitConversions.putIfAbsent(uRight, () => 1.0);
+              }
             }
           }
         }

@@ -182,9 +182,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               );
+              if (!mounted) return;
               setState(() {
-                                _refreshData();
-                              });
+                _refreshData();
+              });
             },
           ),
           if (!ShopCustomizationService.instance.isPureOfflineMode &&
@@ -198,9 +199,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute<void>(
                       builder: (_) => const ShopSyncScreen()),
                 );
+                if (!mounted) return;
                 setState(() {
-                                _refreshData();
-                              });
+                  _refreshData();
+                });
               },
               icon: Stack(
                 clipBehavior: Clip.none,
@@ -235,9 +237,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               );
+              if (!mounted) return;
               setState(() {
-                                _refreshData();
-                              });
+                _refreshData();
+              });
             },
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -315,9 +318,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {
-                                _refreshData();
-                              });
+                              if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                             },
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -446,9 +450,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {
-                                _refreshData();
-                              });
+                              if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                             },
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -569,9 +574,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         );
-                        setState(() {
-                                _refreshData();
-                              });
+                        if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                       },
                       child: Padding(
                         padding: const EdgeInsets.all(20),
@@ -680,9 +686,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {
-                                _refreshData();
-                              });
+                              if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -770,9 +777,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {
-                                _refreshData();
-                              });
+                              if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -851,9 +859,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           );
-                          setState(() {
-                                _refreshData();
-                              });
+                          if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -903,9 +912,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           );
-                          setState(() {
-                                _refreshData();
-                              });
+                          if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -1029,9 +1039,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       );
-                      setState(() {
-                                _refreshData();
-                              });
+                      if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                     },
                     child: const Text('View All',
                         style: TextStyle(fontWeight: FontWeight.w700)),
@@ -1049,6 +1060,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Error loading recent orders: ${snapshot.error}',
+                          style: TextStyle(color: Colors.red.shade700),
+                        ),
                       ),
                     );
                   }
@@ -1094,7 +1116,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               order.takenBy!.trim().isNotEmpty &&
                               order.takenBy!.trim() != 'Store')
                           ? order.takenBy!.trim()
-                          : ShopSyncService.instance.currentUserOrDeviceName;
+                          : 'Store';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Card(
@@ -1114,9 +1136,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {
-                                _refreshData();
-                              });
+                              if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(14),
@@ -1291,9 +1314,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     );
-                    setState(() {
-                                _refreshData();
-                              });
+                    if (!mounted) return;
+              setState(() {
+                _refreshData();
+              });
                   },
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

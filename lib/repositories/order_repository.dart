@@ -53,6 +53,10 @@ class OrderRepository {
                   takenBy: effectiveTakenBy,
                 ).toMap());
 
+      final calculatedSubtotal = draftOrder.items.fold<double>(
+          0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity);
+      final calculatedGrandTotal = billBreakdown?.grandTotal ?? calculatedSubtotal;
+
       final orderId = await txn.insert('orders', {
         'customer_id': draftOrder.customer.id,
         'customer_name_snapshot': draftOrder.customer.name,
@@ -61,7 +65,7 @@ class OrderRepository {
         'created_at': now.toIso8601String(),
         'status': orderStatusLabel(OrderStatus.pending),
         'notes': notes,
-        'estimate_total': estimateTotal ?? draftOrder.estimateTotal ?? 0,
+        'estimate_total': estimateTotal ?? draftOrder.estimateTotal ?? calculatedGrandTotal,
       });
 
       for (final item in draftOrder.items) {
@@ -102,7 +106,9 @@ class OrderRepository {
       return orderId;
     });
 
-    unawaited(ShopSyncService.instance.syncOrder(createdOrderId));
+    unawaited(ShopSyncService.instance.syncOrder(createdOrderId).catchError((e) {
+      debugPrint('Error syncing order in createOrder: $e');
+    }));
     return createdOrderId;
   }
 
@@ -220,7 +226,9 @@ class OrderRepository {
         whereArgs: <Object?>[orderId],
       );
     });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in addItemsToOrder: $e');
+    }));
   }
 
   Future<List<OrderSummary>> searchOrderSummaries(String query) async {
@@ -408,7 +416,12 @@ class OrderRepository {
           applyGst: existingBreakdown.applyGst,
           gstRate: existingBreakdown.gstRate,
           otherCharges: existingBreakdown.otherCharges,
-          note: 'All items marked as delivered and completed.',
+          applyDiscount: existingBreakdown.applyDiscount,
+          discountType: existingBreakdown.discountType,
+          discountValue: existingBreakdown.discountValue,
+          customerPhone: existingBreakdown.customerPhone,
+          takenBy: existingBreakdown.takenBy,
+          note: existingBreakdown.note ?? 'All items marked as delivered and completed.',
         );
       } else {
         newBreakdown = BillBreakdown.calculate(
@@ -428,7 +441,9 @@ class OrderRepository {
         whereArgs: [orderId],
       );
     });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in addItemsToOrder: $e');
+    }));
   }
 
   /// Closes an order billing ONLY the items that were actually given.
@@ -551,7 +566,9 @@ class OrderRepository {
         whereArgs: [orderId],
       );
     });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in addItemsToOrder: $e');
+    }));
   }
 
   Future<void> closeOrder(int orderId) async {
@@ -572,7 +589,9 @@ class OrderRepository {
       where: 'id = ?',
       whereArgs: [orderId],
     );
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in addItemsToOrder: $e');
+    }));
   }
 
 
@@ -710,7 +729,11 @@ class OrderRepository {
           where: 'id = ?',
           whereArgs: [orderId],
         ).then((_) {
-          ShopSyncService.instance.syncOrder(orderId);
+          ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+            debugPrint('Error syncing healed order: $e');
+          });
+        }).catchError((e) {
+          debugPrint('Error updating healed order: $e');
         }));
       }
     }
@@ -724,7 +747,6 @@ class OrderRepository {
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
-      double newEstimateTotal = 0;
       for (final item in items) {
         final status =
             _statusFromGiven(item.quantityOrdered, item.quantityGiven);
@@ -732,7 +754,6 @@ class OrderRepository {
         final procurement = notGiven > 0.001
             ? ProcurementStatus.toProcure
             : ProcurementStatus.notRequired;
-        newEstimateTotal += item.unitPrice * item.quantityGiven;
         await txn.update(
           'order_items',
           {
@@ -746,30 +767,59 @@ class OrderRepository {
         );
       }
 
-      final statuses = items
-          .map((e) => _statusFromGiven(e.quantityOrdered, e.quantityGiven))
-          .toList();
+      // Fetch all items belonging to this order to calculate true total and status
+      final allDbItems = await txn.query(
+        'order_items',
+        where: 'order_id = ?',
+        whereArgs: [orderId],
+      );
 
-      final updateData = <String, Object?>{
-        'status': orderStatusLabel(_calculateOrderStatus(statuses)),
-      };
-      if (newEstimateTotal > 0) {
-        updateData['estimate_total'] = newEstimateTotal;
-        final orderRows = await txn.query('orders',
-            columns: ['notes'], where: 'id = ?', whereArgs: [orderId]);
-        if (orderRows.isNotEmpty) {
-          final existingNotes = orderRows.first['notes'] as String?;
-          final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
-          if (existingBreakdown != null) {
-            final updatedBreakdown = BillBreakdown.calculate(
-              subtotal: newEstimateTotal,
-              applyGst: existingBreakdown.applyGst,
-              gstRate: existingBreakdown.gstRate,
-              otherCharges: existingBreakdown.otherCharges,
-            );
-            updateData['notes'] = jsonEncode(updatedBreakdown.toMap());
-            updateData['estimate_total'] = updatedBreakdown.grandTotal;
+      double allItemsSubtotal = 0;
+      final allStatuses = <ItemStatus>[];
+      for (final row in allDbItems) {
+        final qGiven = (row['quantity_given'] as num?)?.toDouble() ?? 0.0;
+        final qOrd = (row['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
+        double uPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+        if (uPrice <= 0.0) {
+          final snapRaw = row['product_snapshot'] as String?;
+          if (snapRaw != null && snapRaw.isNotEmpty) {
+            try {
+              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
+              uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+            } catch (_) {}
           }
+        }
+        allItemsSubtotal += uPrice * qGiven;
+        allStatuses.add(_statusFromGiven(qOrd, qGiven));
+      }
+
+      final calculatedStatus = _calculateOrderStatus(allStatuses);
+      final updateData = <String, Object?>{
+        'status': orderStatusLabel(calculatedStatus),
+      };
+
+      final orderRows = await txn.query('orders',
+          columns: ['notes'], where: 'id = ?', whereArgs: [orderId]);
+      if (orderRows.isNotEmpty) {
+        final existingNotes = orderRows.first['notes'] as String?;
+        final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
+        if (existingBreakdown != null) {
+          final updatedBreakdown = BillBreakdown.calculate(
+            subtotal: allItemsSubtotal,
+            applyGst: existingBreakdown.applyGst,
+            gstRate: existingBreakdown.gstRate,
+            otherCharges: existingBreakdown.otherCharges,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
+            customerPhone: existingBreakdown.customerPhone,
+            takenBy: existingBreakdown.takenBy,
+            note: existingBreakdown.note,
+          );
+          updateData['notes'] = jsonEncode(updatedBreakdown.toMap());
+          updateData['estimate_total'] = updatedBreakdown.grandTotal;
+        } else if (allItemsSubtotal > 0) {
+          updateData['estimate_total'] = allItemsSubtotal;
         }
       }
 
@@ -780,7 +830,9 @@ class OrderRepository {
         whereArgs: [orderId],
       );
     });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order: $e');
+    }));
   }
 
 
@@ -942,35 +994,45 @@ class OrderRepository {
           : 0.0;
       final effectiveGiven = customQuantityGiven ?? ordered;
 
+      final status = _statusFromGiven(ordered, effectiveGiven);
+      final procurementStatus = effectiveGiven < ordered
+          ? ProcurementStatus.toProcure
+          : ProcurementStatus.notRequired;
+
       await txn.update(
         'order_items',
         {
-          'procurement_status': ProcurementStatus.notRequired.name,
+          'procurement_status': procurementStatus.name,
           'quantity_given': effectiveGiven,
-          'status': itemStatusLabel(ItemStatus.given),
+          'status': itemStatusLabel(status),
         },
         where: 'id = ?',
         whereArgs: [itemId],
       );
 
-      // Check if all items in the order are now fulfilled
+      // Check all items in the order to determine true fulfillment status
       final allItems = await txn.query(
         'order_items',
         where: 'order_id = ?',
         whereArgs: [orderId],
       );
-      final allGiven = allItems.every((i) =>
-          (i['status'] as String?) == itemStatusLabel(ItemStatus.given));
-      if (allGiven && allItems.isNotEmpty) {
-        await txn.update(
-          'orders',
-          {'status': orderStatusLabel(OrderStatus.completed)},
-          where: 'id = ?',
-          whereArgs: [orderId],
-        );
-      }
+      final itemStatuses = allItems.map((i) {
+        final ord = (i['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
+        final giv = (i['quantity_given'] as num?)?.toDouble() ?? 0.0;
+        return _statusFromGiven(ord, giv);
+      }).toList();
+
+      final newOrderStatus = _calculateOrderStatus(itemStatuses);
+      await txn.update(
+        'orders',
+        {'status': orderStatusLabel(newOrderStatus)},
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
     });
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in addItemsToOrder: $e');
+    }));
   }
 
   /// Marks ALL currently pending items across all open orders as procured in the procurement list.
@@ -992,7 +1054,7 @@ class OrderRepository {
   }
 
   ItemStatus _itemStatusFromLabel(String label) {
-    switch (label) {
+    switch (label.toUpperCase().trim()) {
       case 'GIVEN':
         return ItemStatus.given;
       case 'PARTIAL':
@@ -1010,7 +1072,7 @@ class OrderRepository {
   }
 
   OrderStatus _orderStatusFromLabel(String label) {
-    switch (label) {
+    switch (label.toUpperCase().trim()) {
       case 'COMPLETED':
         return OrderStatus.completed;
       case 'PARTIALLY COMPLETED':

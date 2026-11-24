@@ -361,7 +361,8 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     String paymentMode = 'Cash';
     bool sendWhatsAppReceipt = false;
 
-    final received = await showDialog<bool>(
+    try {
+      final received = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDState) => AlertDialog(
@@ -581,8 +582,8 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
       double amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
       if (amount <= 0) return;
 
-      if (amount > balanceDue && balanceDue > 0) {
-        final advance = amount - balanceDue;
+      if (amount > balanceDue) {
+        final advance = balanceDue <= 0 ? amount : amount - balanceDue;
         final confirmAdvance = await showDialog<String>(
           context: context,
           builder: (actx) => AlertDialog(
@@ -694,7 +695,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         );
       }
     }
+  } finally {
+    amountCtrl.dispose();
+    notesCtrl.dispose();
   }
+}
 
   void _openCustomerPassbook(Map<String, dynamic> item) async {
     final customerId = item['customer_id'] as int;

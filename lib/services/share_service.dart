@@ -55,7 +55,7 @@ class ShareService {
 
       await Share.shareXFiles(
         imageFiles.map((f) => XFile(f.path)).toList(),
-        text: 'Order Estimate for ',
+        text: 'Order Estimate for ${draftOrder.customer.name}',
       );
     } catch (_) {
       // Fallback to text if image generation/sharing fails
@@ -186,13 +186,16 @@ class ShareService {
           .map((o) => '${o.optionName}: ${o.optionValue}')
           .join(', ');
       final effectiveQty = isFinalized ? i.quantityGiven : i.quantityOrdered;
+      final qtyFormatted = effectiveQty % 1 == 0
+          ? '${effectiveQty.toInt()} ${i.unit}'
+          : '$effectiveQty ${i.unit}';
       return {
         'name': i.itemName,
         'options': opt,
-        'qty': effectiveQty % 1 == 0
-            ? '${effectiveQty.toInt()} ${i.unit}'
-            : '$effectiveQty ${i.unit}',
+        'qty': qtyFormatted,
+        'qtyStr': qtyFormatted,
         'rate': i.unitPrice,
+        'price': i.unitPrice,
         'amount': i.unitPrice * effectiveQty,
       };
     }).toList();
@@ -338,9 +341,9 @@ class ShareService {
         final item = pageItems[i];
         final name = '${globalIndex + 1}. ${item['name'] as String}';
         final options = item['options'] as String;
-        final qtyStr = item['qtyStr'] as String;
-        final price = item['price'] as double;
-        final amount = item['amount'] as double;
+        final qtyStr = (item['qtyStr'] ?? item['qty']) as String? ?? '';
+        final price = (item['price'] as num?)?.toDouble() ?? (item['rate'] as num?)?.toDouble() ?? 0.0;
+        final amount = (item['amount'] as num?)?.toDouble() ?? 0.0;
 
         // Card row background
         final rowBg = Paint()

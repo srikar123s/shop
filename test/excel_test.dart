@@ -165,10 +165,8 @@ void main() {
   });
 
   test('excel file parsing unit normalization and combination prices', () async {
-    final file = File(r'c:\Users\srikar\OneDrive\Desktop\shop\simple_shop_product_catalog_with_unit_conversion.xlsx');
-    if (!file.existsSync()) {
-      return;
-    }
+    final file = File('simple_shop_product_catalog_with_unit_conversion.xlsx');
+    expect(file.existsSync(), isTrue, reason: 'Test fixture must exist in workspace');
     final products = await ExcelProductService.parseProductsFromFile(file);
 
     expect(products.isNotEmpty, isTrue);

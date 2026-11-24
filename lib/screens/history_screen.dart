@@ -162,6 +162,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() {
         _selectedDate = picked;
@@ -209,8 +210,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         if (effectiveTaken != _selectedTakenBy) return false;
       }
       if (_filter == HistoryFilter.today) {
-        return order.createdAt.isAfter(todayStart) &&
-            order.createdAt.isBefore(todayEnd);
+        return !order.createdAt.isBefore(todayStart) &&
+            order.createdAt.isBefore(todayStart.add(const Duration(days: 1)));
       } else if (_filter == HistoryFilter.pending) {
         return order.status == OrderStatus.pending ||
             order.status == OrderStatus.partiallyCompleted;
@@ -221,9 +222,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       } else if (_filter == HistoryFilter.customDate && _selectedDate != null) {
         final dStart = DateTime(
             _selectedDate!.year, _selectedDate!.month, _selectedDate!.day);
-        final dEnd = DateTime(_selectedDate!.year, _selectedDate!.month,
-            _selectedDate!.day, 23, 59, 59);
-        return order.createdAt.isAfter(dStart) && order.createdAt.isBefore(dEnd);
+        return !order.createdAt.isBefore(dStart) &&
+            order.createdAt.isBefore(dStart.add(const Duration(days: 1)));
       }
       return true;
     }).toList();

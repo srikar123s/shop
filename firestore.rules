@@ -14,6 +14,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/shops/$(shopCode)/devices/$(request.auth.uid)).data.status == 'approved';
     }
 
+    // Helper function to check if the caller is the shop owner
+    function isShopOwner(shopCode) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/shops/$(shopCode)) &&
+        get(/databases/$(database)/documents/shops/$(shopCode)).data.ownerUid == request.auth.uid;
+    }
+
     // Root shops collection
     match /shops/{shopCode} {
       // Allow reading shop details if authenticated
@@ -31,34 +38,44 @@ service cloud.firestore {
       // Devices subcollection
       match /devices/{deviceId} {
         // Any authenticated device can register itself or read device status
-        allow read: if isAuthenticated();
+        allow read: if isAuthenticated() && (
+          request.auth.uid == deviceId ||
+          isApprovedShopDevice(shopCode) ||
+          isShopOwner(shopCode)
+        );
         allow create: if isAuthenticated() && request.auth.uid == deviceId;
         
-        // Only existing approved devices or shop owner can approve/update device statuses
-        allow update, delete: if isAuthenticated() && (
+        // Only existing approved devices or shop owner can approve/update device statuses.
+        // Unapproved devices cannot modify their own status (privilege escalation prevention).
+        allow update: if isAuthenticated() && (
           isApprovedShopDevice(shopCode) ||
+          isShopOwner(shopCode) ||
+          (request.auth.uid == deviceId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
+        );
+        allow delete: if isAuthenticated() && (
+          isShopOwner(shopCode) ||
           request.auth.uid == deviceId
         );
       }
 
       // Products subcollection
       match /products/{productId} {
-        allow read, write: if isApprovedShopDevice(shopCode);
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
 
       // Customers subcollection
       match /customers/{customerId} {
-        allow read, write: if isApprovedShopDevice(shopCode);
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
 
       // Orders subcollection
       match /orders/{orderId} {
-        allow read, write: if isApprovedShopDevice(shopCode);
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
 
       // Khata & Order Payments subcollection
       match /payments/{paymentId} {
-        allow read, write: if isApprovedShopDevice(shopCode);
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
     }
   }

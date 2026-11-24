@@ -48,6 +48,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
+    if (!mounted) return;
     if (picked != null) {
       setState(() => _selectedDate = picked);
       _loadReport();
@@ -293,13 +294,16 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                             '${_report!['pendingOrders']} orders',
                             Colors.orange.shade800,
                           ),
-                          const Divider(height: 1),
-                          _buildReportRow(
-                            Icons.local_fire_department_rounded,
-                            'Top Selling Product',
-                            '${_report!['topItemName']} (${_report!['topItemQty']} ${_report!['topItemUnit']})',
-                            Colors.amber.shade900,
-                          ),
+                          if (_report!['topItemName'] != 'None' &&
+                              ((_report!['topItemQty'] as num?) ?? 0) > 0) ...[
+                            const Divider(height: 1),
+                            _buildReportRow(
+                              Icons.local_fire_department_rounded,
+                              'Top Selling Product',
+                              '${_report!['topItemName']} (${_report!['topItemQty']} ${_report!['topItemUnit']})',
+                              Colors.amber.shade900,
+                            ),
+                          ],
                         ],
                       ),
                     ),

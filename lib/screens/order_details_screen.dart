@@ -581,6 +581,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final shopService = ShopCustomizationService.instance;
     final upiId = shopService.upiId.trim();
     final shopName = shopService.shopName.trim();
+    if (order.isFullyPaid || (order.dueAmount <= 0.01 && order.estimateTotal > 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Order is already fully paid!'),
+          backgroundColor: Color(0xFF0F766E),
+        ),
+      );
+      return;
+    }
     final amountToPay =
         order.dueAmount > 0 ? order.dueAmount : order.estimateTotal;
 
@@ -955,9 +964,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
+            final isClosed = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
             final subtotal = _details!.items.fold<double>(
               0.0,
-              (sum, i) => sum + (i.unitPrice * i.quantityGiven),
+              (sum, i) => sum + (i.unitPrice * (isClosed && i.quantityGiven > 0 ? i.quantityGiven : i.quantityOrdered)),
             );
 
             double discountAmount = 0.0;

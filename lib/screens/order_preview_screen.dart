@@ -93,6 +93,15 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   }
 
   bool _ensureAllItemsPriced(String actionName) {
+    if (widget.draftOrder.items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot proceed with empty order. Please add items.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false;
+    }
     final unpricedItems = widget.draftOrder.items
         .where((i) => (i.unitPrice ?? 0.0) <= 0)
         .toList();
@@ -212,7 +221,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     );
     final presets = [5, 12, 18, 28];
 
-    await showDialog<void>(
+    try {
+      await showDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -288,6 +298,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         );
       },
     );
+    } finally {
+      rateCtrl.dispose();
+    }
   }
 
   Future<void> _showAddOtherChargeDialog() async {
@@ -301,7 +314,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       'Loading'
     ];
 
-    await showDialog<void>(
+    try {
+      await showDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -387,6 +401,10 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
         );
       },
     );
+    } finally {
+      nameCtrl.dispose();
+      amountCtrl.dispose();
+    }
   }
 
   Future<void> _loadCustomerCredit() async {

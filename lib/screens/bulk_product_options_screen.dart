@@ -28,7 +28,8 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   int? _groupIndex;
   final Map<String, String> _prefixSelections = <String, String>{};
   final Set<String> _selectedGroups = <String>{};
-  final Map<String, double> _variantQuantities = <String, double>{};
+  final Map<String, double> _itemQuantities = <String, double>{};
+  final Map<String, Map<String, String>> _itemOptions = <String, Map<String, String>>{};
   final Map<String, double> _customPrices = <String, double>{};
   final Map<String, String> _activeGroupVariant = <String, String>{};
   late String _unit;
@@ -57,65 +58,46 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
         if (item.unit.isNotEmpty) {
           _unit = item.unit;
         }
+        final options = Map<String, String>.from(item.options);
+        final key = _optionsToKey(options);
+        _itemOptions[key] = options;
+        _itemQuantities[key] = (_itemQuantities[key] ?? 0) + item.quantity;
+        if (item.unitPrice != null && item.unitPrice! > 0) {
+          _customPrices[key] = item.unitPrice!;
+        }
+
+        // Restore group selection if group is present
         if (_groupIndex != null) {
           final groupKey = _steps[_groupIndex!].key;
-          final variantKey = _steps[_variantIndex].key;
-          final groupVal = item.options[groupKey] ??
-              item.options.entries
+          final groupVal = options[groupKey] ??
+              options.entries
                   .firstWhere(
                     (e) => _steps[_groupIndex!].values.contains(e.value),
                     orElse: () => const MapEntry('', ''),
                   )
                   .value;
-          final variantVal = item.options[variantKey] ??
-              item.options.entries
-                  .firstWhere(
-                    (e) => _steps[_variantIndex].values.contains(e.value),
-                    orElse: () => const MapEntry('', ''),
-                  )
-                  .value;
-
-          if (groupVal.isNotEmpty && variantVal.isNotEmpty) {
-            final key = '$groupVal::$variantVal';
-            _variantQuantities[key] =
-                (_variantQuantities[key] ?? 0) + item.quantity;
+          if (groupVal.isNotEmpty) {
             _selectedGroups.add(groupVal);
-            _activeGroupVariant[groupVal] = variantVal;
-            if (item.unitPrice != null && item.unitPrice! > 0) {
-              _customPrices[key] = item.unitPrice!;
+            if (_variantIndex >= 0) {
+              final variantKey = _steps[_variantIndex].key;
+              final variantVal = options[variantKey] ??
+                  options.entries
+                      .firstWhere(
+                        (e) => _steps[_variantIndex].values.contains(e.value),
+                        orElse: () => const MapEntry('', ''),
+                      )
+                      .value;
+              if (variantVal.isNotEmpty) {
+                _activeGroupVariant[groupVal] = variantVal;
+              }
             }
-          }
-        } else if (_steps.isNotEmpty) {
-          final variantKey = _steps[_variantIndex].key;
-          final variantVal = item.options[variantKey] ??
-              item.options.entries
-                  .firstWhere(
-                    (e) => _steps[_variantIndex].values.contains(e.value),
-                    orElse: () => const MapEntry('', ''),
-                  )
-                  .value;
-          if (variantVal.isNotEmpty) {
-            _variantQuantities[variantVal] =
-                (_variantQuantities[variantVal] ?? 0) + item.quantity;
-            if (item.unitPrice != null && item.unitPrice! > 0) {
-              _customPrices[variantVal] = item.unitPrice!;
-            }
-          }
-        } else {
-          _variantQuantities[''] =
-              (_variantQuantities[''] ?? 0) + item.quantity;
-          if (item.unitPrice != null && item.unitPrice! > 0) {
-            _customPrices[''] = item.unitPrice!;
           }
         }
 
-        // Restore prefix options
-        for (final step in _steps) {
-          if (step.key != _steps[_variantIndex].key &&
-              (_groupIndex == null || step.key != _steps[_groupIndex!].key)) {
-            if (item.options.containsKey(step.key)) {
-              _prefixSelections[step.key] = item.options[step.key]!;
-            }
+        // Restore prefix options from existing item
+        for (final step in _prefixSteps) {
+          if (options.containsKey(step.key)) {
+            _prefixSelections[step.key] = options[step.key]!;
           }
         }
       }
@@ -150,46 +132,114 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   }
 
   bool get _canAdd {
-    if (_groupIndex != null && _selectedGroups.isEmpty) return false;
+    if (_groupIndex != null && _selectedGroups.isEmpty && _itemQuantities.isEmpty) return false;
     return _prefixSteps
         .every((step) => _prefixSelections.containsKey(step.key));
   }
 
-  String _buildCombinationKey(String group, String variant) {
+  String _optionsToKey(Map<String, String> options) {
+    if (options.isEmpty) return '';
     final parts = <String>[];
     for (final step in _steps) {
-      if (_groupIndex != null && step.key == _steps[_groupIndex!].key) {
-        if (group.isNotEmpty) parts.add(group);
-      } else if (step.key == _steps[_variantIndex].key) {
-        if (variant.isNotEmpty) parts.add(variant);
+      final val = options[step.key];
+      if (val != null && val.isNotEmpty) {
+        parts.add('${step.key}=$val');
+      }
+    }
+    final sortedKeys = options.keys.toList()..sort();
+    for (final k in sortedKeys) {
+      if (!_steps.any((s) => s.key == k)) {
+        parts.add('$k=${options[k]}');
+      }
+    }
+    return parts.join('||');
+  }
+
+  Map<String, String> _buildCurrentOptions({
+    String? group,
+    String? variant,
+  }) {
+    final options = Map<String, String>.from(_prefixSelections);
+    if (_groupIndex != null && group != null && group.isNotEmpty) {
+      options[_steps[_groupIndex!].key] = group;
+    }
+    if (_variantIndex >= 0 && variant != null && variant.isNotEmpty) {
+      options[_steps[_variantIndex].key] = variant;
+    }
+    return options;
+  }
+
+  void _setQuantity(String key, Map<String, String> options, double val) {
+    setState(() {
+      if (val <= 0) {
+        _itemQuantities.remove(key);
+        _itemOptions.remove(key);
       } else {
-        final sel = _prefixSelections[step.key];
-        if (sel != null && sel.isNotEmpty) parts.add(sel);
+        _itemQuantities[key] = val;
+        _itemOptions[key] = options;
+      }
+    });
+  }
+
+  double _getQuantityForStepValue(String stepKey, String stepValue) {
+    double total = 0;
+    for (final entry in _itemQuantities.entries) {
+      if (entry.value > 0) {
+        final options = _itemOptions[entry.key];
+        if (options != null && options[stepKey] == stepValue) {
+          total += entry.value;
+        }
+      }
+    }
+    return total;
+  }
+
+  String _buildCombinationKey(Map<String, String> options) {
+    final parts = <String>[];
+    for (final step in _steps) {
+      final val = options[step.key];
+      if (val != null && val.isNotEmpty) {
+        parts.add(val);
       }
     }
     return parts.join(' • ');
   }
 
-  double _getVariantPrice(String variantKey, String variantName, {String group = ''}) {
-    if (_customPrices.containsKey(variantKey)) {
-      return _customPrices[variantKey]!;
+  double _getPriceForOptions(String key, Map<String, String> options) {
+    if (_customPrices.containsKey(key)) {
+      return _customPrices[key]!;
     }
-    final comboKey = _buildCombinationKey(group, variantName);
+    final comboKey = _buildCombinationKey(options);
     final factor = widget.product.configuration.unitConversions[_unit] ?? 1.0;
-
     final variantPrices = widget.product.configuration.variantPrices;
-    
+
     // 1. Direct key match
     double? configuredPrice = variantPrices[comboKey] ??
-        variantPrices[comboKey.toLowerCase()] ??
-        variantPrices[variantName] ??
-        variantPrices[variantName.toLowerCase()] ??
-        variantPrices[variantKey] ??
-        (group.isNotEmpty
-            ? (variantPrices[group] ?? variantPrices[group.toLowerCase()])
-            : null);
+        variantPrices[comboKey.toLowerCase()];
 
-    // 2. Case-insensitive & set-based match across option values
+    // 2. Check variant step value
+    if (configuredPrice == null || configuredPrice <= 0) {
+      if (_variantIndex >= 0) {
+        final variantVal = options[_steps[_variantIndex].key];
+        if (variantVal != null && variantVal.isNotEmpty) {
+          configuredPrice = variantPrices[variantVal] ??
+              variantPrices[variantVal.toLowerCase()];
+        }
+      }
+    }
+
+    // 3. Check group step value
+    if (configuredPrice == null || configuredPrice <= 0) {
+      if (_groupIndex != null) {
+        final groupVal = options[_steps[_groupIndex!].key];
+        if (groupVal != null && groupVal.isNotEmpty) {
+          configuredPrice = variantPrices[groupVal] ??
+              variantPrices[groupVal.toLowerCase()];
+        }
+      }
+    }
+
+    // 4. Case-insensitive & set-based match across option values
     if (configuredPrice == null || configuredPrice <= 0) {
       final lowerCombo = comboKey.toLowerCase().trim();
       final comboPartsSet = lowerCombo
@@ -226,10 +276,11 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     }
 
     final basePrice = widget.product.configuration.basePrice;
-    
+
     // Auto multiplier for known weight/size variations if basePrice > 0
     double multiplier = 1.0;
-    final lower = variantName.toLowerCase().trim();
+    final variantVal = _variantIndex >= 0 ? (options[_steps[_variantIndex].key] ?? '') : '';
+    final lower = variantVal.toLowerCase().trim();
     if (lower == '4l' || lower == '4 l') {
       multiplier = 4.0;
     } else if (lower == '10l' || lower == '10 l') {
@@ -248,48 +299,23 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
   List<DraftOrderItem> _buildItems() {
     final factor = widget.product.configuration.unitConversions[_unit] ?? 1;
     final items = <DraftOrderItem>[];
-    if (_groupIndex != null) {
-      for (final group in _selectedGroups) {
-        final variants = _steps.isEmpty ? <String>[] : _steps[_variantIndex].values;
-        for (final variant in variants) {
-          final key = '$group::$variant';
-          final quantity = _variantQuantities[key] ?? 0;
-          if (quantity <= 0) continue;
-          final options = <String, String>{
-            ..._prefixSelections,
-            _steps[_groupIndex!].key: group,
-            _steps[_variantIndex].key: variant,
-          };
-          final unitPrice = _getVariantPrice(key, variant, group: group);
-          items.add(DraftOrderItem(
-            productId: widget.product.id,
-            itemName: widget.product.name,
-            options: options,
-            quantity: quantity,
-            unit: _unit,
-            unitPrice: unitPrice > 0 ? unitPrice : null,
-            unitFactor: factor,
-          ));
-        }
-      }
-    } else {
-      for (final variant
-          in _steps.isEmpty ? <String>[''] : _steps[_variantIndex].values) {
-        final quantity = _variantQuantities[variant] ?? 0;
-        if (quantity <= 0) continue;
-        final options = <String, String>{..._prefixSelections};
-        if (_steps.isNotEmpty) options[_steps[_variantIndex].key] = variant;
-        final unitPrice = _getVariantPrice(variant, variant);
-        items.add(DraftOrderItem(
-          productId: widget.product.id,
-          itemName: widget.product.name,
-          options: options,
-          quantity: quantity,
-          unit: _unit,
-          unitPrice: unitPrice > 0 ? unitPrice : null,
-          unitFactor: factor,
-        ));
-      }
+
+    for (final entry in _itemQuantities.entries) {
+      final quantity = entry.value;
+      if (quantity <= 0) continue;
+      final key = entry.key;
+      final options = _itemOptions[key] ?? <String, String>{};
+      final unitPrice = _getPriceForOptions(key, options);
+
+      items.add(DraftOrderItem(
+        productId: widget.product.id,
+        itemName: widget.product.name,
+        options: options,
+        quantity: quantity,
+        unit: _unit,
+        unitPrice: unitPrice > 0 ? unitPrice : null,
+        unitFactor: factor,
+      ));
     }
     return items;
   }
@@ -404,8 +430,32 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                           runSpacing: 8,
                           children: step.values.map((value) {
                             final isSelected = _prefixSelections[step.key] == value;
+                            final count = _getQuantityForStepValue(step.key, value);
                             return ChoiceChip(
-                              label: Text(s.catalog(value)),
+                              label: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(s.catalog(value)),
+                                  if (count > 0) ...[
+                                    const SizedBox(width: 5),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? Colors.white : const Color(0xFF0F766E),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        count % 1 == 0 ? count.toInt().toString() : count.toString(),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: isSelected ? const Color(0xFF0F766E) : Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
                               selected: isSelected,
                               selectedColor: const Color(0xFF0F766E),
                               backgroundColor: Colors.grey.shade100,
@@ -440,11 +490,38 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                     runSpacing: 8,
                     children: _steps[_groupIndex!]
                         .values
-                        .map((value) => FilterChip(
-                              label: Text(s.catalog(value)),
-                              selected: _selectedGroups.contains(value),
-                              onSelected: (_) => _toggleGroup(value),
-                            ))
+                        .map((value) {
+                          final count = _getQuantityForStepValue(_steps[_groupIndex!].key, value);
+                          final isSelected = _selectedGroups.contains(value);
+                          return FilterChip(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(s.catalog(value)),
+                                if (count > 0) ...[
+                                  const SizedBox(width: 5),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isSelected ? Colors.white : const Color(0xFF0F766E),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      count % 1 == 0 ? count.toInt().toString() : count.toString(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: isSelected ? const Color(0xFF0F766E) : Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            selected: isSelected,
+                            onSelected: (_) => _toggleGroup(value),
+                          );
+                        })
                         .toList(),
                   ),
                   const SizedBox(height: 12),
@@ -498,9 +575,11 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     );
   }
 
-  Widget _quantityRow(String key, String label, AppLocalizations s) {
-    final quantity = _variantQuantities[key] ?? 0;
-    final price = _getVariantPrice(key, label);
+  Widget _quantityRow(String variantValue, String label, AppLocalizations s) {
+    final options = _buildCurrentOptions(variant: variantValue);
+    final key = _optionsToKey(options);
+    final quantity = _itemQuantities[key] ?? 0;
+    final price = _getPriceForOptions(key, options);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -532,16 +611,13 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                 QuantitySelector(
                   value: quantity,
                   min: 0,
-                  onChanged: (value) =>
-                      setState(() => _variantQuantities[key] = value),
+                  onChanged: (value) => _setQuantity(key, options, value),
                 ),
               ],
             ),
             const SizedBox(height: 6),
             _compactPresets((val) {
-              setState(() {
-                _variantQuantities[key] = (_variantQuantities[key] ?? 0) + val;
-              });
+              _setQuantity(key, options, quantity + val);
             }),
           ],
         ),
@@ -555,9 +631,10 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
     AppLocalizations s,
   ) {
     final currentVariant = _activeGroupVariant[group] ?? (variants.isNotEmpty ? variants.first : '');
-    final currentKey = '$group::$currentVariant';
-    final currentQty = _variantQuantities[currentKey] ?? 0;
-    final currentPrice = _getVariantPrice(currentKey, currentVariant, group: group);
+    final currentOptions = _buildCurrentOptions(group: group, variant: currentVariant);
+    final currentKey = _optionsToKey(currentOptions);
+    final currentQty = _itemQuantities[currentKey] ?? 0;
+    final currentPrice = _getPriceForOptions(currentKey, currentOptions);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -578,8 +655,9 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: variants.map((v) {
-                  final key = '$group::$v';
-                  final qty = _variantQuantities[key] ?? 0;
+                  final vOptions = _buildCurrentOptions(group: group, variant: v);
+                  final vKey = _optionsToKey(vOptions);
+                  final qty = _itemQuantities[vKey] ?? 0;
                   final isSelected = v == currentVariant;
 
                   return Padding(
@@ -660,18 +738,14 @@ class _BulkProductOptionsScreenState extends State<BulkProductOptionsScreen> {
                           value: currentQty,
                           min: 0,
                           onChanged: (val) {
-                            setState(() {
-                              _variantQuantities[currentKey] = val;
-                            });
+                            _setQuantity(currentKey, currentOptions, val);
                           },
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     _compactPresets((val) {
-                      setState(() {
-                        _variantQuantities[currentKey] = (_variantQuantities[currentKey] ?? 0) + val;
-                      });
+                      _setQuantity(currentKey, currentOptions, currentQty + val);
                     }),
                   ],
                 ),

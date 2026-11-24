@@ -535,9 +535,10 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
 
     final presets = getPresetsForStep(step.key);
 
-    return showDialog<ProductStep>(
-      context: context,
-      builder: (context) => StatefulBuilder(
+    try {
+      return await showDialog<ProductStep>(
+        context: context,
+        builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           void addChoicesFromText(String raw) {
             final tokens = raw
@@ -667,6 +668,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
         },
       ),
     );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Future<void> _editProduct({Product? product}) async {
@@ -745,7 +749,13 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       }
     }
 
-    final saved = await showModalBottomSheet<bool>(
+    final conversionControllers = <String, TextEditingController>{};
+    final quickFillControllers = <String, TextEditingController>{};
+    final variantControllers = <String, TextEditingController>{};
+
+    final bool? saved;
+    try {
+      saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -913,10 +923,13 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           if (selectedUnits.isNotEmpty) ...<Widget>[
                             const SizedBox(height: 10),
                             ...selectedUnits.map((u) {
-                              final factorCtrl = TextEditingController(
-                                text: (customConversions[u] ??
-                                        _defaultConversion(u))
-                                    .toString(),
+                              final factorCtrl = conversionControllers.putIfAbsent(
+                                u,
+                                () => TextEditingController(
+                                  text: (customConversions[u] ??
+                                          _defaultConversion(u))
+                                      .toString(),
+                                ),
                               );
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 6),
@@ -1244,8 +1257,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                               variantPrices[val] = p;
                                               for (final combo
                                                   in combinations) {
-                                                if (combo.contains(val)) {
-                                                  variantPrices[combo] = p;
+                                                final tokens = combo.split(" • ").map((t) => t.trim().toLowerCase()).toSet();
+                                                  if (tokens.contains(val.trim().toLowerCase())) {
+                                                    variantPrices[combo] = p;
                                                 }
                                               }
                                             } else {
@@ -1253,8 +1267,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                               variantPrices.remove(val);
                                               for (final combo
                                                   in combinations) {
-                                                if (combo.contains(val)) {
-                                                  variantPrices.remove(combo);
+                                                final tokens = combo.split(" • ").map((t) => t.trim().toLowerCase()).toSet();
+                                                  if (tokens.contains(val.trim().toLowerCase())) {
+                                                    variantPrices.remove(combo);
                                                 }
                                               }
                                             }
@@ -1305,13 +1320,15 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                             Expanded(
                                               flex: 2,
                                               child: TextField(
-                                                controller:
-                                                    TextEditingController(
-                                                  text: p != null && p > 0
-                                                      ? (p % 1 == 0
-                                                          ? p.toInt().toString()
-                                                          : p.toString())
-                                                      : '',
+                                                controller: variantControllers.putIfAbsent(
+                                                  'override_$combo',
+                                                  () => TextEditingController(
+                                                    text: p != null && p > 0
+                                                        ? (p % 1 == 0
+                                                            ? p.toInt().toString()
+                                                            : p.toString())
+                                                        : '',
+                                                  ),
                                                 ),
                                                 keyboardType:
                                                     const TextInputType
@@ -1362,8 +1379,10 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                 final groupCombos = combinations
                                     .where((c) => c.contains(groupVal))
                                     .toList();
-                                final quickFillCtrl =
-                                    TextEditingController();
+                                final quickFillCtrl = quickFillControllers.putIfAbsent(
+                                  groupVal,
+                                  () => TextEditingController(),
+                                );
                                 return Card(
                                   margin: const EdgeInsets.only(bottom: 12),
                                   elevation: 0,
@@ -1430,6 +1449,10 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                                     for (final c
                                                         in groupCombos) {
                                                       variantPrices[c] = p;
+                                                      final cCtrl = variantControllers['matrix_$c'];
+                                                      if (cCtrl != null) {
+                                                        cCtrl.text = p % 1 == 0 ? p.toInt().toString() : p.toString();
+                                                      }
                                                     }
                                                   });
                                                 }
@@ -1460,16 +1483,18 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                                 Expanded(
                                                   flex: 2,
                                                   child: TextField(
-                                                    controller:
-                                                        TextEditingController(
-                                                      text: cur != null &&
-                                                              cur > 0
-                                                          ? (cur % 1 == 0
-                                                              ? cur
-                                                                  .toInt()
-                                                                  .toString()
-                                                              : cur.toString())
-                                                          : '',
+                                                    controller: variantControllers.putIfAbsent(
+                                                      'matrix_$combo',
+                                                      () => TextEditingController(
+                                                        text: cur != null &&
+                                                                cur > 0
+                                                            ? (cur % 1 == 0
+                                                                ? cur
+                                                                    .toInt()
+                                                                    .toString()
+                                                                : cur.toString())
+                                                            : '',
+                                                      ),
                                                     ),
                                                     keyboardType:
                                                         const TextInputType
@@ -1569,8 +1594,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                 variantPrices[entry.key.toLowerCase()] =
                                     entry.value;
                                 for (final combo in combinations) {
-                                  if (combo.contains(entry.key) &&
-                                      !variantPrices.containsKey(combo)) {
+                                  final tokens = combo.split(" • ").map((t) => t.trim().toLowerCase()).toSet();
+                                   if (tokens.contains(entry.key.trim().toLowerCase()) && !variantPrices.containsKey(combo)) {
                                     variantPrices[combo] = entry.value;
                                     variantPrices[combo.toLowerCase()] =
                                         entry.value;
@@ -1616,6 +1641,20 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
         },
       ),
     );
+    } finally {
+      name.dispose();
+      categoryCtrl.dispose();
+      price.dispose();
+      for (final c in conversionControllers.values) {
+        c.dispose();
+      }
+      for (final c in quickFillControllers.values) {
+        c.dispose();
+      }
+      for (final c in variantControllers.values) {
+        c.dispose();
+      }
+    }
     if (saved == true) _load();
   }
 
@@ -1627,7 +1666,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
           ? (curPrice % 1 == 0 ? curPrice.toInt().toString() : curPrice.toString())
           : '',
     );
-    final newPrice = await showDialog<double>(
+    final double? newPrice;
+    try {
+      newPrice = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Set Rate for "${product.name}"'),
@@ -1667,6 +1708,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
         ],
       ),
     );
+    } finally {
+      ctrl.dispose();
+    }
 
     if (newPrice != null && newPrice >= 0 && product.id != null) {
       final updatedConfig = product.configuration.copyWith(

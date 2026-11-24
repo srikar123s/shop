@@ -171,11 +171,13 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
         }
       }
       final opts = distinctOpts.join(', ');
-      final qtyStr = item.quantityOrdered % 1 == 0
-          ? item.quantityOrdered.toInt().toString()
-          : item.quantityOrdered.toString();
+      final isClosed = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
+      final displayQty = (isClosed && item.quantityGiven > 0) ? item.quantityGiven : item.quantityOrdered;
+      final qtyStr = displayQty % 1 == 0
+          ? displayQty.toInt().toString()
+          : displayQty.toString();
       final price = item.unitPrice;
-      final amount = price * item.quantityOrdered;
+      final amount = price * displayQty;
       calculatedSubtotal += amount;
 
       return {
@@ -283,9 +285,11 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
                                 color: Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Text(
-                                '🔒 CLOSED BILL',
-                                style: TextStyle(
+                              child: Text(
+                                (order.status == OrderStatus.completed || order.status == OrderStatus.closed)
+                                    ? '🔒 CLOSED BILL'
+                                    : orderStatusLabel(order.status),
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 10,
                                   fontWeight: FontWeight.w800,

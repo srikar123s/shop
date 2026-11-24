@@ -16,12 +16,14 @@ class DatabaseHelper {
   static const int dbVersion = 4;
 
   Database? _database;
+  Future<Database>? _initDbFuture;
 
   Future<Database> get database async {
     if (_database != null) {
       return _database!;
     }
-    _database = await _initDb();
+    _initDbFuture ??= _initDb();
+    _database = await _initDbFuture!;
     return _database!;
   }
 
@@ -33,9 +35,11 @@ class DatabaseHelper {
   Future<void> close() async {
     await _database?.close();
     _database = null;
+    _initDbFuture = null;
   }
 
   Future<void> reopen() async {
+    await close();
     _database = await _initDb();
   }
 
@@ -595,40 +599,60 @@ class DatabaseHelper {
     required String paymentMode,
   }) async {
     final db = await database;
-    final order =
-        await db.query('orders', where: 'id = ?', whereArgs: [orderId]);
-    if (order.isEmpty) return;
-    final total = (order.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
-    final prevPaid = (order.first['paid_amount'] as num?)?.toDouble() ?? 0.0;
-    final status = paidAmount >= total
-        ? 'paid'
-        : (paidAmount > 0 ? 'partial' : 'unpaid');
+    int? newPaymentId;
+    await db.transaction((txn) async {
+      final order =
+          await txn.query('orders', where: 'id = ?', whereArgs: [orderId]);
+      if (order.isEmpty) return;
+      final total = (order.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final prevPaid = (order.first['paid_amount'] as num?)?.toDouble() ?? 0.0;
+      final status = paidAmount >= total
+          ? 'paid'
+          : (paidAmount > 0 ? 'partial' : 'unpaid');
 
-    await db.update(
-      'orders',
-      {
-        'paid_amount': paidAmount,
-        'payment_mode': paymentMode,
-        'payment_status': status,
-      },
-      where: 'id = ?',
-      whereArgs: [orderId],
-    );
+      await txn.update(
+        'orders',
+        {
+          'paid_amount': paidAmount,
+          'payment_mode': paymentMode,
+          'payment_status': status,
+        },
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
 
-    final added = paidAmount - prevPaid;
-    final customerId = order.first['customer_id'] as int?;
-    if (added > 0.001 && customerId != null) {
-      final now = DateTime.now().toIso8601String();
-      final pId = await db.insert('customer_payments', {
-        'customer_id': customerId,
-        'amount': added,
-        'payment_mode': paymentMode.toLowerCase(),
-        'notes': 'Payment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
-        'created_at': now,
-      });
-      unawaited(ShopSyncService.instance.syncPayment(pId));
+      final added = paidAmount - prevPaid;
+      final customerId = order.first['customer_id'] as int?;
+      if (added > 0.001 && customerId != null) {
+        final now = DateTime.now().toIso8601String();
+        newPaymentId = await txn.insert('customer_payments', {
+          'customer_id': customerId,
+          'amount': added,
+          'payment_mode': paymentMode.toLowerCase(),
+          'notes': 'Payment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
+          'created_at': now,
+        });
+      } else if (added < -0.001 && customerId != null) {
+        // Compensating adjustment for payment reduction / refund
+        final now = DateTime.now().toIso8601String();
+        newPaymentId = await txn.insert('customer_payments', {
+          'customer_id': customerId,
+          'amount': added,
+          'payment_mode': paymentMode.toLowerCase(),
+          'notes': 'Refund/Adjustment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
+          'created_at': now,
+        });
+      }
+    });
+
+    if (newPaymentId != null) {
+      unawaited(ShopSyncService.instance.syncPayment(newPaymentId!).catchError((e) {
+        debugPrint('Error syncing payment in recordOrderPayment: $e');
+      }));
     }
-    unawaited(ShopSyncService.instance.syncOrder(orderId));
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+      debugPrint('Error syncing order in recordOrderPayment: $e');
+    }));
   }
 
   Future<void> recordCustomerKhataPayment({
@@ -639,6 +663,7 @@ class DatabaseHelper {
   }) async {
     final db = await database;
     int? createdPaymentId;
+    final syncedOrderIds = <int>{};
     await db.transaction((txn) async {
       final now = DateTime.now().toIso8601String();
       createdPaymentId = await txn.insert('customer_payments', {
@@ -652,7 +677,7 @@ class DatabaseHelper {
       // Apply payment to oldest pending/partial orders first
       final unpaidOrders = await txn.query(
         'orders',
-        where: 'customer_id = ? AND estimate_total > paid_amount',
+        where: "customer_id = ? AND estimate_total > paid_amount AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')",
         whereArgs: [customerId],
         orderBy: 'created_at ASC',
       );
@@ -682,12 +707,20 @@ class DatabaseHelper {
             whereArgs: [orderId],
           );
           remainingToApply -= payingForThis;
-          unawaited(ShopSyncService.instance.syncOrder(orderId));
+          syncedOrderIds.add(orderId);
         }
       }
     });
+
+    for (final orderId in syncedOrderIds) {
+      unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
+        debugPrint('Error syncing order in recordCustomerKhataPayment: $e');
+      }));
+    }
     if (createdPaymentId != null) {
-      unawaited(ShopSyncService.instance.syncPayment(createdPaymentId!));
+      unawaited(ShopSyncService.instance.syncPayment(createdPaymentId!).catchError((e) {
+        debugPrint('Error syncing payment in recordCustomerKhataPayment: $e');
+      }));
     }
   }
 
@@ -727,8 +760,9 @@ class DatabaseHelper {
         FROM customer_payments p1
         GROUP BY p1.customer_id
       ) p ON c.id = p.customer_id
-      WHERE (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01 
+      WHERE (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)).abs() > 0.01 
          OR COALESCE(b.total_billed, 0.0) > 0 
+         OR COALESCE(p.total_paid, 0.0) > 0
          OR c.credit_limit > 0
       ORDER BY (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) DESC, c.name ASC
     ''';
@@ -1045,7 +1079,9 @@ class DatabaseHelper {
       'payment_mode': 'Khata',
       'payment_status': 'unpaid',
     });
-    unawaited(ShopSyncService.instance.syncOrder(newOrderId));
+    unawaited(ShopSyncService.instance.syncOrder(newOrderId).catchError((e) {
+      debugPrint('Error syncing order in recordManualKhataDebit: $e');
+    }));
     return newOrderId;
   }
 
@@ -1054,6 +1090,7 @@ class DatabaseHelper {
   Future<Map<String, dynamic>> getKhataSummaryMetrics([List<Map<String, dynamic>>? preloadedList]) async {
     final list = preloadedList ?? await getCustomerKhataList();
     double totalDue = 0;
+    double totalAdvance = 0;
     double totalBilled = 0;
     double totalPaid = 0;
     double overdue30Days = 0;
@@ -1068,7 +1105,6 @@ class DatabaseHelper {
       final days = (item['days_overdue'] as num?)?.toInt() ?? 0;
       final isOver = item['is_over_limit'] as bool? ?? false;
 
-      totalDue += due;
       totalBilled += billed;
       totalPaid += paid;
 
@@ -1077,10 +1113,13 @@ class DatabaseHelper {
       }
 
       if (due > 0.01) {
+        totalDue += due;
         dueCustomersCount++;
         if (days >= 30) {
           overdue30Days += due;
         }
+      } else if (due < -0.01) {
+        totalAdvance += -due;
       } else {
         settledCustomersCount++;
       }
@@ -1090,12 +1129,12 @@ class DatabaseHelper {
     final db = await database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
-    final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
+    final nextDay = DateTime(now.year, now.month, now.day + 1).toIso8601String();
 
     final paymentsToday = await db.query(
       'customer_payments',
-      where: 'created_at >= ? AND created_at <= ?',
-      whereArgs: [startOfDay, endOfDay],
+      where: 'created_at >= ? AND created_at < ?',
+      whereArgs: [startOfDay, nextDay],
     );
 
     double collectedToday = 0;
@@ -1105,6 +1144,7 @@ class DatabaseHelper {
 
     return {
       'totalMarketDue': totalDue,
+      'totalAdvance': totalAdvance,
       'totalBilled': totalBilled,
       'totalPaid': totalPaid,
       'overdue30Days': overdue30Days,
@@ -1121,13 +1161,13 @@ class DatabaseHelper {
       final db = await database;
       final startOfDay =
           DateTime(date.year, date.month, date.day).toIso8601String();
-      final endOfDay =
-          DateTime(date.year, date.month, date.day, 23, 59, 59).toIso8601String();
+      final nextDay =
+          DateTime(date.year, date.month, date.day + 1).toIso8601String();
 
       final orderRows = await db.query(
         'orders',
-        where: 'created_at >= ? AND created_at <= ?',
-        whereArgs: [startOfDay, endOfDay],
+        where: 'created_at >= ? AND created_at < ?',
+        whereArgs: [startOfDay, nextDay],
       );
 
       double totalSales = 0;
@@ -1164,8 +1204,8 @@ class DatabaseHelper {
       // Direct Khata payments received today (avoiding double-counting today's order payments)
       final paymentRows = await db.query(
         'customer_payments',
-        where: 'created_at >= ? AND created_at <= ?',
-        whereArgs: [startOfDay, endOfDay],
+        where: 'created_at >= ? AND created_at < ?',
+        whereArgs: [startOfDay, nextDay],
       );
 
       final todayOrderIds = orderRows.map((r) => r['id'] as int).toSet();
@@ -1193,10 +1233,22 @@ class DatabaseHelper {
 
       TopProductStat? topItem;
       try {
-        final topItems =
-            await getTopSellingProducts(timeRange: 'today', limit: 1);
-        if (topItems.isNotEmpty) {
-          topItem = topItems.first;
+        final topRows = await db.rawQuery('''
+          SELECT oi.item_name, SUM(oi.quantity_ordered) as total_qty, oi.unit
+          FROM order_items oi
+          INNER JOIN orders o ON oi.order_id = o.id
+          WHERE o.created_at >= ? AND o.created_at < ?
+          GROUP BY oi.item_name, oi.unit
+          ORDER BY total_qty DESC
+          LIMIT 1
+        ''', [startOfDay, nextDay]);
+        if (topRows.isNotEmpty) {
+          topItem = TopProductStat(
+            itemName: topRows.first['item_name'] as String? ?? 'None',
+            totalQuantity: (topRows.first['total_qty'] as num?)?.toDouble() ?? 0.0,
+            unit: topRows.first['unit'] as String? ?? '',
+            orderCount: 1,
+          );
         }
       } catch (e) {
         debugPrint('Top product calculation error in evening report: $e');

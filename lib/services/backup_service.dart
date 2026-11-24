@@ -70,20 +70,67 @@ class BackupService {
         throw Exception('Selected backup file does not exist.');
       }
 
+      // 1. Validate SQLite header magic bytes (first 16 bytes must match "SQLite format 3\000")
+      final backupLength = await backupFile.length();
+      if (backupLength < 100) {
+        throw Exception('Selected backup file is invalid or too small to be a database.');
+      }
+      final headerBytes = await backupFile.openRead(0, 16).first;
+      const expectedHeader = [83, 113, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0];
+      if (headerBytes.length < 16 || !headerBytes.take(16).toList().asMap().entries.every((e) => e.value == expectedHeader[e.key])) {
+        throw Exception('Selected file is not a valid SQLite database.');
+      }
+
       final targetPath = await _databaseHelper.getDatabaseFullPath();
+      final targetFile = File(targetPath);
+      final safetyBakPath = '$targetPath.safety_bak';
+      final safetyWalPath = '$targetPath-wal.safety_bak';
+
+      // 2. Create safety backup of active database before touching it
+      if (await targetFile.exists()) {
+        await targetFile.copy(safetyBakPath);
+        final liveWal = File('$targetPath-wal');
+        if (await liveWal.exists()) {
+          await liveWal.copy(safetyWalPath);
+        }
+      }
+
       await _databaseHelper.close();
 
-      // Clean up any existing WAL journal and shared-memory files from old database to avoid corruption
       try {
-        final walFile = File('$targetPath-wal');
-        if (await walFile.exists()) await walFile.delete();
-        final shmFile = File('$targetPath-shm');
-        if (await shmFile.exists()) await shmFile.delete();
-      } catch (_) {}
+        // Clean up any existing WAL journal and shared-memory files from old database to avoid corruption
+        try {
+          final walFile = File('$targetPath-wal');
+          if (await walFile.exists()) await walFile.delete();
+          final shmFile = File('$targetPath-shm');
+          if (await shmFile.exists()) await shmFile.delete();
+        } catch (_) {}
 
-      await backupFile.copy(targetPath);
-      await _databaseHelper.reopen();
-      return true;
+        await backupFile.copy(targetPath);
+        await _databaseHelper.reopen();
+
+        // Remove safety backup on successful restore
+        final safetyBak = File(safetyBakPath);
+        if (await safetyBak.exists()) await safetyBak.delete();
+        final safetyWal = File(safetyWalPath);
+        if (await safetyWal.exists()) await safetyWal.delete();
+
+        return true;
+      } catch (restoreError) {
+        // Rollback to safety backup if copy or reopen fails
+        final safetyBak = File(safetyBakPath);
+        if (await safetyBak.exists()) {
+          await safetyBak.copy(targetPath);
+          await safetyBak.delete();
+        }
+        final safetyWal = File(safetyWalPath);
+        if (await safetyWal.exists()) {
+          await safetyWal.copy('$targetPath-wal');
+          await safetyWal.delete();
+        }
+        await _databaseHelper.reopen();
+        rethrow;
+      }
     } finally {
       if (tempFile != null && await tempFile.exists()) {
         try {

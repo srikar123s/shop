@@ -269,7 +269,8 @@ class _CustomerKhataPassbookScreenState
     String paymentMode = 'Cash';
     bool sendReceiptOnWhatsApp = false;
 
-    final received = await showDialog<bool>(
+    try {
+      final received = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDState) => AlertDialog(
@@ -610,13 +611,18 @@ class _CustomerKhataPassbookScreenState
         await _sendWhatsAppMessage(receiptMsg);
       }
     }
+  } finally {
+    amountCtrl.dispose();
+    notesCtrl.dispose();
   }
+}
 
   Future<void> _showAddManualDebitDialog() async {
     final amountCtrl = TextEditingController();
     final reasonCtrl = TextEditingController();
 
-    final added = await showDialog<bool>(
+    try {
+      final added = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -696,14 +702,19 @@ class _CustomerKhataPassbookScreenState
         ),
       );
     }
+  } finally {
+    amountCtrl.dispose();
+    reasonCtrl.dispose();
   }
+}
 
   Future<void> _showEditCreditLimitDialog() async {
     final limitCtrl = TextEditingController(
       text: _creditLimit > 0 ? _creditLimit.toStringAsFixed(0) : '',
     );
 
-    final updated = await showDialog<bool>(
+    try {
+      final updated = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -773,7 +784,10 @@ class _CustomerKhataPassbookScreenState
         ),
       );
     }
+  } finally {
+    limitCtrl.dispose();
   }
+}
 
   @override
   Widget build(BuildContext context) {

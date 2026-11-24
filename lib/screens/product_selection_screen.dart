@@ -131,7 +131,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   Future<void> _selectProduct(Product product, {int? editIndex}) async {
     if (editIndex == null) {
       final existingForThisProduct = _items
-          .where((i) => i.productId == product.id || i.itemName == product.name)
+          .where((i) =>
+              (product.id != null && i.productId == product.id) ||
+              (product.name.isNotEmpty && i.itemName == product.name))
           .toList();
 
       final bulkItems = await Navigator.push<List<DraftOrderItem>>(
@@ -179,7 +181,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
             ? 'Piece'
             : 'Box';
 
-    final result = await showModalBottomSheet<DraftOrderItem>(
+    final DraftOrderItem? result;
+    try {
+      result = await showModalBottomSheet<DraftOrderItem>(
       context: context,
       isScrollControlled: true,
       builder: (context) {
@@ -322,6 +326,12 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
         );
       },
     );
+    } finally {
+      itemNameCtrl.dispose();
+      detailsCtrl.dispose();
+      notesCtrl.dispose();
+      rateCtrl.dispose();
+    }
 
     if (result != null) {
       setState(() => _items.add(result));
@@ -348,7 +358,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
         ? 'Piece'
         : 'Box';
 
-    final added = await showModalBottomSheet<DraftOrderItem>(
+    final DraftOrderItem? added;
+    try {
+      added = await showModalBottomSheet<DraftOrderItem>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(
@@ -511,6 +523,9 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
         },
       ),
     );
+    } finally {
+      rateCtrl.dispose();
+    }
 
     if (added != null && mounted) {
       setState(() {

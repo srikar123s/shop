@@ -46,7 +46,7 @@ class _QuantitySelectorState extends State<QuantitySelector> {
   }
 
   void _change(double value) {
-    final clamped = value.clamp(widget.min, widget.max ?? 9999).toDouble();
+    final clamped = value.clamp(widget.min, widget.max ?? double.infinity).toDouble();
     if (_controller.text != _format(clamped)) {
       _controller.text = _format(clamped);
     }
@@ -105,7 +105,7 @@ class _QuantitySelectorState extends State<QuantitySelector> {
                 final parsed = double.tryParse(text);
                 if (parsed != null) {
                   final clamped =
-                      parsed.clamp(widget.min, widget.max ?? 9999).toDouble();
+                      parsed.clamp(widget.min, widget.max ?? double.infinity).toDouble();
                   widget.onChanged(clamped);
                 }
               },

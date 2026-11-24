@@ -59,7 +59,8 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
     final chips = List<double>.from(currentShortcuts)..sort();
     final addController = TextEditingController();
 
-    await showDialog<void>(
+    try {
+      await showDialog<void>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -186,13 +187,17 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
         );
       },
     );
+  } finally {
+    addController.dispose();
   }
+}
 
   Future<void> _openCustomProductAssignmentDialog() async {
     final selectedProductIds = <int>{};
     final searchController = TextEditingController();
 
-    await showModalBottomSheet<void>(
+    try {
+      await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -331,19 +336,28 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
                                 currentShortcuts:
                                     _customService.globalShortcuts,
                                 onSave: (newShortcuts) async {
-                                  await _customService.setProductShortcuts(
-                                    selectedProductIds.toList(),
-                                    newShortcuts,
-                                  );
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Custom shortcuts set for ${selectedProductIds.length} product(s)!',
+                                  try {
+                                    await _customService.setProductShortcuts(
+                                      selectedProductIds.toList(),
+                                      newShortcuts,
+                                    );
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Custom shortcuts set for ${selectedProductIds.length} product(s)!',
+                                        ),
+                                        backgroundColor:
+                                            const Color(0xFF0F766E),
                                       ),
-                                      backgroundColor:
-                                          const Color(0xFF0F766E),
-                                    ),
-                                  );
+                                    );
+                                  } catch (e) {
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to set shortcuts: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
+                                  }
                                 },
                               );
                             },
@@ -360,7 +374,10 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
         );
       },
     );
+  } finally {
+    searchController.dispose();
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -468,13 +485,22 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
                               subtitle: 'Choose which + buttons appear by default for all products.',
                               currentShortcuts: globalShortcuts,
                               onSave: (newShortcuts) async {
-                                await _customService.setGlobalShortcuts(newShortcuts);
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Default shortcuts updated successfully!'),
-                                    backgroundColor: Color(0xFF0F766E),
-                                  ),
-                                );
+                                try {
+                                  await _customService.setGlobalShortcuts(newShortcuts);
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Default shortcuts updated successfully!'),
+                                      backgroundColor: Color(0xFF0F766E),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to update shortcuts: $e'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
                               },
                             );
                           },
@@ -574,7 +600,15 @@ class _QuantityShortcutsScreenState extends State<QuantityShortcutsScreen> {
                           icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                           tooltip: 'Remove custom shortcuts',
                           onPressed: () async {
-                            await _customService.removeProductShortcuts([productId]);
+                            try {
+                              await _customService.removeProductShortcuts([productId]);
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Failed to remove shortcuts: $e'), backgroundColor: Colors.red),
+                                );
+                              }
+                            }
                           },
                         ),
                       ),

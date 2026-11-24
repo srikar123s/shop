@@ -192,6 +192,9 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
     final deliveredBreakdown = existingBreakdown != null
         ? BillBreakdown.calculate(
             subtotal: deliveredSubtotal,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
             applyGst: existingBreakdown.applyGst,
             gstRate: existingBreakdown.gstRate,
             otherCharges: existingBreakdown.otherCharges,
@@ -201,6 +204,9 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
     final fullBreakdown = existingBreakdown != null
         ? BillBreakdown.calculate(
             subtotal: orderedSubtotal,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
             applyGst: existingBreakdown.applyGst,
             gstRate: existingBreakdown.gstRate,
             otherCharges: existingBreakdown.otherCharges,

@@ -28,6 +28,7 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final products = await widget.productRepository.getAllProducts();
+    if (!mounted) return;
     setState(() {
       _products = products;
       _loading = false;
@@ -46,7 +47,9 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
     );
     final steps = <ProductStep>[...?product?.configuration.steps];
 
-    final saved = await showDialog<bool>(
+    final bool? saved;
+    try {
+      saved = await showDialog<bool>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -178,6 +181,12 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
         );
       },
     );
+    } finally {
+      nameCtrl.dispose();
+      categoryCtrl.dispose();
+      defaultUnitCtrl.dispose();
+      unitOptionsCtrl.dispose();
+    }
 
     if (saved == true) {
       await _load();
@@ -191,7 +200,8 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
     final valInputCtrl = TextEditingController();
     final values = <String>[...?initial?.values];
 
-    return showDialog<ProductStep>(
+    try {
+      return await showDialog<ProductStep>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -286,6 +296,11 @@ class _ProductAdminScreenState extends State<ProductAdminScreen> {
         );
       },
     );
+    } finally {
+      keyCtrl.dispose();
+      labelCtrl.dispose();
+      valInputCtrl.dispose();
+    }
   }
 
 

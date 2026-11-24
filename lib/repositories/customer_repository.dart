@@ -86,8 +86,12 @@ class CustomerRepository {
     String? address,
     double creditLimit = 0.0,
   }) async {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty) {
+      throw ArgumentError('Customer name cannot be empty');
+    }
     final cleanPhone = phone?.trim().isEmpty == true ? null : phone?.trim();
-    final existing = await findByNameAndPhone(name, cleanPhone);
+    final existing = await findByNameAndPhone(trimmedName, cleanPhone);
     if (existing != null) {
       final mergedPhone = mergePhoneNumbers(existing.phone, cleanPhone);
       final newAddress = (address != null && address.trim().isNotEmpty)
@@ -95,24 +99,31 @@ class CustomerRepository {
           : existing.address;
       final newCredit = creditLimit > 0 ? creditLimit : existing.creditLimit;
 
+      // Only update name if existing name was blank or matches case-insensitively
+      final shouldUpdateName = existing.name.trim().isEmpty ||
+          existing.name.trim().toLowerCase() == trimmedName.toLowerCase();
+      final targetName = shouldUpdateName ? trimmedName : existing.name;
+
       if (mergedPhone != (existing.phone ?? '') ||
           newAddress != existing.address ||
-          newCredit != existing.creditLimit) {
+          newCredit != existing.creditLimit ||
+          (shouldUpdateName && targetName != existing.name)) {
         await updateCustomer(
           id: existing.id!,
-          name: name.trim().isNotEmpty ? name.trim() : existing.name,
+          name: targetName,
           phone: mergedPhone.isNotEmpty ? mergedPhone : null,
           address: newAddress,
           creditLimit: newCredit,
         );
-        return (await getCustomerById(existing.id!))!;
+        final updated = await getCustomerById(existing.id!);
+        return updated ?? existing;
       }
       return existing;
     }
 
     final db = await _databaseHelper.database;
     final customer = Customer(
-      name: name.trim(),
+      name: trimmedName,
       phone: cleanPhone,
       address: address?.trim().isEmpty == true ? null : address?.trim(),
       creditLimit: creditLimit,
@@ -121,7 +132,9 @@ class CustomerRepository {
 
     final id = await db.insert('customers', customer.toMap());
     final savedCustomer = customer.copyWith(id: id);
-    unawaited(ShopSyncService.instance.syncCustomer(savedCustomer));
+    unawaited(ShopSyncService.instance.syncCustomer(savedCustomer).catchError((e) {
+      debugPrint('Error syncing created customer: $e');
+    }));
     return savedCustomer;
   }
 
@@ -157,7 +170,13 @@ class CustomerRepository {
     );
 
     unawaited(getCustomerById(id).then((c) {
-      if (c != null) ShopSyncService.instance.syncCustomer(c);
+      if (c != null) {
+        ShopSyncService.instance.syncCustomer(c).catchError((e) {
+          debugPrint('Error syncing updated customer: $e');
+        });
+      }
+    }).catchError((e) {
+      debugPrint('Error fetching updated customer for sync: $e');
     }));
   }
 
@@ -205,8 +224,8 @@ class CustomerRepository {
         final pDigits = p.replaceAll(RegExp(r'[^0-9]'), '').trim();
         if (pDigits.isNotEmpty &&
             (pDigits == cleanDigits ||
-                pDigits.endsWith(cleanDigits) ||
-                cleanDigits.endsWith(pDigits))) {
+             (pDigits.length >= 7 && cleanDigits.length >= 7 &&
+              (pDigits.endsWith(cleanDigits) || cleanDigits.endsWith(pDigits))))) {
           return c;
         }
       }

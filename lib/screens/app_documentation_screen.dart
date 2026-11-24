@@ -43,7 +43,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             ),
             Text(
               'Complete Pin-to-Pin Feature & Operation Guide',
-              style: TextStyle(fontSize: 11, color: Colors.white70),
+              style: TextStyle(fontSize: 11, color: Colors.black54),
             ),
           ],
         ),
@@ -141,6 +141,7 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
       child: Theme(
         data: theme.copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          key: PageStorageKey<String>('doc_${sec.title}_${_searchQuery.isNotEmpty}'),
           initiallyExpanded: _searchQuery.isNotEmpty || sec.initiallyExpanded,
           leading: Container(
             padding: const EdgeInsets.all(8),

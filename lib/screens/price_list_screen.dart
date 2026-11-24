@@ -44,9 +44,9 @@ class _PriceListScreenState extends State<PriceListScreen> {
     setState(() {
       _allProducts = products;
       _categories = cats.toList();
-      _filter();
       _loading = false;
     });
+    _filter();
   }
 
   void _filter() {
@@ -141,6 +141,7 @@ class _PriceListScreenState extends State<PriceListScreen> {
                           title: 'Search Price List',
                           hint: 'Say product name (e.g. Paints, Sponges)...',
                         );
+                        if (!mounted) return;
                         if (text != null && text.trim().isNotEmpty) {
                           _searchController.text = text.trim();
                           _filter();

@@ -73,11 +73,11 @@ class Customer {
   factory Customer.fromMap(Map<String, Object?> map) {
     return Customer(
       id: map['id'] as int?,
-      name: map['name'] as String,
+      name: (map['name'] as String?)?.trim() ?? 'Unknown Customer',
       phone: map['phone'] as String?,
       address: map['address'] as String?,
       creditLimit: (map['credit_limit'] as num?)?.toDouble() ?? 0.0,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ?? DateTime.now(),
     );
   }
 }

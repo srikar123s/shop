@@ -38,7 +38,7 @@ class OrderItemCard extends StatelessWidget {
             ],
             const SizedBox(height: 6),
             Text(
-              '${s.t('quantity')}: ${item.quantity.toInt()} ${item.unit}',
+              '${s.t('quantity')}: ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity} ${item.unit}',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             if (item.isOtherItem)

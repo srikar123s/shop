@@ -92,7 +92,9 @@ class AppNotificationService {
     await _configureLocalTimeZone();
 
     // Schedule Android OS background alarms for all active reminder times
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling background notifications: $e');
+    }));
 
     // Periodic check every 5 minutes to accurately catch scheduled milestones while foregrounded
     _periodicTimer?.cancel();
@@ -101,7 +103,9 @@ class AppNotificationService {
     });
 
     // Run check on startup
-    unawaited(checkAndNotify());
+    unawaited(checkAndNotify().catchError((e) {
+      debugPrint('Error running startup notification check: $e');
+    }));
   }
 
   /// Configures the native local timezone so that alarms match the phone's wall-clock time
@@ -415,7 +419,9 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefEnabledKey, enabled);
     if (enabled) {
-      unawaited(rescheduleBackgroundNotifications());
+      unawaited(rescheduleBackgroundNotifications().catchError((e) {
+        debugPrint('Error rescheduling notifications: $e');
+      }));
       checkAndNotify(force: true);
     } else {
       await _notificationsPlugin.cancelAll();
@@ -431,7 +437,9 @@ class AppNotificationService {
   Future<void> setPendingOrdersEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefPendingEnabledKey, enabled);
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   Future<String> getPendingOrdersMode() async {
@@ -442,7 +450,9 @@ class AppNotificationService {
   Future<void> setPendingOrdersMode(String mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefPendingModeKey, mode);
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   Future<List<TimeOfDay>> getPendingOrdersTimes() async {
@@ -462,7 +472,9 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
         _prefPendingTimesKey, times.map(_formatTimeOfDay).toList());
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   // --- Procurement List Reminder Preferences ---
@@ -474,7 +486,9 @@ class AppNotificationService {
   Future<void> setProcurementEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefProcureEnabledKey, enabled);
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   Future<List<TimeOfDay>> getProcurementTimes() async {
@@ -493,7 +507,9 @@ class AppNotificationService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
         _prefProcureTimesKey, times.map(_formatTimeOfDay).toList());
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   // --- Daily Report Preferences ---
@@ -505,7 +521,9 @@ class AppNotificationService {
   Future<void> setDailyReportEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefDailyReportEnabledKey, enabled);
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   Future<TimeOfDay> getDailyReportTime() async {
@@ -520,7 +538,9 @@ class AppNotificationService {
   Future<void> setDailyReportTime(TimeOfDay time) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefDailyReportTimeKey, _formatTimeOfDay(time));
-    unawaited(rescheduleBackgroundNotifications());
+    unawaited(rescheduleBackgroundNotifications().catchError((e) {
+      debugPrint('Error rescheduling notifications: $e');
+    }));
   }
 
   // --- Legacy Compatibility ---
@@ -657,12 +677,12 @@ class AppNotificationService {
           if (mode == 'hourly') {
             if (now.hour >= 7 && now.hour <= 21) {
               pendingSlot = '$dayPrefix-pending-hourly-${now.hour}';
-              shouldNotifyPending = prefs.getString(_prefPendingModeKey) != pendingSlot;
+              shouldNotifyPending = prefs.getString('${_prefLastNotifiedKey}_pending_$pendingSlot') != pendingSlot;
             }
           } else if (mode == 'every2hours') {
             if (now.hour >= 8 && now.hour <= 20 && now.hour % 2 == 0) {
               pendingSlot = '$dayPrefix-pending-2hr-${now.hour}';
-              shouldNotifyPending = prefs.getString(_prefPendingModeKey) != pendingSlot;
+              shouldNotifyPending = prefs.getString('${_prefLastNotifiedKey}_pending_$pendingSlot') != pendingSlot;
             }
           } else {
             // Scheduled specific times

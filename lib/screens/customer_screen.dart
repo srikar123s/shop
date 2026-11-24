@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -38,6 +39,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
   bool _loading = true;
   bool _contactsLoading = false;
   bool _contactsEnabled = false;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -45,8 +47,16 @@ class _CustomerScreenState extends State<CustomerScreen> {
     _loadCustomers();
   }
 
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _loadCustomers();
+    });
+  }
+
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -125,7 +135,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final addressCtrl = TextEditingController();
     final creditLimitCtrl = TextEditingController();
 
-    final result = await showDialog<Customer>(
+    final Customer? result;
+    try {
+      result = await showDialog<Customer>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -207,6 +219,12 @@ class _CustomerScreenState extends State<CustomerScreen> {
         );
       },
     );
+    } finally {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      addressCtrl.dispose();
+      creditLimitCtrl.dispose();
+    }
 
     if (result != null) {
       setState(() => _selected = result);
@@ -225,7 +243,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
           : '',
     );
 
-    final updated = await showDialog<bool>(
+    final bool? updated;
+    try {
+      updated = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
@@ -293,6 +313,12 @@ class _CustomerScreenState extends State<CustomerScreen> {
         );
       },
     );
+    } finally {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      addressCtrl.dispose();
+      creditLimitCtrl.dispose();
+    }
 
     if (updated == true && mounted) {
       await _loadCustomers();
@@ -406,7 +432,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
           );
     } else {
       final phoneCtrl = TextEditingController();
-      final enteredPhone = await showDialog<String>(
+      final String? enteredPhone;
+      try {
+        enteredPhone = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
@@ -452,6 +480,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
           ],
         ),
       );
+      } finally {
+        phoneCtrl.dispose();
+      }
       if (enteredPhone == null || !mounted) return;
       customer = await widget.customerRepository.createCustomer(
         name: contactName,
@@ -474,7 +505,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
         customer.phone?.replaceAll(RegExp(r'[^0-9]'), '').trim() ?? '';
     if (cleanP.length < 6) {
       final phoneCtrl = TextEditingController();
-      final savedPhone = await showDialog<String>(
+      final String? savedPhone;
+      try {
+        savedPhone = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
@@ -525,6 +558,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
           ],
         ),
       );
+      } finally {
+        phoneCtrl.dispose();
+      }
 
       if (savedPhone == null || !mounted) return;
       if (customer.id != null) {
@@ -544,6 +580,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
           address: customer.address,
         );
       }
+      if (!mounted) return;
       setState(() => _selected = customer);
       await _loadCustomers();
     }
@@ -641,7 +678,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   ],
                 ),
               ),
-              onChanged: (_) => _loadCustomers(),
+              onChanged: _onSearchChanged,
             ),
             const SizedBox(height: 10),
             Row(
@@ -913,7 +950,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                                   const Icon(Icons.account_balance_wallet, size: 12, color: Color(0xFF0F766E)),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    'Advance: ₹ ',
+                                                    'Advance: ₹ ' + ((-balance % 1 == 0) ? (-balance).toInt().toString() : (-balance).toStringAsFixed(2)),
                                                     style: const TextStyle(
                                                       fontSize: 11,
                                                       fontWeight: FontWeight.w800,
@@ -938,7 +975,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                                   Icon(Icons.warning_amber_rounded, size: 12, color: Colors.red.shade800),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    'Khata Due: ₹ ',
+                                                    'Khata Due: ₹ ' + ((balance % 1 == 0) ? balance.toInt().toString() : balance.toStringAsFixed(2)),
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight: FontWeight.w800,

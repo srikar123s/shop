@@ -11,7 +11,9 @@ plugins {
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    keystorePropertiesFile.inputStream().use {
+        keystoreProperties.load(it)
+    }
 }
 
 val dartDefinesRaw = if (project.hasProperty("dart-defines")) {
@@ -36,8 +38,7 @@ if (dartDefinesRaw.isNotEmpty()) {
 }
 
 val isLocalMode = (project.hasProperty("standalone") && project.property("standalone") == "true")
-        || dartDefinesDecoded.contains("STANDALONE_LOCAL=true")
-        || dartDefinesRaw.contains("STANDALONE_LOCAL")
+        || dartDefinesDecoded.split(",").contains("STANDALONE_LOCAL=true")
 
 val customAppId = if (project.hasProperty("appId")) {
     project.property("appId") as String

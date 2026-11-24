@@ -395,11 +395,21 @@ void main() {
     test('Advance payment calculation logic: excess payment reflects as credit for future bills', () {
       const balanceDue = 1200.0;
       const amountPaid = 1500.0;
-      const excessAdvance = amountPaid - balanceDue;
+      final order = OrderEntity(
+        customerId: 1,
+        customerNameSnapshot: 'Test Customer',
+        createdAt: DateTime.now(),
+        status: OrderStatus.completed,
+        estimateTotal: balanceDue,
+        paidAmount: amountPaid,
+      );
 
+      // In production OrderEntity, dueAmount is clamped to 0.0 when paidAmount >= estimateTotal
+      expect(order.dueAmount, 0.0);
+      expect(order.isFullyPaid, isTrue);
+
+      const excessAdvance = amountPaid - balanceDue;
       expect(excessAdvance, 300.0);
-      const remainingDue = balanceDue - amountPaid;
-      expect(remainingDue, -300.0); // Negative due indicates advance credit balance
     });
   });
 }

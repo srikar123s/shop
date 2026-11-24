@@ -392,10 +392,17 @@ class ExcelCustomerService {
   /// Parses monetary amounts supporting ₹, commas, Dr/Cr
   static double _parseAmount(String raw) {
     if (raw.trim().isEmpty) return 0.0;
-    String clean = raw.trim().replaceAll('₹', '').replaceAll(',', '').replaceAll(' ', '');
-    // If formatted as "1500 Dr", remove "Dr"
+    final lower = raw.trim().toLowerCase();
+    final isCredit = lower.contains('cr') || (raw.trim().startsWith('(') && raw.trim().endsWith(')'));
+    String clean = raw.trim()
+        .replaceAll('₹', '')
+        .replaceAll(',', '')
+        .replaceAll(' ', '')
+        .replaceAll('(', '')
+        .replaceAll(')', '');
     clean = clean.replaceAll(RegExp(r'[a-zA-Z]'), '');
-    return double.tryParse(clean) ?? 0.0;
+    final amount = double.tryParse(clean) ?? 0.0;
+    return isCredit ? -amount : amount;
   }
 
   static String _unescapeXml(String text) {

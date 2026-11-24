@@ -1287,10 +1287,22 @@ class InvoicePdfService {
       );
     } else if (!isDeliveryChallan) {
       pageFormat = PdfPageFormat.a4;
-      bytes = await generateReceiptImagePdfBytes(
-        details,
-        customerBillNumber: customerBillNumber,
-      );
+      Uint8List? generatedBytes;
+      try {
+        generatedBytes = await generateReceiptImagePdfBytes(
+          details,
+          customerBillNumber: customerBillNumber,
+        );
+      } catch (e) {
+        debugPrint('Warning: generateReceiptImagePdfBytes failed, falling back to standard PDF: $e');
+      }
+      bytes = generatedBytes ??
+          await generatePdfBytes(
+            details,
+            isDeliveryChallan: false,
+            isThermal58mm: false,
+            customerBillNumber: customerBillNumber,
+          );
     } else {
       pageFormat = PdfPageFormat.a4;
       bytes = await generatePdfBytes(

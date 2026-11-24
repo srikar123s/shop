@@ -147,7 +147,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     } catch (e) {
       if (mounted) {
         final errText = e.toString().contains('permission-denied')
-            ? 'Firebase Rules Locked! In Firebase Console -> Firestore Database -> Rules tab, change to "allow read, write: if true;" and click Publish.'
+            ? 'Firebase Rules Error: Please ensure you are logged in and your device is approved in Firestore.'
             : 'Sync failed: $e';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

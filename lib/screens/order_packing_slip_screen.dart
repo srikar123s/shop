@@ -98,8 +98,9 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
             tooltip: 'Share Packing Slip',
             icon: const Icon(Icons.share_outlined),
             onPressed: () async {
-              await ShareService.shareOrderDetails(
+              await InvoicePdfService.instance.sharePdf(
                 widget.details,
+                isDeliveryChallan: true,
                 customerBillNumber: widget.customerBillNumber,
               );
             },
@@ -353,6 +354,31 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
             ),
           ),
         ],
+      ),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Colors.grey.shade300)),
+        ),
+        child: SafeArea(
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: allPacked ? const Color(0xFF16A34A) : const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(context, _packedItemIndices);
+            },
+            icon: const Icon(Icons.check_circle_outline),
+            label: Text(
+              allPacked ? 'All Items Packed ($packedCount/$totalItems) - Done' : 'Save Packing Progress ($packedCount/$totalItems)',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+          ),
+        ),
       ),
     );
   }

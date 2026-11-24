@@ -20,17 +20,56 @@ const bool kPureOfflineMode =
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await DatabaseHelper.instance.database;
-  await ShopCustomizationService.instance.initialize();
-  unawaited(AppNotificationService.instance.initialize());
-  if (kPureOfflineMode) {
-    await ShopCustomizationService.instance.setPureOfflineMode(true);
-  } else {
-    unawaited(ShopSyncService.instance.initialize());
+
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('Flutter Error: ${details.exceptionAsString()}');
+  };
+
+  try {
+    await DatabaseHelper.instance.database;
+    await ShopCustomizationService.instance.initialize();
+    unawaited(AppNotificationService.instance.initialize().catchError((e) {
+      debugPrint('Notification service init error: $e');
+    }));
+    if (kPureOfflineMode) {
+      await ShopCustomizationService.instance.setPureOfflineMode(true);
+    } else {
+      unawaited(ShopSyncService.instance.initialize().catchError((e) {
+        debugPrint('Sync service init error: $e');
+      }));
+    }
+    final preferences = await SharedPreferences.getInstance();
+    final languageCode = preferences.getString('language_code') ?? 'en';
+    runApp(ShopApp(initialLocale: Locale(languageCode)));
+  } catch (error, stack) {
+    debugPrint('Fatal application startup error: $error\n$stack');
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text(
+                  'Initialization Error',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Failed to start the application:\n$error',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
   }
-  final preferences = await SharedPreferences.getInstance();
-  final languageCode = preferences.getString('language_code') ?? 'en';
-  runApp(ShopApp(initialLocale: Locale(languageCode)));
 }
 
 class ShopApp extends StatefulWidget {

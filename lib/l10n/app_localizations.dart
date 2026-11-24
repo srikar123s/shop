@@ -10,9 +10,14 @@ class AppLocalizations {
   static const LocalizationsDelegate<AppLocalizations> delegate =
       _AppLocalizationsDelegate();
 
+  static AppLocalizations? maybeOf(BuildContext context) {
+    return Localizations.of<AppLocalizations>(context, AppLocalizations);
+  }
+
   static AppLocalizations of(BuildContext context) {
-    final value = Localizations.of<AppLocalizations>(context, AppLocalizations);
-    return value!;
+    final value = maybeOf(context);
+    assert(value != null, 'No AppLocalizations found in context');
+    return value ?? AppLocalizations(const Locale('en'));
   }
 
   static const supportedLocales = <Locale>[Locale('en'), Locale('te')];

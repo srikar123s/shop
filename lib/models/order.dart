@@ -239,10 +239,10 @@ class BillBreakdown {
       final decoded = jsonDecode(jsonStr);
       if (decoded is Map<String, dynamic>) {
         if (decoded.containsKey('subtotal') ||
+            decoded.containsKey('grandTotal') ||
             decoded.containsKey('applyGst') ||
             decoded.containsKey('otherCharges') ||
-            decoded.containsKey('applyDiscount') ||
-            decoded.containsKey('note')) {
+            decoded.containsKey('applyDiscount')) {
           return BillBreakdown.fromMap(decoded);
         }
       }
@@ -315,15 +315,15 @@ class DraftOrder {
 
   factory DraftOrder.fromMap(Map<String, dynamic> map) {
     return DraftOrder(
-      customer: Customer.fromMap(map['customer'] as Map<String, dynamic>),
+      customer: Customer.fromMap(Map<String, Object?>.from(map['customer'] as Map)),
       items: (map['items'] as List<dynamic>? ?? [])
-          .map((e) => DraftOrderItem.fromMap(e as Map<String, dynamic>))
+          .map((e) => DraftOrderItem.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
       estimateTotal: (map['estimateTotal'] as num?)?.toDouble(),
       applyGst: map['applyGst'] as bool? ?? false,
       gstRate: (map['gstRate'] as num?)?.toDouble() ?? 18.0,
       otherCharges: (map['otherCharges'] as List<dynamic>? ?? [])
-          .map((e) => OtherCharge.fromMap(e as Map<String, dynamic>))
+          .map((e) => OtherCharge.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
       applyDiscount: map['applyDiscount'] as bool? ?? false,
       discountType: map['discountType'] as String? ?? 'flat',
@@ -401,11 +401,11 @@ class DraftOrderItem {
   factory DraftOrderItem.fromMap(Map<String, dynamic> map) {
     return DraftOrderItem(
       productId: map['productId'] as int?,
-      itemName: map['itemName'] as String,
+      itemName: (map['itemName'] as String?) ?? '',
       options: (map['options'] as Map<dynamic, dynamic>? ?? {})
           .map((k, v) => MapEntry(k.toString(), v.toString())),
-      quantity: (map['quantity'] as num).toDouble(),
-      unit: map['unit'] as String,
+      quantity: (map['quantity'] as num?)?.toDouble() ?? 0.0,
+      unit: (map['unit'] as String?) ?? 'Piece',
       isOtherItem: map['isOtherItem'] as bool? ?? false,
       description: map['description'] as String?,
       notes: map['notes'] as String?,
@@ -450,7 +450,7 @@ class OrderEntity {
   BillBreakdown? get billBreakdown => BillBreakdown.fromJsonString(notes);
 
   double get dueAmount => (estimateTotal - paidAmount).clamp(0, double.infinity);
-  bool get isFullyPaid => dueAmount <= 0.01 && estimateTotal > 0;
+  bool get isFullyPaid => estimateTotal >= 0 && dueAmount <= 0.01;
 
   OrderEntity copyWith({
     int? id,
@@ -533,7 +533,7 @@ class OrderItemEntity {
   final String? notes;
   final List<OrderItemOptionEntity> options;
 
-  double get quantityPending => quantityOrdered - quantityGiven;
+  double get quantityPending => (quantityOrdered - quantityGiven).clamp(0.0, double.infinity);
 
   double get unitPrice {
     try {
@@ -555,10 +555,14 @@ class OrderItemEntity {
     String updatedSnapshot = productSnapshot;
     if (unitPrice != null) {
       try {
-        final map = jsonDecode(productSnapshot) as Map<String, dynamic>;
+        final map = productSnapshot.trim().isNotEmpty
+            ? (jsonDecode(productSnapshot) as Map<String, dynamic>)
+            : <String, dynamic>{};
         map['unitPrice'] = unitPrice;
         updatedSnapshot = jsonEncode(map);
-      } catch (_) {}
+      } catch (_) {
+        updatedSnapshot = jsonEncode({'unitPrice': unitPrice});
+      }
     }
     return OrderItemEntity(
       id: id,
@@ -629,7 +633,7 @@ class OrderSummary {
 
   double get dueAmount =>
       (estimateTotal - paidAmount).clamp(0.0, double.infinity);
-  bool get isFullyPaid => estimateTotal > 0 && paidAmount >= estimateTotal;
+  bool get isFullyPaid => estimateTotal >= 0 && dueAmount <= 0.01;
 
   String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
 }

@@ -51,27 +51,39 @@ class Product {
       'is_active': isActive ? 1 : 0,
       'configuration': jsonEncode(configuration.toMap()),
       'needs_review': needsReview ? 1 : 0,
-      if (priceUpdatedAt != null)
-        'price_updated_at': priceUpdatedAt!.toIso8601String(),
-      if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+      'price_updated_at': priceUpdatedAt?.toIso8601String(),
+      'created_at': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
     };
   }
 
   factory Product.fromMap(Map<String, Object?> map) {
+    final rawIsActive = map['is_active'];
+    final bool active = rawIsActive == 1 || rawIsActive == true || rawIsActive == '1' || rawIsActive == null;
+    ProductConfiguration config;
+    try {
+      final rawConfig = map['configuration'];
+      if (rawConfig is Map) {
+        config = ProductConfiguration.fromMap(Map<String, dynamic>.from(rawConfig));
+      } else if (rawConfig is String && rawConfig.trim().isNotEmpty) {
+        config = ProductConfiguration.fromMap(jsonDecode(rawConfig) as Map<String, dynamic>);
+      } else {
+        config = const ProductConfiguration(steps: []);
+      }
+    } catch (_) {
+      config = const ProductConfiguration(steps: []);
+    }
     return Product(
       id: map['id'] as int?,
-      name: map['name'] as String,
-      category: map['category'] as String,
-      isActive: (map['is_active'] as int) == 1,
-      configuration: ProductConfiguration.fromMap(
-        jsonDecode(map['configuration'] as String) as Map<String, dynamic>,
-      ),
+      name: (map['name'] as String?)?.trim() ?? '',
+      category: (map['category'] as String?)?.trim() ?? '',
+      isActive: active,
+      configuration: config,
       needsReview: (map['needs_review'] as int? ?? 0) == 1,
       priceUpdatedAt: map['price_updated_at'] != null
-          ? DateTime.tryParse(map['price_updated_at'] as String)
+          ? DateTime.tryParse(map['price_updated_at'].toString())
           : null,
       createdAt: map['created_at'] != null
-          ? DateTime.tryParse(map['created_at'] as String)
+          ? DateTime.tryParse(map['created_at'].toString())
           : null,
     );
   }
@@ -179,11 +191,11 @@ class ProductStep {
 
   factory ProductStep.fromMap(Map<String, dynamic> map) {
     return ProductStep(
-      key: map['key'] as String,
-      label: map['label'] as String,
-      type: map['type'] as String,
+      key: (map['key'] as String?) ?? '',
+      label: (map['label'] as String?) ?? '',
+      type: (map['type'] as String?) ?? 'text',
       values: (map['values'] as List<dynamic>? ?? <dynamic>[])
-          .map((e) => e as String)
+          .map((e) => e.toString())
           .toList(),
     );
   }
