@@ -43,30 +43,53 @@ class BackupService {
       dialogTitle: 'Select Backup File',
       type: FileType.custom,
       allowedExtensions: <String>['db'],
+      withData: true,
     );
-    if (picked == null || picked.files.single.path == null) {
+    if (picked == null || picked.files.isEmpty) {
       return false;
     }
 
-    final backupPath = picked.files.single.path!;
-    final backupFile = File(backupPath);
-    if (!await backupFile.exists()) {
-      throw Exception('Selected backup file does not exist.');
+    final singleFile = picked.files.single;
+    String? backupPath = singleFile.path;
+    File? tempFile;
+
+    if (backupPath == null && singleFile.bytes != null) {
+      final tempDir = await getTemporaryDirectory();
+      tempFile = File(p.join(tempDir.path, 'restored_temp_${DateTime.now().millisecondsSinceEpoch}.db'));
+      await tempFile.writeAsBytes(singleFile.bytes!);
+      backupPath = tempFile.path;
     }
 
-    final targetPath = await _databaseHelper.getDatabaseFullPath();
-    await _databaseHelper.close();
+    if (backupPath == null) {
+      return false;
+    }
 
-    // Clean up any existing WAL journal and shared-memory files from old database to avoid corruption
     try {
-      final walFile = File('$targetPath-wal');
-      if (await walFile.exists()) await walFile.delete();
-      final shmFile = File('$targetPath-shm');
-      if (await shmFile.exists()) await shmFile.delete();
-    } catch (_) {}
+      final backupFile = File(backupPath);
+      if (!await backupFile.exists()) {
+        throw Exception('Selected backup file does not exist.');
+      }
 
-    await backupFile.copy(targetPath);
-    await _databaseHelper.reopen();
-    return true;
+      final targetPath = await _databaseHelper.getDatabaseFullPath();
+      await _databaseHelper.close();
+
+      // Clean up any existing WAL journal and shared-memory files from old database to avoid corruption
+      try {
+        final walFile = File('$targetPath-wal');
+        if (await walFile.exists()) await walFile.delete();
+        final shmFile = File('$targetPath-shm');
+        if (await shmFile.exists()) await shmFile.delete();
+      } catch (_) {}
+
+      await backupFile.copy(targetPath);
+      await _databaseHelper.reopen();
+      return true;
+    } finally {
+      if (tempFile != null && await tempFile.exists()) {
+        try {
+          await tempFile.delete();
+        } catch (_) {}
+      }
+    }
   }
 }

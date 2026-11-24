@@ -108,8 +108,10 @@ class AppNotificationService {
   Future<void> _configureLocalTimeZone() async {
     try {
       tz.initializeTimeZones();
-      final info = await FlutterTimezone.getLocalTimezone();
-      final String timeZoneName = info.identifier;
+      final dynamic info = await FlutterTimezone.getLocalTimezone();
+      final String timeZoneName = info is String
+          ? info
+          : (info?.identifier?.toString() ?? info.toString());
       tz.setLocalLocation(tz.getLocation(timeZoneName));
       debugPrint('[AppNotificationService] Local timezone configured: $timeZoneName');
     } catch (e) {

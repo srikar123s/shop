@@ -38,9 +38,9 @@ class StaffHistoryGroup {
   double get totalBillValue =>
       orders.fold(0.0, (sum, o) => sum + o.estimateTotal);
 
-  DateTime get latestOrderDate => orders
-      .map((o) => o.createdAt)
-      .reduce((a, b) => a.isAfter(b) ? a : b);
+  DateTime get latestOrderDate => orders.isEmpty
+      ? DateTime.now()
+      : orders.map((o) => o.createdAt).reduce((a, b) => a.isAfter(b) ? a : b);
 }
 
 class CustomerHistoryGroup {
@@ -67,9 +67,9 @@ class CustomerHistoryGroup {
   double get totalBillValue =>
       orders.fold(0.0, (sum, o) => sum + o.estimateTotal);
 
-  DateTime get latestOrderDate => orders
-      .map((o) => o.createdAt)
-      .reduce((a, b) => a.isAfter(b) ? a : b);
+  DateTime get latestOrderDate => orders.isEmpty
+      ? DateTime.now()
+      : orders.map((o) => o.createdAt).reduce((a, b) => a.isAfter(b) ? a : b);
 }
 
 class HistoryScreen extends StatefulWidget {

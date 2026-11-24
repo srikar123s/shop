@@ -666,7 +666,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     );
   }
 
-  void _showRecordPaymentDialog() {
+  Future<void> _showRecordPaymentDialog() async {
     if (_details == null) return;
     final order = _details!.order;
     final total = order.estimateTotal;
@@ -686,10 +686,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ? order.paymentMode
         : (isRetail ? 'Cash' : 'UPI');
 
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
@@ -910,6 +911,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ),
       ),
     );
+    } finally {
+      amountController.dispose();
+    }
   }
 
   Future<void> _showEditBillDialog(OrderEntity order) async {
@@ -940,14 +944,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       text: gstRate % 1 == 0 ? gstRate.toInt().toString() : gstRate.toString(),
     );
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
             final subtotal = _details!.items.fold<double>(
@@ -1199,53 +1204,58 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           onPressed: () async {
                             final nameCtrl = TextEditingController();
                             final amtCtrl = TextEditingController();
-                            final added = await showDialog<bool>(
-                              context: ctx,
-                              builder: (dCtx) => AlertDialog(
-                                title: const Text('Add Other Charge'),
-                                content: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    TextField(
-                                      controller: nameCtrl,
-                                      decoration: const InputDecoration(
-                                          labelText:
-                                              'Charge Name (e.g. Transport, Labor)'),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    TextField(
-                                      controller: amtCtrl,
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                              decimal: true),
-                                      decoration: const InputDecoration(
-                                          labelText: 'Amount ₹'),
-                                    ),
+                            try {
+                              final added = await showDialog<bool>(
+                                context: ctx,
+                                builder: (dCtx) => AlertDialog(
+                                  title: const Text('Add Other Charge'),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      TextField(
+                                        controller: nameCtrl,
+                                        decoration: const InputDecoration(
+                                            labelText:
+                                                'Charge Name (e.g. Transport, Labor)'),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      TextField(
+                                        controller: amtCtrl,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                                decimal: true),
+                                        decoration: const InputDecoration(
+                                            labelText: 'Amount ₹'),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () => Navigator.pop(dCtx, false),
+                                        child: const Text('CANCEL')),
+                                    FilledButton(
+                                        onPressed: () => Navigator.pop(dCtx, true),
+                                        child: const Text('ADD')),
                                   ],
                                 ),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () => Navigator.pop(dCtx, false),
-                                      child: const Text('CANCEL')),
-                                  FilledButton(
-                                      onPressed: () => Navigator.pop(dCtx, true),
-                                      child: const Text('ADD')),
-                                ],
-                              ),
-                            );
-                            if (added == true && amtCtrl.text.isNotEmpty) {
-                              final amt =
-                                  double.tryParse(amtCtrl.text.trim()) ?? 0.0;
-                              if (amt > 0) {
-                                setModalState(() {
-                                  otherCharges.add(OtherCharge(
-                                    name: nameCtrl.text.trim().isNotEmpty
-                                        ? nameCtrl.text.trim()
-                                        : 'Transport',
-                                    amount: amt,
-                                  ));
-                                });
+                              );
+                              if (added == true && amtCtrl.text.isNotEmpty) {
+                                final amt =
+                                    double.tryParse(amtCtrl.text.trim()) ?? 0.0;
+                                if (amt > 0) {
+                                  setModalState(() {
+                                    otherCharges.add(OtherCharge(
+                                      name: nameCtrl.text.trim().isNotEmpty
+                                          ? nameCtrl.text.trim()
+                                          : 'Transport',
+                                      amount: amt,
+                                    ));
+                                  });
+                                }
                               }
+                            } finally {
+                              nameCtrl.dispose();
+                              amtCtrl.dispose();
                             }
                           },
                         ),
@@ -1420,6 +1430,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         );
       },
     );
+    } finally {
+      discountController.dispose();
+      gstController.dispose();
+    }
   }
 
   @override

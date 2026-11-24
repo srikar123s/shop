@@ -34,15 +34,26 @@ Future<void> showCustomerImportDialog({
             }
           }
 
-          final totalBalance = candidates.fold<double>(
-            0.0,
-            (sum, c) => sum + (selectedIndices.contains(candidates.indexOf(c)) ? c.presentBalance : 0.0),
-          );
+          double totalBalance = 0.0;
+          int newCount = 0;
+          int existingCount = 0;
+          int multiPhoneCount = 0;
 
+          for (final idx in selectedIndices) {
+            if (idx >= 0 && idx < candidates.length) {
+              final c = candidates[idx];
+              totalBalance += c.presentBalance;
+              if (c.isExisting) {
+                existingCount++;
+              } else {
+                newCount++;
+              }
+              if (c.hasMultiplePhones) {
+                multiPhoneCount++;
+              }
+            }
+          }
           final selectedCount = selectedIndices.length;
-          final newCount = candidates.where((c) => !c.isExisting && selectedIndices.contains(candidates.indexOf(c))).length;
-          final existingCount = candidates.where((c) => c.isExisting && selectedIndices.contains(candidates.indexOf(c))).length;
-          final multiPhoneCount = candidates.where((c) => c.hasMultiplePhones && selectedIndices.contains(candidates.indexOf(c))).length;
 
           return AlertDialog(
             titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -349,12 +360,21 @@ Future<void> showCustomerImportDialog({
                             if (recordOpeningBalance &&
                                 row.presentBalance > 0.01 &&
                                 savedCustomer.id != null) {
-                              await DatabaseHelper.instance.recordManualKhataDebit(
-                                customerId: savedCustomer.id!,
-                                amount: row.presentBalance,
-                                description: 'Opening Balance (Imported from Excel)',
+                              final db = await DatabaseHelper.instance.database;
+                              final existingDebit = await db.query(
+                                'orders',
+                                where: 'customer_id = ? AND notes LIKE ?',
+                                whereArgs: [savedCustomer.id!, '%Opening Balance (Imported from Excel)%'],
+                                limit: 1,
                               );
-                              balancesRecorded++;
+                              if (existingDebit.isEmpty) {
+                                await DatabaseHelper.instance.recordManualKhataDebit(
+                                  customerId: savedCustomer.id!,
+                                  amount: row.presentBalance,
+                                  description: 'Opening Balance (Imported from Excel)',
+                                );
+                                balancesRecorded++;
+                              }
                             }
                           } catch (_) {}
                         }

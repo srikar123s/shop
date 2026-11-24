@@ -57,7 +57,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
   Future<void> _loadKhata() async {
     setState(() => _loading = true);
     final list = await DatabaseHelper.instance.getCustomerKhataList();
-    final metrics = await DatabaseHelper.instance.getKhataSummaryMetrics();
+    final metrics = await DatabaseHelper.instance.getKhataSummaryMetrics(list);
     if (!mounted) return;
     setState(() {
       _khataList = list;

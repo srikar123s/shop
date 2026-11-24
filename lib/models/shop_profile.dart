@@ -18,6 +18,7 @@ class ShopProfile {
   const ShopProfile({
     required this.shopCode,
     required this.shopName,
+    this.ownerUid = '',
     this.ownerPhone = '',
     this.ownerName = '',
     this.address = '',
@@ -35,6 +36,7 @@ class ShopProfile {
 
   final String shopCode;
   final String shopName;
+  final String ownerUid;
   final String ownerPhone;
   final String ownerName;
   final String address;
@@ -57,6 +59,7 @@ class ShopProfile {
   ShopProfile copyWith({
     String? shopCode,
     String? shopName,
+    String? ownerUid,
     String? ownerPhone,
     String? ownerName,
     String? address,
@@ -74,6 +77,7 @@ class ShopProfile {
     return ShopProfile(
       shopCode: shopCode ?? this.shopCode,
       shopName: shopName ?? this.shopName,
+      ownerUid: ownerUid ?? this.ownerUid,
       ownerPhone: ownerPhone ?? this.ownerPhone,
       ownerName: ownerName ?? this.ownerName,
       address: address ?? this.address,
@@ -94,6 +98,7 @@ class ShopProfile {
     return {
       'shopCode': shopCode,
       'shopName': shopName,
+      'ownerUid': ownerUid,
       'ownerPhone': ownerPhone,
       'ownerName': ownerName,
       'address': address,
@@ -114,6 +119,7 @@ class ShopProfile {
     return ShopProfile(
       shopCode: (map['shopCode'] as String? ?? '').trim().toUpperCase(),
       shopName: map['shopName'] as String? ?? 'My Shop',
+      ownerUid: map['ownerUid'] as String? ?? '',
       ownerPhone: map['ownerPhone'] as String? ?? '',
       ownerName: map['ownerName'] as String? ?? '',
       address: map['address'] as String? ?? '',

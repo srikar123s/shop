@@ -241,9 +241,11 @@ class ShopSyncService extends ChangeNotifier {
     notifyListeners();
 
     final code = generateShopCode();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final profile = ShopProfile(
       shopCode: code,
       shopName: shopName.trim(),
+      ownerUid: currentUid,
       ownerName: ownerName.trim(),
       ownerPhone: ownerPhone.trim(),
       address: address.trim(),
@@ -267,9 +269,13 @@ class ShopSyncService extends ChangeNotifier {
         final firestore = FirebaseFirestore.instance;
         await firestore.collection('shops').doc(code).set({
           ...profile.toMap(),
+          'ownerUid': currentUid,
           'updatedAt': FieldValue.serverTimestamp(),
           'lastUpdatedByDevice': _deviceId,
         });
+
+        // Register owner device first so security rules authorize subcollection writes
+        await _registerCurrentDevice();
 
         // Push existing local items into the newly created cloud shop
         await uploadLocalDataToCloud();
@@ -277,7 +283,6 @@ class ShopSyncService extends ChangeNotifier {
         _status = SyncStatus.connected;
         _statusMessage = 'Shop created and live synced!';
         _startRealtimeListeners();
-        unawaited(_registerCurrentDevice());
       } catch (e) {
         debugPrint('Error uploading shop to Firestore: $e');
         _status = SyncStatus.offline;
@@ -625,6 +630,11 @@ class ShopSyncService extends ChangeNotifier {
             'phone': incomingPhone,
             'created_at': DateTime.now().toIso8601String(),
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          if (localCustId <= 0) {
+            final existing = await db.query('customers',
+                where: 'phone = ?', whereArgs: [incomingPhone]);
+            localCustId = existing.isNotEmpty ? existing.first['id'] as int : 1;
+          }
         }
       } else {
         final existingCust = await db.query('customers',
@@ -679,16 +689,14 @@ class ShopSyncService extends ChangeNotifier {
 
       final rawItems = data['items'] as List<dynamic>? ?? [];
       for (final rawItem in rawItems) {
-        final item = rawItem as Map<String, dynamic>;
-        final itemId = item['id'] as int? ?? Random().nextInt(1000000);
+        final item = (rawItem as Map).cast<String, dynamic>();
         final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
         final snapString = item['product_snapshot'] as String? ?? jsonEncode({
           'itemName': item['item_name'],
           'unitPrice': unitPrice,
           'options': item['options'] ?? {},
         });
-        await db.insert('order_items', {
-          'id': itemId,
+        final localItemId = await db.insert('order_items', {
           'order_id': targetOrderId,
           'product_id': item['product_id'],
           'item_name': item['item_name'],
@@ -702,15 +710,15 @@ class ShopSyncService extends ChangeNotifier {
           'details': item['details'],
           'notes': item['notes'],
           'product_snapshot': snapString,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        });
 
-        final rawOptions = item['options'] as Map<String, dynamic>? ?? {};
+        final rawOptions = (item['options'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
         for (final optEntry in rawOptions.entries) {
           await db.insert('order_item_options', {
-            'order_item_id': itemId,
+            'order_item_id': localItemId,
             'option_name': optEntry.key,
             'option_value': optEntry.value.toString(),
-          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          });
         }
       }
     }
@@ -958,6 +966,11 @@ class ShopSyncService extends ChangeNotifier {
                 'phone': incomingPhone,
                 'created_at': DateTime.now().toIso8601String(),
               }, conflictAlgorithm: ConflictAlgorithm.ignore);
+              if (localCustId <= 0) {
+                final existing = await db.query('customers',
+                    where: 'phone = ?', whereArgs: [incomingPhone]);
+                localCustId = existing.isNotEmpty ? existing.first['id'] as int : 1;
+              }
             }
           } else {
             final existingCust = await db.query('customers',
@@ -1012,37 +1025,36 @@ class ShopSyncService extends ChangeNotifier {
 
           final rawItems = data['items'] as List<dynamic>? ?? [];
           for (final rawItem in rawItems) {
-            final item = rawItem as Map<String, dynamic>;
-            final itemId = item['id'] as int? ?? Random().nextInt(1000000);
+            final item = (rawItem as Map).cast<String, dynamic>();
+            final unitPrice = (item['unit_price'] as num?)?.toDouble() ?? 0.0;
             final snapString = item['product_snapshot'] as String? ?? jsonEncode({
               'itemName': item['item_name'],
-              'unitPrice': item['unit_price'] ?? 0.0,
+              'unitPrice': unitPrice,
               'options': item['options'] ?? {},
             });
-            await db.insert('order_items', {
-              'id': itemId,
+            final localItemId = await db.insert('order_items', {
               'order_id': targetOrderId,
               'product_id': item['product_id'],
               'item_name': item['item_name'],
               'quantity_ordered': item['quantity_ordered'],
               'quantity_given': item['quantity_given'] ?? 0,
               'unit': item['unit'],
-              'unit_price': (item['unit_price'] as num?)?.toDouble() ?? 0.0,
+              'unit_price': unitPrice,
               'status': item['status'],
               'is_other_item': item['is_other_item'] ?? 0,
               'procurement_status': item['procurement_status'],
               'details': item['details'],
               'notes': item['notes'],
               'product_snapshot': snapString,
-            }, conflictAlgorithm: ConflictAlgorithm.replace);
+            });
 
-            final rawOptions = item['options'] as Map<String, dynamic>? ?? {};
+            final rawOptions = (item['options'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
             for (final optEntry in rawOptions.entries) {
               await db.insert('order_item_options', {
-                'order_item_id': itemId,
+                'order_item_id': localItemId,
                 'option_name': optEntry.key,
                 'option_value': optEntry.value.toString(),
-              }, conflictAlgorithm: ConflictAlgorithm.replace);
+              });
             }
           }
         }
@@ -1218,7 +1230,7 @@ class ShopSyncService extends ChangeNotifier {
       final existing = await docRef.get();
       final isOwner = _currentShop!.isOwner;
       final effectiveName = isOwner
-          ? (_currentShop!.ownerName.isNotEmpty ? _currentShop!.ownerName : 'Srikar')
+          ? (_currentShop!.ownerName.isNotEmpty ? _currentShop!.ownerName : 'Owner')
           : (_currentShop!.staffName.isNotEmpty ? _currentShop!.staffName : 'Staff');
 
       if (!existing.exists) {

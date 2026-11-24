@@ -66,6 +66,9 @@ class _ShopAppState extends State<ShopApp> {
     final productRepository = ProductRepository(database);
     final orderRepository = OrderRepository(database);
     final backupService = BackupService(database);
+    final themePrimaryColor = kPureOfflineMode
+        ? const Color(0xFFD97706) // Bright Amber / Retail Counter Theme
+        : const Color(0xFF0F766E); // Deep Emerald / Wholesale Theme
 
     return MaterialApp(
       navigatorKey: navigatorKey,
@@ -83,12 +86,8 @@ class _ShopAppState extends State<ShopApp> {
       ],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: kPureOfflineMode
-              ? const Color(0xFFD97706) // Bright Amber / Retail Counter Theme
-              : const Color(0xFF0F766E), // Deep Emerald / Wholesale Theme
-          primary: kPureOfflineMode
-              ? const Color(0xFFD97706)
-              : const Color(0xFF0F766E),
+          seedColor: themePrimaryColor,
+          primary: themePrimaryColor,
           surface: Colors.white,
           surfaceContainerLowest: Colors.white,
           surfaceContainerLow: const Color(0xFFF8FAFC),
@@ -135,14 +134,14 @@ class _ShopAppState extends State<ShopApp> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF0F766E), width: 1.8),
+            borderSide: BorderSide(color: themePrimaryColor, width: 1.8),
           ),
           labelStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 14),
           hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF0F766E),
+            backgroundColor: themePrimaryColor,
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -154,7 +153,7 @@ class _ShopAppState extends State<ShopApp> {
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF0F766E),
+            foregroundColor: themePrimaryColor,
             side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),

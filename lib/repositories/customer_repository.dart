@@ -62,16 +62,20 @@ class CustomerRepository {
       if (byPhone != null) return byPhone;
     }
 
-    // 2. Check by exact name (case-insensitive)
-    final db = await _databaseHelper.database;
-    final result = await db.query(
-      'customers',
-      where: 'LOWER(TRIM(name)) = ?',
-      whereArgs: [normalizedName],
-      limit: 1,
-    );
-    if (result.isNotEmpty) {
-      return Customer.fromMap(result.first);
+    // 2. Check by exact name (case-insensitive) ONLY if no phone numbers were provided.
+    // If phone numbers were provided and none matched, do NOT conflate different customers
+    // who happen to share a common name (e.g. two unrelated customers named "Ramesh").
+    if (inputNumbers.isEmpty) {
+      final db = await _databaseHelper.database;
+      final result = await db.query(
+        'customers',
+        where: 'LOWER(TRIM(name)) = ?',
+        whereArgs: [normalizedName],
+        limit: 1,
+      );
+      if (result.isNotEmpty) {
+        return Customer.fromMap(result.first);
+      }
     }
     return null;
   }
@@ -158,6 +162,10 @@ class CustomerRepository {
   }
 
   Future<void> deleteCustomer(int id) async {
+    final balance = await _databaseHelper.getCustomerKhataBalance(id);
+    if (balance.abs() > 0.01) {
+      throw Exception('Cannot delete customer with active Khata balance of ₹${balance.toStringAsFixed(2)}');
+    }
     final db = await _databaseHelper.database;
     await db.delete(
       'customers',
@@ -184,8 +192,14 @@ class CustomerRepository {
     final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '').trim();
     if (cleanDigits.isEmpty) return null;
     final db = await _databaseHelper.database;
-    final all = await db.query('customers');
-    for (final row in all) {
+    // Direct filtered query on phone substring to avoid full-table scan in Dart memory
+    final candidates = await db.query(
+      'customers',
+      where: 'phone LIKE ?',
+      whereArgs: ['%$cleanDigits%'],
+      limit: 25,
+    );
+    for (final row in candidates) {
       final c = Customer.fromMap(row);
       for (final p in c.phoneNumbers) {
         final pDigits = p.replaceAll(RegExp(r'[^0-9]'), '').trim();

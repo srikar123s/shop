@@ -51,9 +51,36 @@ class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _isTopSellingExpanded = false;
   bool _priceCautionBannerDismissed = false;
+
+  late Future<({int pendingCount, int oldPendingCount, int toProcureCount})> _pendingStatsFuture;
+  late Future<int> _needsReviewFuture;
+  late Future<List<OrderSummary>> _recentOrdersFuture;
+  late Future<({bool enabled, int days, int count})> _priceCautionFuture;
+  late Future<List<TopProductStat>> _topSellingFuture;
+
+  void _refreshData() {
+    _pendingStatsFuture = widget.orderRepository.getPendingAndProcurementStats();
+    _needsReviewFuture = widget.productRepository.getNeedsReviewCount();
+    _recentOrdersFuture = widget.orderRepository.searchOrderSummaries('');
+    _priceCautionFuture = _fetchPriceCaution();
+    _topSellingFuture = DatabaseHelper.instance.getTopSellingProducts(limit: 5);
+  }
+
+  Future<({bool enabled, int days, int count})> _fetchPriceCaution() async {
+    final enabled =
+        await AppNotificationService.instance.isPriceCautionEnabled();
+    if (!enabled) return (enabled: false, days: 30, count: 0);
+    final days =
+        await AppNotificationService.instance.getPriceCautionDays();
+    final count = await widget.productRepository
+        .getStalePriceCount(thresholdDays: days);
+    return (enabled: true, days: days, count: count);
+  }
+
   @override
   void initState() {
     super.initState();
+    _refreshData();
     ShopSyncService.instance.addListener(_onSyncUpdate);
     ShopCustomizationService.instance.addListener(_onSyncUpdate);
   }
@@ -66,7 +93,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onSyncUpdate() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        _refreshData();
+      });
+    }
   }
 
   Color _statusColor(OrderStatus status) {
@@ -151,7 +182,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               );
-              setState(() {});
+              setState(() {
+                                _refreshData();
+                              });
             },
           ),
           if (!ShopCustomizationService.instance.isPureOfflineMode &&
@@ -165,7 +198,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute<void>(
                       builder: (_) => const ShopSyncScreen()),
                 );
-                setState(() {});
+                setState(() {
+                                _refreshData();
+                              });
               },
               icon: Stack(
                 clipBehavior: Clip.none,
@@ -200,7 +235,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               );
-              setState(() {});
+              setState(() {
+                                _refreshData();
+                              });
             },
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -249,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 12),
               // Dashboard Metrics: Pending Orders & Procurement Needed
               FutureBuilder<({int pendingCount, int oldPendingCount, int toProcureCount})>(
-                future: widget.orderRepository.getPendingAndProcurementStats(),
+                future: _pendingStatsFuture,
                 builder: (context, snapshot) {
                   final stats = snapshot.data;
                   final pendingCount = stats?.pendingCount ?? 0;
@@ -278,7 +315,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {});
+                              setState(() {
+                                _refreshData();
+                              });
                             },
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -407,7 +446,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {});
+                              setState(() {
+                                _refreshData();
+                              });
                             },
                             child: Container(
                               padding: const EdgeInsets.all(12),
@@ -528,7 +569,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         );
-                        setState(() {});
+                        setState(() {
+                                _refreshData();
+                              });
                       },
                       child: Padding(
                         padding: const EdgeInsets.all(20),
@@ -637,7 +680,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {});
+                              setState(() {
+                                _refreshData();
+                              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -725,7 +770,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {});
+                              setState(() {
+                                _refreshData();
+                              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -804,7 +851,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           );
-                          setState(() {});
+                          setState(() {
+                                _refreshData();
+                              });
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -854,7 +903,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           );
-                          setState(() {});
+                          setState(() {
+                                _refreshData();
+                              });
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(16),
@@ -875,8 +926,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         color: Colors.amber.shade900, size: 22),
                                   ),
                                   FutureBuilder<int>(
-                                    future: widget.productRepository
-                                        .getNeedsReviewCount(),
+                                    future: _needsReviewFuture,
                                     builder: (context, snap) {
                                       final count = snap.data ?? 0;
                                       if (count <= 0) {
@@ -979,7 +1029,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       );
-                      setState(() {});
+                      setState(() {
+                                _refreshData();
+                              });
                     },
                     child: const Text('View All',
                         style: TextStyle(fontWeight: FontWeight.w700)),
@@ -990,7 +1042,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
               // Orders List
               FutureBuilder<List<OrderSummary>>(
-                future: widget.orderRepository.searchOrderSummaries(''),
+                future: _recentOrdersFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(
@@ -1062,7 +1114,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                   ),
                                 ),
                               );
-                              setState(() {});
+                              setState(() {
+                                _refreshData();
+                              });
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(14),
@@ -1190,16 +1244,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_priceCautionBannerDismissed) return const SizedBox.shrink();
 
     return FutureBuilder<({bool enabled, int days, int count})>(
-      future: () async {
-        final enabled =
-            await AppNotificationService.instance.isPriceCautionEnabled();
-        if (!enabled) return (enabled: false, days: 30, count: 0);
-        final days =
-            await AppNotificationService.instance.getPriceCautionDays();
-        final count = await widget.productRepository
-            .getStalePriceCount(thresholdDays: days);
-        return (enabled: true, days: days, count: count);
-      }(),
+      future: _priceCautionFuture,
       builder: (context, snapshot) {
         final data = snapshot.data;
         if (data == null || !data.enabled || data.count <= 0) {
@@ -1246,7 +1291,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     );
-                    setState(() {});
+                    setState(() {
+                                _refreshData();
+                              });
                   },
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1319,9 +1366,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildTopSellingExpandableBar(ThemeData theme) {
     return FutureBuilder<List<TopProductStat>>(
-      future: DatabaseHelper.instance.getTopSellingProducts(limit: 3),
+      future: _topSellingFuture,
       builder: (context, snapshot) {
-        final list = snapshot.data ?? [];
+        final list = (snapshot.data ?? []).take(3).toList();
         if (list.isEmpty) return const SizedBox.shrink();
 
         final top1 = list.first;
@@ -1554,7 +1601,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       children: [
                         FutureBuilder<List<TopProductStat>>(
-                          future: DatabaseHelper.instance.getTopSellingProducts(limit: 5),
+                          future: _topSellingFuture,
                           builder: (context, snapshot) {
                             if (snapshot.connectionState == ConnectionState.waiting) {
                               return const Padding(

@@ -80,9 +80,8 @@ class ShareService {
         }
       }
       final opts = distinctOpts.join(', ');
-      final hasFulfillmentActivity = details.items.any((i) => i.quantityGiven > 0);
       final isFinalizedOrder = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
-      final effectiveQty = (isFinalizedOrder || hasFulfillmentActivity) ? item.quantityGiven : item.quantityOrdered;
+      final effectiveQty = isFinalizedOrder ? item.quantityGiven : item.quantityOrdered;
       final qtyStr = effectiveQty % 1 == 0 ? effectiveQty.toInt().toString() : effectiveQty.toString();
       
       double price = item.unitPrice > 0 ? item.unitPrice : 0.0;
@@ -182,12 +181,11 @@ class ShareService {
         : order.formattedOrderId;
 
     final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
-    final hasFulfillment = details.items.any((i) => i.quantityGiven > 0);
     final itemsData = details.items.map((i) {
       final opt = i.options
           .map((o) => '${o.optionName}: ${o.optionValue}')
           .join(', ');
-      final effectiveQty = (isFinalized || hasFulfillment) ? i.quantityGiven : i.quantityOrdered;
+      final effectiveQty = isFinalized ? i.quantityGiven : i.quantityOrdered;
       return {
         'name': i.itemName,
         'options': opt,
@@ -626,8 +624,7 @@ class ShareService {
       final opts = distinctOpts.join(', ');
       final optsStr = opts.isNotEmpty ? ' ($opts)' : '';
       final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
-      final hasFulfillment = details.items.any((it) => it.quantityGiven > 0);
-      final effectiveQty = (isFinalized || hasFulfillment) ? item.quantityGiven : item.quantityOrdered;
+      final effectiveQty = isFinalized ? item.quantityGiven : item.quantityOrdered;
       final orderedStr = effectiveQty % 1 == 0
           ? effectiveQty.toInt().toString()
           : effectiveQty.toString();

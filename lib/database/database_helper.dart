@@ -45,6 +45,7 @@ class DatabaseHelper {
       await txn.delete('order_item_options');
       await txn.delete('order_items');
       await txn.delete('orders');
+      await txn.delete('customer_payments');
     });
   }
 
@@ -62,6 +63,7 @@ class DatabaseHelper {
       await txn.delete('order_item_options');
       await txn.delete('order_items');
       await txn.delete('orders');
+      await txn.delete('customer_payments');
       await txn.delete('product_options');
       await txn.delete('products');
       await txn.delete('customers');
@@ -74,6 +76,9 @@ class DatabaseHelper {
     return openDatabase(
       path,
       version: dbVersion,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON;');
+      },
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
@@ -554,8 +559,8 @@ class DatabaseHelper {
       }
 
       final entry = statsMap[name]!;
-      entry['totalQuantity'] = (entry['totalQuantity'] as double) + qty;
-      entry['totalRevenue'] = (entry['totalRevenue'] as double) + revenue;
+      entry['totalQuantity'] = ((entry['totalQuantity'] as num?)?.toDouble() ?? 0.0) + qty;
+      entry['totalRevenue'] = ((entry['totalRevenue'] as num?)?.toDouble() ?? 0.0) + revenue;
       if (orderId != null) {
         (entry['orderIds'] as Set<int>).add(orderId);
       }
@@ -566,8 +571,8 @@ class DatabaseHelper {
         itemName: e['itemName'] as String,
         productId: e['productId'] as int?,
         unit: e['unit'] as String,
-        totalQuantity: e['totalQuantity'] as double,
-        totalRevenue: e['totalRevenue'] as double,
+        totalQuantity: (e['totalQuantity'] as num?)?.toDouble() ?? 0.0,
+        totalRevenue: (e['totalRevenue'] as num?)?.toDouble() ?? 0.0,
         orderCount: (e['orderIds'] as Set<int>).length,
       );
     }).toList();
@@ -708,9 +713,9 @@ class DatabaseHelper {
           SUM(estimate_total) as total_billed,
           COUNT(id) as order_count,
           MAX(created_at) as last_order_date,
-          MIN(CASE WHEN estimate_total > (paid_amount + 0.01) AND (LOWER(status) IN ('completed', 'closed')) THEN created_at ELSE NULL END) as oldest_unpaid_date
+          MIN(CASE WHEN estimate_total > (paid_amount + 0.01) AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed')) THEN created_at ELSE NULL END) as oldest_unpaid_date
         FROM orders
-        WHERE (LOWER(status) IN ('completed', 'closed') OR notes LIKE '%khata_debit%')
+        WHERE (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
         GROUP BY customer_id
       ) b ON c.id = b.customer_id
       LEFT JOIN (
@@ -768,7 +773,7 @@ class DatabaseHelper {
           SELECT SUM(o.estimate_total) 
           FROM orders o 
           WHERE o.customer_id = ? 
-            AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+            AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
         ), 0.0) - 
         COALESCE((
           SELECT SUM(p.amount) 
@@ -806,7 +811,7 @@ class DatabaseHelper {
             SELECT SUM(o.estimate_total) 
             FROM orders o 
             WHERE o.customer_id = c.id 
-              AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+              AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
           ), 0.0) - 
           COALESCE((
             SELECT SUM(p.amount) 
@@ -861,7 +866,7 @@ class DatabaseHelper {
         (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
       FROM orders o
       WHERE o.customer_id = ? 
-        AND (LOWER(o.status) IN ('completed', 'closed') OR o.notes LIKE '%khata_debit%')
+        AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
       ORDER BY o.created_at ASC
     ''', [customerId]);
 
@@ -950,7 +955,8 @@ class DatabaseHelper {
         entry['bill_number'] = billSequence;
         entry['title'] = 'Bill #$billSequence';
       }
-      running += (entry['debit'] as double) - (entry['credit'] as double);
+      running += ((entry['debit'] as num?)?.toDouble() ?? 0.0) -
+                 ((entry['credit'] as num?)?.toDouble() ?? 0.0);
       entry['running_balance'] = running;
     }
 
@@ -972,13 +978,12 @@ class DatabaseHelper {
     final customerId = target.first['customer_id'] as int?;
     if (customerId == null) return null;
 
-    final customerOrders = await db.query(
-      'orders',
-      columns: ['id'],
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      orderBy: 'created_at ASC, id ASC',
-    );
+    final customerOrders = await db.rawQuery('''
+      SELECT id FROM orders
+      WHERE customer_id = ?
+        AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
+      ORDER BY created_at ASC, id ASC
+    ''', [customerId]);
 
     final idx = customerOrders.indexWhere((r) => r['id'] == orderId);
     if (idx < 0) return null;
@@ -1044,9 +1049,10 @@ class DatabaseHelper {
     return newOrderId;
   }
 
-  /// Calculates aggregated Khata metrics for the business dashboard
-  Future<Map<String, dynamic>> getKhataSummaryMetrics() async {
-    final list = await getCustomerKhataList();
+  /// Calculates aggregated Khata metrics for the business dashboard.
+  /// Pass [preloadedList] if getCustomerKhataList() was already called to avoid duplicate query.
+  Future<Map<String, dynamic>> getKhataSummaryMetrics([List<Map<String, dynamic>>? preloadedList]) async {
+    final list = preloadedList ?? await getCustomerKhataList();
     double totalDue = 0;
     double totalBilled = 0;
     double totalPaid = 0;
@@ -1135,10 +1141,10 @@ class DatabaseHelper {
         final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
         final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
         final mode = (row['payment_mode'] as String?)?.toLowerCase() ?? 'unpaid';
-        final status = (row['status'] as String?) ?? '';
+        final status = (row['status'] as String?)?.trim().toUpperCase() ?? '';
 
         totalSales += total;
-        if (status == 'Completed' || status == 'Closed') {
+        if (status == 'COMPLETED' || status == 'CLOSED') {
           completedCount++;
         } else {
           pendingCount++;
@@ -1155,20 +1161,34 @@ class DatabaseHelper {
         }
       }
 
-      // Direct Khata payments received today
+      // Direct Khata payments received today (avoiding double-counting today's order payments)
       final paymentRows = await db.query(
         'customer_payments',
         where: 'created_at >= ? AND created_at <= ?',
         whereArgs: [startOfDay, endOfDay],
       );
 
+      final todayOrderIds = orderRows.map((r) => r['id'] as int).toSet();
       double directPayments = 0;
       for (final p in paymentRows) {
         final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
         final mode = (p['payment_mode'] as String?)?.toLowerCase() ?? '';
-        directPayments += amt;
-        if (mode == 'cash') cashSales += amt;
-        if (mode == 'upi') upiSales += amt;
+        final notes = (p['notes'] as String?) ?? '';
+
+        bool alreadyCountedInTodayOrders = false;
+        final match = RegExp(r'Order #ORD-(\d+)').firstMatch(notes);
+        if (match != null) {
+          final matchedOrderId = int.tryParse(match.group(1) ?? '');
+          if (matchedOrderId != null && todayOrderIds.contains(matchedOrderId)) {
+            alreadyCountedInTodayOrders = true;
+          }
+        }
+
+        if (!alreadyCountedInTodayOrders) {
+          directPayments += amt;
+          if (mode == 'cash') cashSales += amt;
+          if (mode == 'upi') upiSales += amt;
+        }
       }
 
       TopProductStat? topItem;

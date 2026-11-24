@@ -200,12 +200,16 @@ class InvoicePdfService {
                 ],
                 data: List.generate(items.length, (i) {
                   final item = items[i];
-                  final hasFulfillmentActivity = items.any((it) => it.quantityGiven > 0);
                   final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
-                  final effectiveQty = (isFinalized || hasFulfillmentActivity) ? item.quantityGiven : item.quantityOrdered;
-                  final details = item.description?.isNotEmpty == true
+                  final effectiveQty = isFinalized ? item.quantityGiven : item.quantityOrdered;
+                  String details = item.description?.isNotEmpty == true
                       ? '\n${item.description}'
                       : '';
+                  if (!isFinalized && item.quantityGiven > 0 && item.quantityGiven != item.quantityOrdered) {
+                    final gStr = item.quantityGiven % 1 == 0 ? item.quantityGiven.toInt() : item.quantityGiven;
+                    final oStr = item.quantityOrdered % 1 == 0 ? item.quantityOrdered.toInt() : item.quantityOrdered;
+                    details += '\n(Given: $gStr of $oStr ${item.unit})';
+                  }
                   return [
                     '${i + 1}',
                     '${item.itemName}$details',
@@ -448,9 +452,8 @@ class InvoicePdfService {
 
         // Item List
         ...items.map((item) {
-          final hasFulfillmentActivity = items.any((it) => it.quantityGiven > 0);
           final isFinalized = order.status == OrderStatus.completed || order.status == OrderStatus.closed;
-          final effectiveQty = (isFinalized || hasFulfillmentActivity) ? item.quantityGiven : item.quantityOrdered;
+          final effectiveQty = isFinalized ? item.quantityGiven : item.quantityOrdered;
           final opts = item.options.map((o) => '${o.optionName}: ${o.optionValue}').join(', ');
           final qtyStr = effectiveQty % 1 == 0
               ? effectiveQty.toInt().toString()

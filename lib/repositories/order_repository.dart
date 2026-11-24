@@ -181,12 +181,32 @@ class OrderRepository {
             )
           : null;
 
+      // Fetch existing order info to retain status, phone and takenBy
+      final orderRow = await txn.query(
+        'orders',
+        columns: ['status', 'notes', 'customer_phone', 'taken_by'],
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+      final currentStatus = orderRow.isNotEmpty ? orderRow.first['status'] as String? : null;
+      final existingNotes = orderRow.isNotEmpty ? orderRow.first['notes'] as String? : null;
+      final existingBd = BillBreakdown.fromJsonString(existingNotes);
+
+      final anyGiven = allItemRows.any((r) => ((r['quantity_given'] as num?)?.toDouble() ?? 0.0) > 0);
+      final newStatus = anyGiven
+          ? orderStatusLabel(OrderStatus.partiallyCompleted)
+          : (currentStatus ?? orderStatusLabel(OrderStatus.pending));
+
       final orderUpdateData = <String, Object?>{
-        'status': orderStatusLabel(OrderStatus.partiallyCompleted),
+        'status': newStatus,
       };
       if (combinedBreakdown != null) {
-        orderUpdateData['notes'] = jsonEncode(combinedBreakdown.toMap());
-        orderUpdateData['estimate_total'] = combinedBreakdown.grandTotal;
+        final mergedBreakdown = combinedBreakdown.copyWith(
+          customerPhone: existingBd?.customerPhone ?? (orderRow.isNotEmpty ? orderRow.first['customer_phone'] as String? : null),
+          takenBy: existingBd?.takenBy ?? (orderRow.isNotEmpty ? orderRow.first['taken_by'] as String? : null),
+        );
+        orderUpdateData['notes'] = jsonEncode(mergedBreakdown.toMap());
+        orderUpdateData['estimate_total'] = mergedBreakdown.grandTotal;
       } else if (estimateTotalAddition != 0) {
         await txn.rawUpdate(
           'UPDATE orders SET estimate_total = estimate_total + ? WHERE id = ?',
@@ -510,6 +530,8 @@ class OrderRepository {
           discountType: existingBreakdown.discountType,
           discountValue: existingBreakdown.discountValue,
           note: fullNote,
+          customerPhone: existingBreakdown.customerPhone,
+          takenBy: existingBreakdown.takenBy,
         );
       } else {
         newBreakdown = BillBreakdown.calculate(

@@ -146,14 +146,14 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     return false;
   }
 
-  double _calculateTaxableSubtotal() {
-    final subtotal = _calculateSubtotal();
-    final discount = _calculateDiscountAmount(subtotal);
-    return (subtotal - discount).clamp(0.0, double.infinity);
+  double _calculateTaxableSubtotal([double? subtotal]) {
+    final s = subtotal ?? _calculateSubtotal();
+    final discount = _calculateDiscountAmount(s);
+    return (s - discount).clamp(0.0, double.infinity);
   }
 
-  double _calculateGstAmount(double subtotal) {
-    final taxable = _calculateTaxableSubtotal();
+  double _calculateGstAmount([double? taxableSubtotal]) {
+    final taxable = taxableSubtotal ?? _calculateTaxableSubtotal();
     return _applyGst ? (taxable * _gstRate / 100.0) : 0.0;
   }
 
@@ -162,7 +162,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
 
   double _calculateGrandTotal() {
     final taxable = _calculateTaxableSubtotal();
-    final gst = _calculateGstAmount(_calculateSubtotal());
+    final gst = _calculateGstAmount(taxable);
     final other = _calculateOtherChargesTotal();
     return (taxable + gst + other).clamp(0.0, double.infinity);
   }
@@ -616,7 +616,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     final subtotal = _calculateSubtotal();
-    final gstAmount = _calculateGstAmount(subtotal);
+    final taxable = _calculateTaxableSubtotal(subtotal);
+    final gstAmount = _calculateGstAmount(taxable);
     final otherChargesTotal = _calculateOtherChargesTotal();
     final calculatedGrandTotal = _calculateGrandTotal();
     final currentEstimate =
