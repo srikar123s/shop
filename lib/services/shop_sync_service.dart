@@ -14,6 +14,7 @@ import 'package:shop/models/order.dart';
 import 'package:shop/models/product.dart';
 import 'package:shop/models/shop_profile.dart';
 import 'package:shop/services/app_notification_service.dart';
+import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -49,6 +50,7 @@ class ShopSyncService extends ChangeNotifier {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _paymentsSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _deviceSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _shopDocSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _notifSub;
 
   StaffDevice? _myDevicePermissions;
 
@@ -423,6 +425,11 @@ class ShopSyncService extends ChangeNotifier {
 
   /// Disconnect / Leave current shop
   Future<void> leaveShop() async {
+    if (_currentShop != null) {
+      unawaited(FCMService.instance.unsubscribeFromShopTopic(_currentShop!.shopCode).catchError((e) {
+        debugPrint('[ShopSyncService] Error unsubscribing from FCM topic: $e');
+      }));
+    }
     _stopRealtimeListeners();
     _currentShop = null;
     final prefs = await SharedPreferences.getInstance();
@@ -1019,6 +1026,11 @@ class ShopSyncService extends ChangeNotifier {
     final firestore = FirebaseFirestore.instance;
     final shopCode = _currentShop!.shopCode;
 
+    // Auto-subscribe this device to the shop's multi-device FCM cloud push channel
+    unawaited(FCMService.instance.subscribeToShopTopic(shopCode).catchError((e) {
+      debugPrint('[ShopSyncService] Error subscribing to FCM shop topic: $e');
+    }));
+
     // 1. Orders live stream
     _ordersSub = firestore
         .collection('shops')
@@ -1103,6 +1115,15 @@ class ShopSyncService extends ChangeNotifier {
               'payment_mode': data['payment_mode'] ?? 'unpaid',
               'payment_status': data['payment_status'] ?? 'unpaid',
             });
+          }
+
+          if (change.type == DocumentChangeType.added && data['lastUpdatedByDevice'] != _deviceId) {
+            final estTotal = (data['estimate_total'] as num?)?.toDouble() ?? 0.0;
+            final totalStr = estTotal > 0 ? ' (₹ ${estTotal.toStringAsFixed(0)})' : '';
+            unawaited(AppNotificationService.instance.showLiveOrderNotification(
+              title: '📋 New Order from $incomingTakenBy',
+              body: 'Order for $custName$totalStr received from connected device.',
+            ));
           }
 
           // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
@@ -1321,6 +1342,26 @@ class ShopSyncService extends ChangeNotifier {
         if (data['lastUpdatedNotifDevice'] != _deviceId) {
           final notifMap = (data['notification_settings'] as Map).cast<String, dynamic>();
           await AppNotificationService.instance.applyCloudNotificationSettings(notifMap);
+        }
+      }
+    });
+
+    // 7. Multi-device live broadcast alert stream
+    _notifSub = firestore
+        .collection('shops')
+        .doc(shopCode)
+        .collection('outbound_notifications')
+        .snapshots()
+        .listen((snapshot) {
+      for (final change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data();
+          if (data != null && data['sender_device_id'] != _deviceId) {
+            unawaited(AppNotificationService.instance.showLiveOrderNotification(
+              title: data['title'] ?? 'Shop Alert',
+              body: data['body'] ?? '',
+            ));
+          }
         }
       }
     });
@@ -1589,6 +1630,8 @@ class ShopSyncService extends ChangeNotifier {
     _deviceSub = null;
     _shopDocSub?.cancel();
     _shopDocSub = null;
+    _notifSub?.cancel();
+    _notifSub = null;
   }
 
   @override

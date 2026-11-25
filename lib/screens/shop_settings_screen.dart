@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/l10n/app_localizations.dart';
@@ -9,6 +10,7 @@ import 'package:shop/screens/quantity_shortcuts_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
 import 'package:shop/services/app_notification_service.dart';
+import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
@@ -1173,33 +1175,45 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: Colors.green.shade50,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child:
-                        Icon(Icons.send_rounded, color: Colors.blue.shade700),
+                    child: Icon(Icons.notifications_active, color: Colors.green.shade700),
                   ),
-                  title: const Text('Send Test Notification Now',
+                  title: const Text('Instant Test Notification (1s)',
                       style:
                           TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   subtitle: const Text(
-                    'Triggers the pending orders / procurement notification immediately',
+                    'Fires immediate sound & heads-up banner to verify system permissions.',
                     style: TextStyle(fontSize: 11, color: Colors.grey),
                   ),
-                  trailing: TextButton.icon(
-                    icon: const Icon(Icons.notifications, size: 16),
-                    label: const Text('Test'),
+                  trailing: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Test Now'),
                     onPressed: () async {
-                      await AppNotificationService.instance
-                          .checkAndNotify(force: true);
+                      final enabled = await AppNotificationService.instance
+                          .showInstantTestNotification();
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Test reminder notification sent! Check your notification bar.'),
-                            backgroundColor: Colors.teal,
-                          ),
-                        );
+                        if (enabled) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('🔔 Notification sent! Check status bar and sound.'),
+                              backgroundColor: Color(0xFF0F766E),
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('⚠️ System notifications are BLOCKED in phone settings! Please allow notifications in App Info.'),
+                              backgroundColor: Colors.red,
+                              duration: Duration(seconds: 5),
+                            ),
+                          );
+                        }
                       }
                     },
                   ),
@@ -1242,6 +1256,101 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         );
                       }
                     },
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.cloud_upload_outlined,
+                        color: Color(0xFF2563EB)),
+                  ),
+                  title: const Text('Multi-Device Cloud Push (FCM)',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  subtitle: const Text(
+                    'Dispatches real-time cloud alert to all connected staff & owner devices.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'View Device FCM Token',
+                        icon: const Icon(Icons.key_rounded, size: 18),
+                        onPressed: () {
+                          final token = FCMService.instance.fcmToken ?? 'Generating token...';
+                          showDialog<void>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Device FCM Push Token'),
+                              content: SelectableText(
+                                token,
+                                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                              ),
+                              actions: [
+                                TextButton.icon(
+                                  icon: const Icon(Icons.copy, size: 16),
+                                  label: const Text('Copy Token'),
+                                  onPressed: () {
+                                    Clipboard.setData(ClipboardData(text: token));
+                                    Navigator.pop(ctx);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('FCM Token copied to clipboard!')),
+                                    );
+                                  },
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('Close'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        child: const Text('Push All'),
+                        onPressed: () async {
+                          final currentShop = ShopSyncService.instance.currentShop;
+                          if (currentShop == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('⚠️ Link or create a shop in Cloud Sync first to push to all devices!'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                            return;
+                          }
+                          await FCMService.instance.broadcastCloudAlert(
+                            shopCode: currentShop.shopCode,
+                            title: '📢 Cloud Alert: ${currentShop.shopName}',
+                            body: 'Cloud push verified across all connected devices! Delivered even when closed.',
+                            senderDeviceId: ShopSyncService.instance.deviceId,
+                            data: {'screen': 'home'},
+                          );
+                          // Also trigger instant notification locally so you immediately hear and see it
+                          await AppNotificationService.instance.showInstantTestNotification();
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('☁️ Push alert dispatched to all devices in shop "${currentShop.shopCode}"!'),
+                                backgroundColor: const Color(0xFF2563EB),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ),
                 const Divider(height: 1),

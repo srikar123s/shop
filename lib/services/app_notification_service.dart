@@ -33,10 +33,10 @@ class AppNotificationService {
   Timer? _periodicTimer;
   bool _initialized = false;
 
-  static const String _channelId = 'shop_order_reminders';
-  static const String _channelName = 'Shop Order & Procurement Reminders';
+  static const String _channelId = 'shop_alerts_high_priority_v1';
+  static const String _channelName = 'Shop Urgent Alerts & Reminders';
   static const String _channelDesc =
-      'Reminders for unclosed bills and items needing procurement';
+      'Important business reminders, order updates, and counter notifications';
 
   static const String _prefEnabledKey = 'hourly_reminders_enabled';
   static const String _prefLastNotifiedKey = 'last_notified_slot_key';
@@ -270,6 +270,84 @@ class AppNotificationService {
         _notificationsPlugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
     await androidDetails?.requestExactAlarmsPermission();
+  }
+
+  /// Check if the user has enabled notifications in Android system settings
+  Future<bool> areNotificationsEnabled() async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    return (await androidDetails?.areNotificationsEnabled()) ?? true;
+  }
+
+  /// Explicitly requests system notification permission on Android 13+
+  Future<bool?> requestNotificationsPermission() async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    return await androidDetails?.requestNotificationsPermission();
+  }
+
+  /// Fires an instant 1-second heads-up test notification to verify sound & banner
+  Future<bool> showInstantTestNotification() async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    final areEnabled = (await androidDetails?.areNotificationsEnabled()) ?? true;
+    if (!areEnabled) {
+      await androidDetails?.requestNotificationsPermission();
+    }
+
+    const testDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF0F766E),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      visibility: NotificationVisibility.public,
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    await _notificationsPlugin.show(
+      888,
+      '🔔 Notification Test SUCCESS!',
+      'Sound, vibration, and banner are working on this phone!',
+      const NotificationDetails(android: testDetails),
+      payload: 'test_instant',
+    );
+    return areEnabled;
+  }
+
+  /// Shows immediate heads-up notification when an order or broadcast arrives from another device
+  Future<void> showLiveOrderNotification({
+    required String title,
+    required String body,
+    String payload = 'orders',
+  }) async {
+    const details = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDesc,
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF0F766E),
+      playSound: true,
+      enableVibration: true,
+      visibility: NotificationVisibility.public,
+      styleInformation: BigTextStyleInformation(''),
+    );
+
+    await _notificationsPlugin.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title,
+      body,
+      const NotificationDetails(android: details),
+      payload: payload,
+    );
   }
 
   /// Exports the complete active notification schedule to a map for cloud sync

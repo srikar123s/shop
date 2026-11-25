@@ -12,6 +12,7 @@ import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/home_screen.dart';
 import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/backup_service.dart';
+import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
@@ -37,6 +38,9 @@ void main() async {
     } else {
       unawaited(ShopSyncService.instance.initialize().catchError((e) {
         debugPrint('Sync service init error: $e');
+      }));
+      unawaited(FCMService.instance.initialize().catchError((e) {
+        debugPrint('FCM service init error: $e');
       }));
     }
     final preferences = await SharedPreferences.getInstance();
