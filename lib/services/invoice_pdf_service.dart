@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -1343,6 +1342,536 @@ class InvoicePdfService {
       [XFile(file.path)],
       text:
           '${isDeliveryChallan ? "Delivery Challan" : "Order Receipt"} for ${details.order.customerNameSnapshot} (${details.order.formattedOrderId})',
+    );
+  }
+
+  /// Generates and shares Daily Collections Report PDF
+  Future<void> shareDailyCollectionsPdf(
+    DateTime date,
+    List<Map<String, dynamic>> collections,
+  ) async {
+    final pdf = pw.Document();
+    final shopService = ShopCustomizationService.instance;
+    final shopName = shopService.shopName;
+    final shopPhone = shopService.shopPhone;
+    final shopAddress = shopService.shopAddress;
+    final dateStr = DateFormat('dd MMMM yyyy (EEEE)').format(date);
+
+    double totalAmount = 0;
+    for (final c in collections) {
+      totalAmount += (c['amount'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
+        build: (pw.Context context) => [
+          // Header
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    shopName,
+                    style: pw.TextStyle(
+                      fontSize: 20,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.teal900,
+                    ),
+                  ),
+                  if (shopAddress.isNotEmpty)
+                    pw.Text(shopAddress, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                  if (shopPhone.isNotEmpty)
+                    pw.Text('Phone: $shopPhone', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.teal800,
+                      borderRadius: pw.BorderRadius.circular(6),
+                    ),
+                    child: pw.Text(
+                      'DAILY COLLECTION REPORT',
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(dateStr, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800)),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 14),
+          pw.Divider(thickness: 1, color: PdfColors.teal700),
+          pw.SizedBox(height: 8),
+
+          // Summary Box
+          pw.Container(
+            padding: const pw.EdgeInsets.all(10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.teal50,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: PdfColors.teal200),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Total Collected Entries: ${collections.length}',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11, color: PdfColors.teal900)),
+                pw.Text('Total Amount Collected: Rs. ${totalAmount.toStringAsFixed(2)}',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.teal900)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 14),
+
+          // Collections Table
+          pw.TableHelper.fromTextArray(
+            headers: ['#', 'Customer & Location', 'Phone', 'Mode', 'Time', 'Collected', 'Remaining Due'],
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.teal800),
+            cellStyle: const pw.TextStyle(fontSize: 8.5),
+            cellAlignment: pw.Alignment.centerLeft,
+            columnWidths: {
+              0: const pw.FixedColumnWidth(24),
+              1: const pw.FlexColumnWidth(3.0),
+              2: const pw.FlexColumnWidth(1.8),
+              3: const pw.FlexColumnWidth(1.2),
+              4: const pw.FlexColumnWidth(1.4),
+              5: const pw.FlexColumnWidth(1.6),
+              6: const pw.FlexColumnWidth(1.6),
+            },
+            data: List<List<dynamic>>.generate(collections.length, (index) {
+              final item = collections[index];
+              final name = item['customer_name'] as String? ?? 'Customer';
+              final loc = (item['customer_location'] as String?)?.trim() ?? '';
+              final nameWithLoc = loc.isNotEmpty ? '$name\n($loc)' : name;
+              final phone = item['customer_phone'] as String? ?? '-';
+              final mode = (item['payment_mode'] as String? ?? 'Cash').toUpperCase();
+              final dtStr = item['created_at'] as String?;
+              String timeStr = '-';
+              if (dtStr != null) {
+                final dt = DateTime.tryParse(dtStr);
+                if (dt != null) timeStr = DateFormat('hh:mm a').format(dt);
+              }
+              final amt = (item['amount'] as num?)?.toDouble() ?? 0.0;
+              final remDue = (item['remaining_due'] as num?)?.toDouble() ?? 0.0;
+
+              return [
+                '${index + 1}',
+                nameWithLoc,
+                phone,
+                mode,
+                timeStr,
+                'Rs. ${amt.toStringAsFixed(2)}',
+                'Rs. ${remDue.toStringAsFixed(2)}',
+              ];
+            }),
+          ),
+          pw.SizedBox(height: 12),
+
+          // Footer
+          pw.Divider(thickness: 0.5, color: PdfColors.grey400),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Generated by Shop Management Notebook App',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+              pw.Text('Page 1 of 1 • Total: Rs. ${totalAmount.toStringAsFixed(2)}',
+                  style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final bytes = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final filename = 'Daily_Collections_${DateFormat("yyyyMMdd").format(date)}.pdf';
+    final file = File('${tempDir.path}/$filename');
+    await file.writeAsBytes(bytes);
+
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: '$shopName - Daily Collections Report ($dateStr) - Total: Rs. ${totalAmount.toStringAsFixed(2)}',
+    );
+  }
+
+  /// Generates and shares Lifetime Business Report PDF
+  Future<void> shareLifetimeReportPdf(
+    Map<String, dynamic> report, {
+    String? locationFilter,
+    String? staffFilter,
+    String? dateRangeLabel,
+  }) async {
+    final pdf = pw.Document();
+    final shopService = ShopCustomizationService.instance;
+    final shopName = shopService.shopName;
+    final shopPhone = shopService.shopPhone;
+    final shopAddress = shopService.shopAddress;
+
+    final totalSales = (report['totalSales'] as num?)?.toDouble() ?? 0.0;
+    final totalCollected = (report['totalCollected'] as num?)?.toDouble() ?? 0.0;
+    final totalMarketDue = (report['totalMarketDue'] as num?)?.toDouble() ?? 0.0;
+    final advancePool = (report['advancePoolTotal'] as num?)?.toDouble() ?? 0.0;
+    final totalOrders = (report['totalOrders'] as num?)?.toInt() ?? 0;
+    final completedOrders = (report['completedOrders'] as num?)?.toInt() ?? 0;
+    final pendingOrders = (report['pendingOrders'] as num?)?.toInt() ?? 0;
+    final aov = (report['averageOrderValue'] as num?)?.toDouble() ?? 0.0;
+    final basketSize = (report['avgBasketSize'] as num?)?.toDouble() ?? 0.0;
+    final totalDiscounts = (report['totalDiscountsGiven'] as num?)?.toDouble() ?? 0.0;
+    final totalGst = (report['totalGstBilled'] as num?)?.toDouble() ?? 0.0;
+    final cash = (report['cashCollected'] as num?)?.toDouble() ?? 0.0;
+    final upi = (report['upiCollected'] as num?)?.toDouble() ?? 0.0;
+    final healthGrade = report['healthGrade'] as String? ?? 'Grade A';
+    final healthScore = (report['healthScore'] as num?)?.toInt() ?? 85;
+    final repeatRate = (report['repeatRatePercentage'] as num?)?.toDouble() ?? 0.0;
+    final dsoDays = (report['avgDsoDays'] as num?)?.toInt() ?? 14;
+
+    final topProducts = (report['topProducts'] as List?) ?? [];
+    final topBuyers = (report['topBuyers'] as List?) ?? [];
+    final topPayers = (report['topPayers'] as List?) ?? [];
+    final highestDues = (report['highestDueCustomers'] as List?) ?? [];
+    final categorySales = (report['categorySales'] as List?) ?? [];
+    final staffLeaderboard = (report['staffLeaderboard'] as List?) ?? [];
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
+        build: (pw.Context context) => [
+          // Header
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    shopName,
+                    style: pw.TextStyle(
+                      fontSize: 22,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.teal900,
+                    ),
+                  ),
+                  if (shopAddress.isNotEmpty)
+                    pw.Text(shopAddress, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                  if (shopPhone.isNotEmpty)
+                    pw.Text('Phone: $shopPhone', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.teal800,
+                      borderRadius: pw.BorderRadius.circular(6),
+                    ),
+                    child: pw.Text(
+                      'LIFETIME BUSINESS ANALYTICS',
+                      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Period: ${dateRangeLabel ?? "All Time"}${locationFilter != null ? " • Loc: $locationFilter" : ""}',
+                    style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 14),
+          pw.Divider(thickness: 1, color: PdfColors.teal700),
+          pw.SizedBox(height: 8),
+
+          // Financial Health & KPI Highlights
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.grey100,
+              borderRadius: pw.BorderRadius.circular(6),
+              border: pw.Border.all(color: PdfColors.grey300),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('STORE FINANCIAL HEALTH: $healthGrade ($healthScore/100)',
+                    style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+                pw.Text('Repeat Rate: ${repeatRate.toStringAsFixed(1)}% • Avg Debt Clearance: $dsoDays Days',
+                    style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey800)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 8),
+
+          // KPI Box Grid
+          pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.teal50,
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: PdfColors.teal200),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('TOTAL SALES (BILLED)', style: const pw.TextStyle(fontSize: 8, color: PdfColors.teal800)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Rs. ${totalSales.toStringAsFixed(0)}',
+                          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+                      pw.Text('$totalOrders Orders ($completedOrders Done)',
+                          style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
+                    ],
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 6),
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.blue50,
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: PdfColors.blue200),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('TOTAL COLLECTED', style: const pw.TextStyle(fontSize: 8, color: PdfColors.blue800)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Rs. ${totalCollected.toStringAsFixed(0)}',
+                          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                      pw.Text('Cash Rs. ${cash.toStringAsFixed(0)} | UPI Rs. ${upi.toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
+                    ],
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 6),
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.red50,
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: PdfColors.red200),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('MARKET UDHAAR (DUE)', style: const pw.TextStyle(fontSize: 8, color: PdfColors.red800)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Rs. ${totalMarketDue.toStringAsFixed(0)}',
+                          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+                      pw.Text('Advance Pool: Rs. ${advancePool.toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
+                    ],
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 6),
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.amber50,
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: PdfColors.amber200),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('AVG ORDER (AOV)', style: pw.TextStyle(fontSize: 8, color: PdfColors.amber900)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Rs. ${aov.toStringAsFixed(0)}',
+                          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.amber900)),
+                      pw.Text('${basketSize.toStringAsFixed(1)} items/bill', style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 6),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Total Discounts Given: Rs. ${totalDiscounts.toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+              pw.Text('Total GST Tax Billed: Rs. ${totalGst.toStringAsFixed(0)}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+            ],
+          ),
+          pw.SizedBox(height: 14),
+
+          // Top Selling Products Section
+          pw.Text('TOP SELLING PRODUCTS', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+          pw.SizedBox(height: 6),
+          pw.TableHelper.fromTextArray(
+            headers: ['#', 'Product Name', 'Total Qty Sold', 'Total Revenue'],
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
+            headerDecoration: const pw.BoxDecoration(color: PdfColors.teal800),
+            cellStyle: const pw.TextStyle(fontSize: 8.5),
+            data: List<List<dynamic>>.generate(topProducts.take(8).length, (index) {
+              final p = topProducts[index];
+              final name = p['item_name'] as String? ?? '';
+              final unit = p['unit'] as String? ?? '';
+              final qty = (p['total_qty'] as num?)?.toDouble() ?? 0.0;
+              final rev = (p['total_rev'] as num?)?.toDouble() ?? 0.0;
+              return [
+                '${index + 1}',
+                name,
+                '${qty % 1 == 0 ? qty.toInt() : qty.toStringAsFixed(1)} $unit',
+                'Rs. ${rev.toStringAsFixed(2)}',
+              ];
+            }),
+          ),
+          pw.SizedBox(height: 16),
+
+          // Customer Insights: Top Buyers & Top Payers Side by Side
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('TOP HIGH-VALUE BUYERS', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+                    pw.SizedBox(height: 6),
+                    pw.TableHelper.fromTextArray(
+                      headers: ['Customer', 'Location', 'Total Bought'],
+                      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+                      headerDecoration: const pw.BoxDecoration(color: PdfColors.teal700),
+                      cellStyle: const pw.TextStyle(fontSize: 8),
+                      data: List<List<dynamic>>.generate(topBuyers.take(6).length, (index) {
+                        final b = topBuyers[index];
+                        final name = b['name'] as String? ?? '';
+                        final loc = b['location'] as String? ?? '-';
+                        final val = (b['total_bought'] as num?)?.toDouble() ?? 0.0;
+                        return [name, loc, 'Rs. ${val.toStringAsFixed(0)}'];
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(width: 12),
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('TOP HIGHEST OUTSTANDING DUES', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
+                    pw.SizedBox(height: 6),
+                    pw.TableHelper.fromTextArray(
+                      headers: ['Customer', 'Location', 'Balance Due'],
+                      headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+                      headerDecoration: const pw.BoxDecoration(color: PdfColors.red700),
+                      cellStyle: const pw.TextStyle(fontSize: 8),
+                      data: List<List<dynamic>>.generate(highestDues.take(6).length, (index) {
+                        final d = highestDues[index];
+                        final name = d['customer_name'] as String? ?? '';
+                        final loc = (d['customer_location'] as String?)?.trim() ?? '-';
+                        final val = (d['balance_due'] as num?)?.toDouble() ?? 0.0;
+                        return [name, loc.isNotEmpty ? loc : '-', 'Rs. ${val.toStringAsFixed(0)}'];
+                      }),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 16),
+
+          if (topPayers.isNotEmpty) ...[
+            pw.Text('TOP PAYERS (CASH & UPI RECOVERED)', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+            pw.SizedBox(height: 6),
+            pw.TableHelper.fromTextArray(
+              headers: ['Customer', 'Location', 'Total Paid'],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.blue700),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              data: List<List<dynamic>>.generate(topPayers.take(6).length, (index) {
+                final p = topPayers[index];
+                final name = p['customer_name'] as String? ?? '';
+                final loc = (p['customer_location'] as String?)?.trim() ?? '-';
+                final val = (p['total_paid'] as num?)?.toDouble() ?? 0.0;
+                return [name, loc.isNotEmpty ? loc : '-', 'Rs. ${val.toStringAsFixed(0)}'];
+              }),
+            ),
+            pw.SizedBox(height: 16),
+          ],
+
+          if (categorySales.isNotEmpty) ...[
+            pw.Text('CATEGORY & DEPARTMENT SALES', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.SizedBox(height: 6),
+            pw.TableHelper.fromTextArray(
+              headers: ['Category / Department', 'Total Sales', 'Items Count'],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.teal800),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              data: List<List<dynamic>>.generate(categorySales.take(5).length, (index) {
+                final cat = categorySales[index];
+                final name = cat['category'] as String? ?? 'General';
+                final s = (cat['category_sales'] as num?)?.toDouble() ?? 0.0;
+                final count = (cat['item_count'] as num?)?.toInt() ?? 0;
+                return [name, 'Rs. ${s.toStringAsFixed(0)}', '$count items'];
+              }),
+            ),
+            pw.SizedBox(height: 16),
+          ],
+
+          if (staffLeaderboard.isNotEmpty) ...[
+            pw.Text('STAFF PERFORMANCE LEADERBOARD', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.SizedBox(height: 6),
+            pw.TableHelper.fromTextArray(
+              headers: ['Staff / Counter', 'Orders Taken', 'Total Billed', 'Direct Collected'],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.teal700),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              data: List<List<dynamic>>.generate(staffLeaderboard.take(5).length, (index) {
+                final st = staffLeaderboard[index];
+                final name = st['staff_name'] as String? ?? 'Store';
+                final ords = (st['orders_taken'] as num?)?.toInt() ?? 0;
+                final sales = (st['total_sales'] as num?)?.toDouble() ?? 0.0;
+                final col = (st['direct_collected'] as num?)?.toDouble() ?? 0.0;
+                return [name, '$ords orders', 'Rs. ${sales.toStringAsFixed(0)}', 'Rs. ${col.toStringAsFixed(0)}'];
+              }),
+            ),
+            pw.SizedBox(height: 16),
+          ],
+
+          pw.Divider(thickness: 0.5, color: PdfColors.grey400),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Lifetime Business Analytics Summary • Generated automatically',
+                  style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+              pw.Text('Shop Management Notebook App',
+                  style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final bytes = await pdf.save();
+    final tempDir = await getTemporaryDirectory();
+    final filename = 'Lifetime_Business_Report_${DateFormat("yyyyMMdd").format(DateTime.now())}.pdf';
+    final file = File('${tempDir.path}/$filename');
+    await file.writeAsBytes(bytes);
+
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      text: '$shopName - Lifetime Business Analytics Report (Sales: Rs. ${totalSales.toStringAsFixed(2)})',
     );
   }
 }

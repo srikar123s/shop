@@ -235,12 +235,13 @@ class OrderRepository {
   Future<List<OrderSummary>> searchOrderSummaries(String query) async {
     final db = await _databaseHelper.database;
     final normalized = query.trim();
-    final orderRows = await db.query(
-      'orders',
-      where: normalized.isEmpty ? null : 'customer_name_snapshot LIKE ?',
-      whereArgs: normalized.isEmpty ? null : ['%$normalized%'],
-      orderBy: 'created_at DESC',
-    );
+    final orderRows = await db.rawQuery('''
+      SELECT o.*, c.address as customer_address
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      ${normalized.isEmpty ? '' : 'WHERE o.customer_name_snapshot LIKE ?'}
+      ORDER BY o.created_at DESC
+    ''', normalized.isEmpty ? null : ['%$normalized%']);
 
     final summaries = <OrderSummary>[];
     for (final row in orderRows) {
@@ -249,6 +250,7 @@ class OrderRepository {
       final breakdown = BillBreakdown.fromJsonString(notes);
       final customerPhone =
           (row['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final customerAddress = (row['customer_address'] as String?)?.trim();
       final rawTakenBy = (row['taken_by'] as String?) ?? breakdown?.takenBy;
       final takenBy = (rawTakenBy != null &&
               rawTakenBy.trim().isNotEmpty &&
@@ -290,6 +292,7 @@ class OrderRepository {
           customerId: row['customer_id'] as int,
           customerName: row['customer_name_snapshot'] as String,
           customerPhone: customerPhone,
+          customerAddress: customerAddress,
           takenBy: takenBy,
           createdAt: DateTime.parse(row['created_at'] as String),
           totalItems: itemRows.length,
@@ -852,9 +855,11 @@ class OrderRepository {
         o.customer_phone,
         o.taken_by,
         o.created_at,
-        o.notes as order_notes
+        o.notes as order_notes,
+        c.address as customer_address
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN customers c ON o.customer_id = c.id
       WHERE LOWER(oi.procurement_status) = 'toprocure'
         AND (oi.quantity_ordered - oi.quantity_given) > 0
       ORDER BY o.created_at ASC
@@ -870,6 +875,7 @@ class OrderRepository {
       final breakdown = BillBreakdown.fromJsonString(orderNotes);
       final customerPhone =
           (row['customer_phone'] as String?) ?? breakdown?.customerPhone;
+      final customerAddress = (row['customer_address'] as String?)?.trim();
       final rawTakenBy =
           (row['taken_by'] as String?) ?? breakdown?.takenBy;
       final takenBy = (rawTakenBy != null &&
@@ -905,6 +911,7 @@ class OrderRepository {
           orderId: orderId,
           customerName: customerName,
           customerPhone: customerPhone,
+          customerAddress: customerAddress,
           takenBy: takenBy,
           createdAt: createdAt,
           itemName: row['item_name'] as String,

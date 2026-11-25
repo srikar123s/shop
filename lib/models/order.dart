@@ -79,6 +79,7 @@ class BillBreakdown {
     required this.grandTotal,
     this.note,
     this.customerPhone,
+    this.customerAddress,
     this.takenBy,
   });
 
@@ -95,6 +96,7 @@ class BillBreakdown {
   final double grandTotal;
   final String? note;
   final String? customerPhone;
+  final String? customerAddress;
   final String? takenBy;
 
   BillBreakdown copyWith({
@@ -423,6 +425,7 @@ class OrderEntity {
     required this.customerId,
     required this.customerNameSnapshot,
     this.customerPhone,
+    this.customerAddress,
     this.takenBy,
     required this.createdAt,
     required this.status,
@@ -437,6 +440,7 @@ class OrderEntity {
   final int customerId;
   final String customerNameSnapshot;
   final String? customerPhone;
+  final String? customerAddress;
   final String? takenBy;
   final DateTime createdAt;
   final OrderStatus status;
@@ -608,6 +612,7 @@ class OrderSummary {
     required this.customerId,
     required this.customerName,
     this.customerPhone,
+    this.customerAddress,
     this.takenBy,
     required this.createdAt,
     required this.totalItems,
@@ -624,6 +629,7 @@ class OrderSummary {
   final int customerId;
   final String customerName;
   final String? customerPhone;
+  final String? customerAddress;
   final String? takenBy;
   final DateTime createdAt;
   final int totalItems;
@@ -655,6 +661,7 @@ class ProcurementItem {
     required this.orderId,
     required this.customerName,
     this.customerPhone,
+    this.customerAddress,
     required this.takenBy,
     required this.createdAt,
     required this.itemName,
@@ -670,6 +677,7 @@ class ProcurementItem {
   final int orderId;
   final String customerName;
   final String? customerPhone;
+  final String? customerAddress;
   final String takenBy;
   final DateTime createdAt;
   final String itemName;

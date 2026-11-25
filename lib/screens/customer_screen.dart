@@ -65,23 +65,31 @@ class _CustomerScreenState extends State<CustomerScreen> {
 
   Future<void> _loadCustomers() async {
     setState(() => _loading = true);
-    final data =
-        await widget.customerRepository.searchCustomers(_searchController.text);
-    final khataList = await DatabaseHelper.instance.getCustomerKhataList();
-    final balances = <int, double>{};
-    for (final item in khataList) {
-      final cid = item['customer_id'] as int?;
-      final bal = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
-      if (cid != null) {
-        balances[cid] = bal;
+    try {
+      final data =
+          await widget.customerRepository.searchCustomers(_searchController.text);
+      final khataList = await DatabaseHelper.instance.getCustomerKhataList();
+      final balances = <int, double>{};
+      for (final item in khataList) {
+        final cid = item['customer_id'] as int?;
+        final bal = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
+        if (cid != null) {
+          balances[cid] = bal;
+        }
       }
+      if (!mounted) return;
+      setState(() {
+        _customers = data;
+        _customerBalances = balances;
+        _loading = false;
+      });
+    } catch (e, stack) {
+      debugPrint('Error loading customers in CustomerScreen: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
     }
-    if (!mounted) return;
-    setState(() {
-      _customers = data;
-      _customerBalances = balances;
-      _loading = false;
-    });
   }
 
   Future<void> _importCustomersFile() async {
@@ -201,12 +209,34 @@ class _CustomerScreenState extends State<CustomerScreen> {
                   );
                   return;
                 }
+                final existingByPhone =
+                    await widget.customerRepository.findByPhone(cleanP);
+                if (!context.mounted) return;
+                if (existingByPhone != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                          'Phone number $cleanP is already registered to "${existingByPhone.name}". Phone number must be unique.'),
+                      backgroundColor: Colors.red.shade700,
+                    ),
+                  );
+                  return;
+                }
+                final address = addressCtrl.text.trim();
+                if (address.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            'Location / Address is compulsory to create customer.')),
+                  );
+                  return;
+                }
                 final creditLimit =
                     double.tryParse(creditLimitCtrl.text.trim()) ?? 0.0;
                 final customer = await widget.customerRepository.createCustomer(
                   name: name,
                   phone: phone,
-                  address: addressCtrl.text,
+                  address: address,
                   creditLimit: creditLimit,
                 );
                 if (context.mounted) {
@@ -293,6 +323,21 @@ class _CustomerScreenState extends State<CustomerScreen> {
               onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty || customer.id == null) {
                   return;
+                }
+                final cleanPhone = phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
+                if (cleanPhone.length >= 6) {
+                  final existingCust = await widget.customerRepository.findByPhone(cleanPhone);
+                  if (!context.mounted) return;
+                  if (existingCust != null && existingCust.id != customer.id) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Phone number already belongs to "${existingCust.name}". Phone number must be unique.'),
+                        backgroundColor: Colors.red.shade700,
+                      ),
+                    );
+                    return;
+                  }
                 }
                 final creditLimit =
                     double.tryParse(creditLimitCtrl.text.trim()) ?? 0.0;
@@ -503,84 +548,149 @@ class _CustomerScreenState extends State<CustomerScreen> {
   Future<void> _proceedWithCustomer(Customer customer) async {
     final cleanP =
         customer.phone?.replaceAll(RegExp(r'[^0-9]'), '').trim() ?? '';
-    if (cleanP.length < 6) {
-      final phoneCtrl = TextEditingController();
-      final String? savedPhone;
+    final hasValidName = customer.name.trim().isNotEmpty &&
+        customer.name.trim().toLowerCase() != 'unknown customer';
+    final hasValidPhone = cleanP.length >= 6;
+    final hasValidLocation =
+        customer.address != null && customer.address!.trim().isNotEmpty;
+
+    if (!hasValidName || !hasValidPhone || !hasValidLocation) {
+      final nameCtrl = TextEditingController(text: customer.name.trim());
+      final phoneCtrl = TextEditingController(text: customer.phone ?? '');
+      final addressCtrl = TextEditingController(text: customer.address ?? '');
+
+      final Customer? updated;
       try {
-        savedPhone = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Phone Number Required',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Phone number is compulsory to create an order for "${customer.name}":',
-                style: const TextStyle(fontSize: 13, color: Colors.grey),
+        updated = await showDialog<Customer>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Update Customer Details',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Name, unique phone number, and location are compulsory to create orders. Please update missing details:',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Customer / Shop Name *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number *',
+                      hintText: 'e.g. 9876543210',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: addressCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Location / Address *',
+                      hintText: 'e.g. Market Road, Hyderabad',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneCtrl,
-                keyboardType: TextInputType.phone,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Phone Number *',
-                  hintText: 'e.g. 9876543210',
-                  border: OutlineInputBorder(),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('CANCEL'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  final n = nameCtrl.text.trim();
+                  if (n.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(content: Text('Customer name is required.')),
+                    );
+                    return;
+                  }
+                  final p = phoneCtrl.text.trim();
+                  final digits = p.replaceAll(RegExp(r'[^0-9]'), '');
+                  if (digits.length < 6) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              'Phone number is compulsory (minimum 6 digits).')),
+                    );
+                    return;
+                  }
+                  // Check uniqueness against other customers
+                  final match =
+                      await widget.customerRepository.findByPhone(digits);
+                  if (!ctx.mounted) return;
+                  if (match != null && match.id != customer.id) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                            'Phone number already belongs to "${match.name}". Phone number must be unique.'),
+                        backgroundColor: Colors.red.shade700,
+                      ),
+                    );
+                    return;
+                  }
+                  final addr = addressCtrl.text.trim();
+                  if (addr.isEmpty) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              'Location / Address is compulsory to create order.')),
+                    );
+                    return;
+                  }
+
+                  if (customer.id != null) {
+                    await widget.customerRepository.updateCustomer(
+                      id: customer.id!,
+                      name: n,
+                      phone: p,
+                      address: addr,
+                      creditLimit: customer.creditLimit,
+                    );
+                    final saved = (await widget.customerRepository
+                            .getCustomerById(customer.id!)) ??
+                        customer.copyWith(name: n, phone: p, address: addr);
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx, saved);
+                  } else {
+                    final saved =
+                        await widget.customerRepository.createCustomer(
+                      name: n,
+                      phone: p,
+                      address: addr,
+                    );
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx, saved);
+                  }
+                },
+                child: const Text('SAVE & PROCEED'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('CANCEL'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final p =
-                    phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
-                if (p.length < 6) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                        content: Text(
-                            'Please enter a valid phone number (at least 6 digits)')),
-                  );
-                  return;
-                }
-                Navigator.pop(ctx, phoneCtrl.text.trim());
-              },
-              child: const Text('SAVE & CONTINUE'),
-            ),
-          ],
-        ),
-      );
+        );
       } finally {
+        nameCtrl.dispose();
         phoneCtrl.dispose();
+        addressCtrl.dispose();
       }
 
-      if (savedPhone == null || !mounted) return;
-      if (customer.id != null) {
-        await widget.customerRepository.updateCustomer(
-          id: customer.id!,
-          name: customer.name,
-          phone: savedPhone,
-          address: customer.address,
-        );
-        customer = (await widget.customerRepository
-                .getCustomerById(customer.id!)) ??
-            customer.copyWith(phone: savedPhone);
-      } else {
-        customer = await widget.customerRepository.createCustomer(
-          name: customer.name,
-          phone: savedPhone,
-          address: customer.address,
-        );
-      }
-      if (!mounted) return;
+      if (updated == null || !mounted) return;
+      customer = updated;
       setState(() => _selected = customer);
       await _loadCustomers();
     }
@@ -975,7 +1085,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                                   Icon(Icons.warning_amber_rounded, size: 12, color: Colors.red.shade800),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    'Khata Due: ₹ ' + ((balance % 1 == 0) ? balance.toInt().toString() : balance.toStringAsFixed(2)),
+                                                    'Khata Due: ₹ ${(balance % 1 == 0) ? balance.toInt() : balance.toStringAsFixed(2)}',
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight: FontWeight.w800,

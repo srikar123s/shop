@@ -15,6 +15,7 @@ import 'package:shop/screens/top_selling_screen.dart';
 import 'package:shop/screens/price_list_screen.dart';
 import 'package:shop/screens/khata_book_screen.dart';
 import 'package:shop/screens/evening_report_screen.dart';
+import 'package:shop/screens/lifetime_report_screen.dart';
 import 'package:shop/screens/app_documentation_screen.dart';
 
 import 'package:shop/screens/procurement_screen.dart';
@@ -1742,6 +1743,25 @@ class _HomeScreenState extends State<HomeScreen> {
                         context,
                         MaterialPageRoute<void>(
                           builder: (_) => const EveningReportScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.analytics_outlined,
+                        color: Color(0xFF0F766E)),
+                    title: const Text('Lifetime Business Analytics',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    subtitle: const Text(
+                        'Total sales, top products, high-value clients & PDF',
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const LifetimeReportScreen(),
                         ),
                       );
                     },

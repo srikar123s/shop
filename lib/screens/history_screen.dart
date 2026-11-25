@@ -100,6 +100,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   DateTime? _selectedDate;
   HistoryViewMode _viewMode = HistoryViewMode.byCustomer;
   String? _selectedTakenBy;
+  String? _selectedLocation;
 
   @override
   void initState() {
@@ -184,7 +185,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final s = AppLocalizations.of(context);
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59);
     final canViewTotals = ShopSyncService.instance.canViewBillTotals;
 
     final fallbackUser = ShopSyncService.instance.currentUserOrDeviceName;
@@ -202,12 +202,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
         .toList()
       ..sort();
 
+    // Collect all customer locations
+    final allLocations = _orders
+        .map((o) => o.customerAddress?.trim() ?? '')
+        .where((loc) => loc.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
     // Filter orders
     final filteredOrders = _orders.where((order) {
       if (_selectedTakenBy != null) {
         final t = order.takenBy?.trim();
         final effectiveTaken = (t == null || t.isEmpty || t == 'Store') ? fallbackUser : t;
         if (effectiveTaken != _selectedTakenBy) return false;
+      }
+      if (_selectedLocation != null) {
+        final loc = order.customerAddress?.trim() ?? '';
+        if (loc != _selectedLocation) return false;
       }
       if (_filter == HistoryFilter.today) {
         return !order.createdAt.isBefore(todayStart) &&
@@ -485,6 +497,62 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ),
 
+            // Filter by Location Dropdown
+            if (allLocations.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined,
+                        size: 16, color: Color(0xFF0F766E)),
+                    const SizedBox(width: 8),
+                    const Text('Location:',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String?>(
+                          value: _selectedLocation,
+                          isDense: true,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF0F766E),
+                            fontWeight: FontWeight.bold,
+                          ),
+                          items: [
+                            const DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text('All Locations'),
+                            ),
+                            ...allLocations.map((loc) => DropdownMenuItem<String?>(
+                                  value: loc,
+                                  child: Text(loc, overflow: TextOverflow.ellipsis),
+                                )),
+                          ],
+                          onChanged: (val) {
+                            setState(() => _selectedLocation = val);
+                          },
+                        ),
+                      ),
+                    ),
+                    if (_selectedLocation != null)
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedLocation = null),
+                        child: const Icon(Icons.close,
+                            size: 16, color: Colors.grey),
+                      ),
+                  ],
+                ),
+              ),
+
             // Status Filter Chips Row
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -597,6 +665,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   setState(() {
                                     _filter = HistoryFilter.all;
                                     _selectedTakenBy = null;
+                                    _selectedLocation = null;
                                     _searchController.clear();
                                   });
                                   _load();

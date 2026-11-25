@@ -41,6 +41,37 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
   bool _loading = true;
   String _filter = 'due'; // 'due', 'overdue30', 'all', 'settled'
   String _sortBy = 'due_desc'; // 'due_desc', 'ageing_desc', 'name_asc', 'recent'
+  String? _selectedLocation;
+
+  List<String> get _allLocations {
+    final locs = _khataList
+        .map((item) => (item['customer_location'] as String?)?.trim() ?? '')
+        .where((loc) => loc.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return locs;
+  }
+
+  double get _locationTotalDue {
+    final list = _selectedLocation == null
+        ? _khataList
+        : _khataList.where((item) => ((item['customer_location'] as String?)?.trim() ?? '') == _selectedLocation);
+    return list.fold(0.0, (sum, item) {
+      final due = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
+      return sum + (due > 0 ? due : 0.0);
+    });
+  }
+
+  double get _locationTotalCollected {
+    final list = _selectedLocation == null
+        ? _khataList
+        : _khataList.where((item) => ((item['customer_location'] as String?)?.trim() ?? '') == _selectedLocation);
+    return list.fold(0.0, (sum, item) {
+      final paid = (item['total_paid'] as num?)?.toDouble() ?? 0.0;
+      return sum + paid;
+    });
+  }
 
   @override
   void initState() {
@@ -56,15 +87,23 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
 
   Future<void> _loadKhata() async {
     setState(() => _loading = true);
-    final list = await DatabaseHelper.instance.getCustomerKhataList();
-    final metrics = await DatabaseHelper.instance.getKhataSummaryMetrics(list);
-    if (!mounted) return;
-    setState(() {
-      _khataList = list;
-      _metrics = metrics;
-      _applyFilterAndSort();
-      _loading = false;
-    });
+    try {
+      final list = await DatabaseHelper.instance.getCustomerKhataList();
+      final metrics = await DatabaseHelper.instance.getKhataSummaryMetrics(list);
+      if (!mounted) return;
+      setState(() {
+        _khataList = list;
+        _metrics = metrics;
+        _applyFilterAndSort();
+        _loading = false;
+      });
+    } catch (e, stack) {
+      debugPrint('Error loading khata list: $e\n$stack');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   void _applyFilterAndSort() {
@@ -78,6 +117,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
       if (_filter == 'overdue30' && (due <= 0.01 || days < 30)) return false;
       if (_filter == 'over_limit' && item['is_over_limit'] != true) return false;
       if (_filter == 'settled' && (due > 0.01 || due < -0.01)) return false;
+
+      if (_selectedLocation != null) {
+        final loc = (item['customer_location'] as String?)?.trim() ?? '';
+        if (loc != _selectedLocation) return false;
+      }
 
       final name = (item['customer_name'] as String?)?.toLowerCase() ?? '';
       final phone = (item['customer_phone'] as String?)?.toLowerCase() ?? '';
@@ -963,6 +1007,130 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
             ),
           ),
 
+          // Location Filter & Metrics Banner
+          if (_allLocations.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: _selectedLocation != null ? const Color(0xFFF0FDFA) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _selectedLocation != null ? const Color(0xFF0F766E) : Colors.grey.shade300,
+                    width: _selectedLocation != null ? 1.5 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.location_on, size: 18, color: Color(0xFF0F766E)),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Location:',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String?>(
+                              value: _selectedLocation,
+                              isDense: true,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF0F766E),
+                                fontWeight: FontWeight.w700,
+                              ),
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('All Locations (Market Total)'),
+                                ),
+                                ..._allLocations.map((loc) => DropdownMenuItem<String?>(
+                                      value: loc,
+                                      child: Text(loc, overflow: TextOverflow.ellipsis),
+                                    )),
+                              ],
+                              onChanged: (val) {
+                                setState(() {
+                                  _selectedLocation = val;
+                                  _applyFilterAndSort();
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                        if (_selectedLocation != null)
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedLocation = null;
+                                _applyFilterAndSort();
+                              });
+                            },
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.close, size: 16, color: Colors.grey),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (_selectedLocation != null) ...[
+                      const Divider(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Column(
+                            children: [
+                              Text(
+                                '$_selectedLocation Total Due',
+                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                currency.format(_locationTotalDue),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(height: 24, width: 1, color: Colors.grey.shade300),
+                          Column(
+                            children: [
+                              Text(
+                                '$_selectedLocation Total Collected',
+                                style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                currency.format(_locationTotalCollected),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF0F766E),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
           // Search and Sort Row
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -1359,6 +1527,27 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                                   ],
                                                 ),
                                               const SizedBox(height: 2),
+                                              if (((item['customer_location'] as String?)?.trim() ?? '').isNotEmpty) ...[
+                                                Row(
+                                                  children: [
+                                                    Icon(Icons.location_on_outlined, size: 12, color: Colors.grey.shade600),
+                                                    const SizedBox(width: 3),
+                                                    Expanded(
+                                                      child: Text(
+                                                        (item['customer_location'] as String).trim(),
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: Colors.grey.shade700,
+                                                        ),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 2),
+                                              ],
                                               Text(
                                                 '$orderCount closed bills • Billed: ₹ ${totalBilled.toStringAsFixed(0)} • Collected: ₹ ${totalPaid.toStringAsFixed(0)}',
                                                 style: TextStyle(

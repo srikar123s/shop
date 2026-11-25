@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:shop/screens/order_packing_slip_screen.dart';
 import 'dart:convert';
@@ -46,9 +47,42 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   final Map<int, TextEditingController> _itemPriceControllers = {};
   final ScrollController _scrollController = ScrollController();
   double _customerAdvanceBalance = 0.0;
+  Timer? _autoSaveTimer;
+
+  void _autoSaveFulfillment() {
+    if (_details == null) return;
+    final orderId = _details!.order.id!;
+    final items = List<OrderItemEntity>.from(_details!.items);
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        await widget.orderRepository.updateOrderFulfillment(
+          orderId: orderId,
+          items: items,
+        );
+      } catch (e) {
+        debugPrint('Error auto-saving fulfillment: $e');
+      }
+    });
+  }
+
+  Future<void> _flushFulfillmentSave() async {
+    _autoSaveTimer?.cancel();
+    if (_details != null) {
+      try {
+        await widget.orderRepository.updateOrderFulfillment(
+          orderId: _details!.order.id!,
+          items: _details!.items,
+        );
+      } catch (e) {
+        debugPrint('Error flushing fulfillment: $e');
+      }
+    }
+  }
 
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
     _scrollController.dispose();
     for (final c in _itemPriceControllers.values) {
       c.dispose();
@@ -437,6 +471,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   Future<void> _navigateToAddProducts() async {
     if (_details == null) return;
+    await _flushFulfillmentSave();
     final order = _details!.order;
     final customer =
         await widget.customerRepository.getCustomerById(order.customerId);
@@ -1461,7 +1496,12 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
     final fullyGivenItems = _details!.items.where((i) => i.quantityGiven >= i.quantityOrdered).length;
     final overallProgress = totalItemsCount > 0 ? (fullyGivenItems / totalItemsCount) : 0.0;
 
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) async {
+        await _flushFulfillmentSave();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1531,6 +1571,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               tooltip: 'Add products to order',
               icon: const Icon(Icons.playlist_add),
               onPressed: () async {
+                await _flushFulfillmentSave();
                 final customer = await widget.customerRepository
                     .getCustomerById(order.customerId);
                 if (!context.mounted || customer == null) return;
@@ -2190,6 +2231,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                             _details!.items[index] =
                                                 item.copyWith(unitPrice: parsed);
                                           });
+                                          _autoSaveFulfillment();
                                         },
                                       );
                                     },
@@ -2211,6 +2253,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                   _details!.items[index] =
                                       item.copyWith(quantityGiven: newGiven);
                                 });
+                                _autoSaveFulfillment();
                               },
                             ),
                           ],
@@ -2304,6 +2347,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 }
