@@ -1349,13 +1349,24 @@ class DatabaseHelper {
       orderWhereParts.add('o.created_at <= ?');
       orderWhereArgs.add(endDate.toIso8601String());
     }
-    if (locationFilter != null && locationFilter.trim().isNotEmpty && locationFilter != 'All Locations') {
-      orderWhereParts.add('c.address = ?');
-      orderWhereArgs.add(locationFilter.trim());
+
+    final bool isLocFiltered = locationFilter != null &&
+        locationFilter.trim().isNotEmpty &&
+        locationFilter.trim() != 'All Locations';
+    final String? cleanLoc = isLocFiltered ? locationFilter.trim() : null;
+
+    final bool isStaffFiltered = staffFilter != null &&
+        staffFilter.trim().isNotEmpty &&
+        staffFilter.trim() != 'All Staff';
+    final String? cleanStaff = isStaffFiltered ? staffFilter.trim() : null;
+
+    if (cleanLoc != null) {
+      orderWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
+      orderWhereArgs.add(cleanLoc);
     }
-    if (staffFilter != null && staffFilter.trim().isNotEmpty && staffFilter != 'All Staff') {
-      orderWhereParts.add('o.taken_by = ?');
-      orderWhereArgs.add(staffFilter.trim());
+    if (cleanStaff != null) {
+      orderWhereParts.add('TRIM(o.taken_by) = ? COLLATE NOCASE');
+      orderWhereArgs.add(cleanStaff);
     }
 
     final orderWhereClause = orderWhereParts.isNotEmpty
@@ -1392,9 +1403,9 @@ class DatabaseHelper {
       payWhereParts.add('cp.created_at <= ?');
       payWhereArgs.add(endDate.toIso8601String());
     }
-    if (locationFilter != null && locationFilter.trim().isNotEmpty && locationFilter != 'All Locations') {
-      payWhereParts.add('c.address = ?');
-      payWhereArgs.add(locationFilter.trim());
+    if (cleanLoc != null) {
+      payWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
+      payWhereArgs.add(cleanLoc);
     }
 
     final payWhereClause = payWhereParts.isNotEmpty
@@ -1412,12 +1423,20 @@ class DatabaseHelper {
         ? (payAggRows.first['total_collected'] as num?)?.toDouble() ?? 0.0
         : 0.0;
 
-    // 3. Outstanding Market Due & Advance Pool
-    final khataSummary = await getKhataSummaryMetrics();
-    final totalMarketDue = (khataSummary['totalMarketDue'] as num?)?.toDouble() ?? 0.0;
-    final overdue30 = (khataSummary['overdue30'] as num?)?.toDouble() ?? 0.0;
+    // 3. Outstanding Market Due & Advance Pool (Filtered by location if specified)
+    final rawKhataList = await getCustomerKhataList();
+    final targetLocLower = cleanLoc?.toLowerCase();
+    final khataList = cleanLoc != null
+        ? rawKhataList.where((item) {
+            final loc = (item['customer_location'] as String?)?.trim().toLowerCase();
+            return loc == targetLocLower;
+          }).toList()
+        : rawKhataList;
 
-    final khataList = await getCustomerKhataList();
+    final khataSummary = await getKhataSummaryMetrics(khataList);
+    final totalMarketDue = (khataSummary['totalMarketDue'] as num?)?.toDouble() ?? 0.0;
+    final overdue30 = (khataSummary['overdue30Days'] as num?)?.toDouble() ?? 0.0;
+
     final highestDueCustomers = khataList
         .where((item) => ((item['balance_due'] as num?)?.toDouble() ?? 0.0) > 0.01)
         .toList()
@@ -1531,6 +1550,15 @@ class DatabaseHelper {
     final repeatRatePercentage = uniqueCustomerCount > 0 ? (repeatCustomerCount / uniqueCustomerCount) * 100 : 0.0;
 
     // 7. Dormant / Lost Customers (Inactive 30+ days, sorted by past spend)
+    final dormantWhereParts = <String>[];
+    final dormantWhereArgs = <Object?>[];
+    if (cleanLoc != null) {
+      dormantWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
+      dormantWhereArgs.add(cleanLoc);
+    }
+    final dormantWhereClause = dormantWhereParts.isNotEmpty
+        ? 'WHERE ${dormantWhereParts.join(' AND ')}'
+        : '';
     final dormantQuery = '''
       SELECT 
         c.id as customer_id,
@@ -1543,23 +1571,35 @@ class DatabaseHelper {
         CAST((julianday('now') - julianday(MAX(o.created_at))) as INTEGER) as days_since_last_order
       FROM orders o
       JOIN customers c ON o.customer_id = c.id
+      $dormantWhereClause
       GROUP BY c.id
       HAVING (julianday('now') - julianday(MAX(o.created_at))) >= 30
       ORDER BY past_total_bought DESC
       LIMIT 20
     ''';
-    final dormantCustomers = await db.rawQuery(dormantQuery);
+    final dormantCustomers = await db.rawQuery(dormantQuery, dormantWhereArgs);
 
     // 8. Average Udhaar Clearance Cycle (DSO)
+    final dsoWhereParts = <String>[
+      'julianday(cp.created_at) >= julianday(o.created_at)',
+      '(julianday(cp.created_at) - julianday(o.created_at)) <= 365'
+    ];
+    final dsoWhereArgs = <Object?>[];
+    if (cleanLoc != null) {
+      dsoWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
+      dsoWhereArgs.add(cleanLoc);
+    }
     final dsoQuery = '''
       SELECT AVG(julianday(cp.created_at) - julianday(o.created_at)) as avg_dso
       FROM customer_payments cp
       JOIN orders o ON cp.customer_id = o.customer_id
-      WHERE julianday(cp.created_at) >= julianday(o.created_at)
-        AND (julianday(cp.created_at) - julianday(o.created_at)) <= 365
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE ${dsoWhereParts.join(' AND ')}
     ''';
-    final dsoRows = await db.rawQuery(dsoQuery);
-    final rawDso = (dsoRows.first['avg_dso'] as num?)?.toDouble();
+    final dsoRows = await db.rawQuery(dsoQuery, dsoWhereArgs);
+    final rawDso = (dsoRows.isNotEmpty && dsoRows.first['avg_dso'] != null)
+        ? (dsoRows.first['avg_dso'] as num).toDouble()
+        : null;
     final avgDsoDays = (rawDso != null && rawDso > 0)
         ? rawDso.round()
         : (totalMarketDue > 0 && totalSales > 0 ? ((totalMarketDue / totalSales) * 30).round() : 14);
@@ -1596,7 +1636,11 @@ class DatabaseHelper {
     ''';
     final leastProdRows = await db.rawQuery(leastProductsQuery);
 
-    // 11. Dead Stock Alert (0 sales in catalog)
+    // 11. Dead Stock Alert (0 sales in catalog for current filter)
+    final deadStockWhereSubquery = orderWhereClause.isEmpty
+        ? 'WHERE oi.product_id IS NOT NULL'
+        : '$orderWhereClause AND oi.product_id IS NOT NULL';
+
     final deadStockQuery = '''
       SELECT 
         p.id,
@@ -1609,8 +1653,8 @@ class DatabaseHelper {
           SELECT DISTINCT oi.product_id 
           FROM order_items oi
           INNER JOIN orders o ON oi.order_id = o.id
-          $orderWhereClause
-          WHERE oi.product_id IS NOT NULL
+          LEFT JOIN customers c ON o.customer_id = c.id
+          $deadStockWhereSubquery
         )
       ORDER BY p.name ASC
       LIMIT 20
@@ -1820,6 +1864,7 @@ class DatabaseHelper {
       SELECT DISTINCT TRIM(address) as location 
       FROM customers 
       WHERE address IS NOT NULL AND TRIM(address) != ''
+      GROUP BY TRIM(address) COLLATE NOCASE
       ORDER BY location ASC
     ''');
     final allLocations = locRows
@@ -1831,6 +1876,7 @@ class DatabaseHelper {
       SELECT DISTINCT TRIM(taken_by) as staff 
       FROM orders 
       WHERE taken_by IS NOT NULL AND TRIM(taken_by) != '' AND TRIM(taken_by) != 'Store'
+      GROUP BY TRIM(taken_by) COLLATE NOCASE
       ORDER BY staff ASC
     ''');
     final allStaff = staffRows

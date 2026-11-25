@@ -753,20 +753,22 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                     const SizedBox(height: 16),
 
                     // Button: View Collections List (Detailed customers with remaining dues)
-                    FilledButton.tonalIcon(
+                    FilledButton.icon(
                       style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       onPressed: _showCollectionsDialog,
-                      icon: const Icon(Icons.people_alt_outlined, color: Color(0xFF0F766E)),
+                      icon: const Icon(Icons.people_alt_outlined, color: Colors.white),
                       label: const Text(
                         'VIEW TODAY\'S COLLECTIONS LIST',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF0F766E),
+                          color: Colors.white,
                           fontSize: 13,
                         ),
                       ),

@@ -1633,7 +1633,7 @@ class InvoicePdfService {
                       pw.SizedBox(height: 2),
                       pw.Text('Rs. ${totalSales.toStringAsFixed(0)}',
                           style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
-                      pw.Text('$totalOrders Orders ($completedOrders Done)',
+                      pw.Text('$totalOrders Orders ($completedOrders Done • $pendingOrders Pend)',
                           style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
                     ],
                   ),

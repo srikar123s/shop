@@ -68,15 +68,15 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
       case DateRangeFilter.lifetime:
         return null;
       case DateRangeFilter.today:
-        return DateTime(now.year, now.month, now.day, 23, 59, 59);
+        return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
       case DateRangeFilter.thisWeek:
-        return DateTime(now.year, now.month, now.day, 23, 59, 59);
+        return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
       case DateRangeFilter.thisMonth:
-        return DateTime(now.year, now.month, now.day, 23, 59, 59);
+        return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
       case DateRangeFilter.custom:
         if (_customDateRange == null) return null;
         return DateTime(_customDateRange!.end.year, _customDateRange!.end.month,
-            _customDateRange!.end.day, 23, 59, 59);
+            _customDateRange!.end.day, 23, 59, 59, 999);
     }
   }
 
@@ -118,6 +118,12 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
       debugPrint('Error loading lifetime business report: $e\n$stack');
       if (!mounted) return;
       setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to load report: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -198,7 +204,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
     final target = clean.length == 10 ? '91$clean' : clean;
     final shopName = ShopCustomizationService.instance.currentShopName;
     final upiId = ShopCustomizationService.instance.upiId;
-    final upiLine = upiId != null && upiId.isNotEmpty ? '\nUPI ID: $upiId' : '';
+    final upiLine = upiId.isNotEmpty ? '\nUPI ID: $upiId' : '';
     final text = 'Dear $customerName,\n\nGreetings from $shopName! 🙏\nYour current outstanding balance is ₹ ${dueAmount.toStringAsFixed(2)}.$upiLine\n\nPlease settle at your earliest convenience. Thank you!';
     final encoded = Uri.encodeComponent(text);
     final url = Uri.parse('whatsapp://send?phone=$target&text=$encoded');
@@ -357,6 +363,16 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
     final allStaff =
         (_reportData?['allStaff'] as List<dynamic>?)?.cast<String>() ?? [];
 
+    final locationItems = <String>[...allLocations];
+    if (_selectedLocation != null && !locationItems.contains(_selectedLocation)) {
+      locationItems.insert(0, _selectedLocation!);
+    }
+
+    final staffItems = <String>[...allStaff];
+    if (_selectedTakenBy != null && !staffItems.contains(_selectedTakenBy)) {
+      staffItems.insert(0, _selectedTakenBy!);
+    }
+
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
@@ -430,7 +446,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                                 child: Text('All Locations (Market)',
                                     style: TextStyle(fontSize: 11)),
                               ),
-                              ...allLocations.map(
+                              ...locationItems.map(
                                 (loc) => DropdownMenuItem<String?>(
                                   value: loc,
                                   child: Text(loc,
@@ -497,7 +513,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                                 child: Text('All Staff / Devices',
                                     style: TextStyle(fontSize: 11)),
                               ),
-                              ...allStaff.map(
+                              ...staffItems.map(
                                 (st) => DropdownMenuItem<String?>(
                                   value: st,
                                   child: Text(st,
@@ -1054,7 +1070,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                       style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF0F766E)),
                     ),
                     const SizedBox(height: 2),
-                    Text('$repeatCount repeat • $oneTimeCount walk-in', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                    Text('$repeatCount repeat • $oneTimeCount walk-in ($uniqueCount total)', style: const TextStyle(fontSize: 10, color: Colors.grey)),
                   ],
                 ),
                 Container(height: 36, width: 1, color: Colors.grey.shade200),
