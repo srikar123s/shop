@@ -52,6 +52,8 @@ class ShopCustomizationService extends ChangeNotifier {
     return _shopName;
   }
 
+  String get currentShopName => shopName;
+
   List<double> get globalShortcuts => List<double>.unmodifiable(_globalShortcuts);
   Map<int, List<double>> get productShortcuts => Map<int, List<double>>.unmodifiable(_productShortcuts);
   bool get isPureOfflineMode =>
