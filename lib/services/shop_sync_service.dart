@@ -13,6 +13,7 @@ import 'package:shop/models/customer.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/models/product.dart';
 import 'package:shop/models/shop_profile.dart';
+import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -47,6 +48,7 @@ class ShopSyncService extends ChangeNotifier {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _customersSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _paymentsSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _deviceSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _shopDocSub;
 
   StaffDevice? _myDevicePermissions;
 
@@ -289,9 +291,12 @@ class ShopSyncService extends ChangeNotifier {
     if (_isFirebaseAvailable) {
       try {
         final firestore = FirebaseFirestore.instance;
+        final notifSettings = await AppNotificationService.instance.exportNotificationSettingsMap();
         await firestore.collection('shops').doc(code).set({
           ...profile.toMap(),
           'ownerUid': currentUid,
+          'notification_settings': notifSettings,
+          'lastUpdatedNotifDevice': _deviceId,
           'updatedAt': FieldValue.serverTimestamp(),
           'lastUpdatedByDevice': _deviceId,
         });
@@ -823,6 +828,17 @@ class ShopSyncService extends ChangeNotifier {
       }
     }
 
+      // 5. Sync Notification Timers from Cloud Shop Document
+      try {
+        final rootShopDoc = await firestore.collection('shops').doc(shopCode).get();
+        if (rootShopDoc.exists && rootShopDoc.data()?['notification_settings'] is Map) {
+          final notifMap = (rootShopDoc.data()!['notification_settings'] as Map).cast<String, dynamic>();
+          await AppNotificationService.instance.applyCloudNotificationSettings(notifMap);
+        }
+      } catch (err) {
+        debugPrint('Error syncing notification settings from cloud: $err');
+      }
+
       _lastSyncTime = DateTime.now();
       _status = SyncStatus.connected;
       _statusMessage = 'Synced with ${_currentShop!.shopName}';
@@ -1292,6 +1308,22 @@ class ShopSyncService extends ChangeNotifier {
         }
       });
     }
+
+    // 6. Shop notification schedule live stream (synchronizes alert times across all devices)
+    _shopDocSub = firestore
+        .collection('shops')
+        .doc(shopCode)
+        .snapshots()
+        .listen((snap) async {
+      if (!snap.exists || snap.data() == null) return;
+      final data = snap.data()!;
+      if (data['notification_settings'] is Map) {
+        if (data['lastUpdatedNotifDevice'] != _deviceId) {
+          final notifMap = (data['notification_settings'] as Map).cast<String, dynamic>();
+          await AppNotificationService.instance.applyCloudNotificationSettings(notifMap);
+        }
+      }
+    });
   }
 
   void _listenForStaffApproval(String shopCode) {
@@ -1525,6 +1557,25 @@ class ShopSyncService extends ChangeNotifier {
     await updateShopProfileDetails(shopName: newName);
   }
 
+  /// Synchronizes active notification schedule (custom alert times) to Firestore for all connected devices
+  Future<void> syncNotificationSettingsToCloud() async {
+    if (_currentShop == null || !_isFirebaseAvailable || _deviceId == null) return;
+    try {
+      final notifSettings = await AppNotificationService.instance.exportNotificationSettingsMap();
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(_currentShop!.shopCode)
+          .set({
+        'notification_settings': notifSettings,
+        'lastUpdatedNotifDevice': _deviceId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('[ShopSyncService] Synced notification settings to cloud for shop ${_currentShop!.shopCode}');
+    } catch (e) {
+      debugPrint('[ShopSyncService] Error syncing notification settings to cloud: $e');
+    }
+  }
+
   void _stopRealtimeListeners() {
     _ordersSub?.cancel();
     _ordersSub = null;
@@ -1536,6 +1587,8 @@ class ShopSyncService extends ChangeNotifier {
     _paymentsSub = null;
     _deviceSub?.cancel();
     _deviceSub = null;
+    _shopDocSub?.cancel();
+    _shopDocSub = null;
   }
 
   @override

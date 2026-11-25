@@ -150,8 +150,9 @@ class AppNotificationService {
     return scheduledDate;
   }
 
-  /// Safely registers an alarm with Android AlarmManager, falling back to inexactAllowWhileIdle
-  /// if exact alarms are disallowed by the OS or battery optimization.
+  /// Safely registers an alarm with Android AlarmManager.
+  /// Uses AndroidScheduleMode.alarmClock as primary (highest OS priority, fires even in Doze/sleep),
+  /// falling back to exactAllowWhileIdle and inexactAllowWhileIdle.
   Future<void> _safeZonedSchedule({
     required int id,
     required String title,
@@ -160,34 +161,10 @@ class AppNotificationService {
     required NotificationDetails notificationDetails,
     required String payload,
     DateTimeComponents? matchDateTimeComponents,
+    bool useAlarmClock = true,
   }) async {
-    final androidDetails =
-        _notificationsPlugin.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
-    bool canExact = false;
-    try {
-      canExact = (await androidDetails?.canScheduleExactNotifications()) ?? false;
-    } catch (_) {}
-
-    final primaryMode = canExact
-        ? AndroidScheduleMode.exactAllowWhileIdle
-        : AndroidScheduleMode.inexactAllowWhileIdle;
-
-    try {
-      await _notificationsPlugin.zonedSchedule(
-        id,
-        title,
-        body,
-        scheduledDate,
-        notificationDetails,
-        androidScheduleMode: primaryMode,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: matchDateTimeComponents,
-        payload: payload,
-      );
-    } catch (e) {
-      debugPrint('[AppNotificationService] Primary schedule error ($primaryMode): $e. Retrying with inexactAllowWhileIdle...');
+    // 1. Primary: AndroidScheduleMode.alarmClock (Highest priority in Android OS, wakes device from Doze mode)
+    if (useAlarmClock) {
       try {
         await _notificationsPlugin.zonedSchedule(
           id,
@@ -195,23 +172,64 @@ class AppNotificationService {
           body,
           scheduledDate,
           notificationDetails,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          androidScheduleMode: AndroidScheduleMode.alarmClock,
           uiLocalNotificationDateInterpretation:
               UILocalNotificationDateInterpretation.absoluteTime,
           matchDateTimeComponents: matchDateTimeComponents,
           payload: payload,
         );
-      } catch (err) {
-        debugPrint('[AppNotificationService] Inexact schedule fallback failed: $err');
+        debugPrint('[AppNotificationService] Scheduled #$id at $scheduledDate via alarmClock mode.');
+        return;
+      } catch (e) {
+        debugPrint('[AppNotificationService] alarmClock schedule failed: $e. Falling back to exactAllowWhileIdle...');
       }
+    }
+
+    // 2. Secondary: AndroidScheduleMode.exactAllowWhileIdle
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id,
+        title,
+        body,
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: matchDateTimeComponents,
+        payload: payload,
+      );
+      debugPrint('[AppNotificationService] Scheduled #$id at $scheduledDate via exactAllowWhileIdle.');
+      return;
+    } catch (e) {
+      debugPrint('[AppNotificationService] exactAllowWhileIdle schedule failed: $e. Falling back to inexactAllowWhileIdle...');
+    }
+
+    // 3. Tertiary fallback: AndroidScheduleMode.inexactAllowWhileIdle
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id,
+        title,
+        body,
+        scheduledDate,
+        notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: matchDateTimeComponents,
+        payload: payload,
+      );
+      debugPrint('[AppNotificationService] Scheduled #$id at $scheduledDate via inexactAllowWhileIdle.');
+    } catch (err) {
+      debugPrint('[AppNotificationService] All zonedSchedule attempts failed: $err');
     }
   }
 
   /// Schedule a 30-second test alarm to verify background alarm delivery when app is closed
-  Future<void> scheduleTestBackgroundAlarm() async {
+  Future<void> scheduleTestBackgroundAlarm({int delaySeconds = 30}) async {
     await _configureLocalTimeZone();
     final now = tz.TZDateTime.now(tz.local);
-    final scheduledDate = now.add(const Duration(seconds: 30));
+    final scheduledDate = now.add(Duration(seconds: delaySeconds));
 
     const testDetails = AndroidNotificationDetails(
       _channelId,
@@ -220,17 +238,94 @@ class AppNotificationService {
       importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF0F766E),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(''),
     );
 
     await _safeZonedSchedule(
       id: 999,
-      title: '⏰ Background Alarm Test SUCCESS!',
-      body: 'This notification fired on time even while the app was closed/locked!',
+      title: '⏰ Closed-App Alarm Test SUCCESS!',
+      body: 'Exact native alarm fired on schedule ($delaySeconds s)! Your notifications will ring on time even when the app is closed.',
       scheduledDate: scheduledDate,
       notificationDetails: const NotificationDetails(android: testDetails),
       payload: 'test_alarm',
+      useAlarmClock: true,
     );
+  }
+
+  /// Check if exact alarms can be scheduled on this device (Android 12+)
+  Future<bool> canScheduleExactAlarms() async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    return (await androidDetails?.canScheduleExactNotifications()) ?? true;
+  }
+
+  /// Prompts Android system settings to grant exact alarm scheduling if needed
+  Future<void> requestExactAlarmsPermission() async {
+    final androidDetails =
+        _notificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidDetails?.requestExactAlarmsPermission();
+  }
+
+  /// Exports the complete active notification schedule to a map for cloud sync
+  Future<Map<String, dynamic>> exportNotificationSettingsMap() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'enabled': await isEnabled(),
+      'pending_enabled': await isPendingOrdersEnabled(),
+      'pending_mode': await getPendingOrdersMode(),
+      'pending_times': prefs.getStringList(_prefPendingTimesKey) ?? ['10:00', '14:00', '19:00'],
+      'procure_enabled': await isProcurementEnabled(),
+      'procure_times': prefs.getStringList(_prefProcureTimesKey) ?? ['09:30', '17:30'],
+      'daily_report_enabled': await isDailyReportEnabled(),
+      'daily_report_time': prefs.getString(_prefDailyReportTimeKey) ?? '21:00',
+      'price_caution_enabled': await isPriceCautionEnabled(),
+      'price_caution_days': await getPriceCautionDays(),
+    };
+  }
+
+  /// Applies notification schedule received from the cloud (Firestore) and reschedules native alarms
+  Future<void> applyCloudNotificationSettings(Map<String, dynamic> map) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (map.containsKey('enabled')) {
+      await prefs.setBool(_prefEnabledKey, map['enabled'] == true);
+    }
+    if (map.containsKey('pending_enabled')) {
+      await prefs.setBool(_prefPendingEnabledKey, map['pending_enabled'] == true);
+    }
+    if (map.containsKey('pending_mode') && map['pending_mode'] is String) {
+      await prefs.setString(_prefPendingModeKey, map['pending_mode'] as String);
+    }
+    if (map.containsKey('pending_times') && map['pending_times'] is List) {
+      final list = (map['pending_times'] as List).map((e) => e.toString()).toList();
+      await prefs.setStringList(_prefPendingTimesKey, list);
+    }
+    if (map.containsKey('procure_enabled')) {
+      await prefs.setBool(_prefProcureEnabledKey, map['procure_enabled'] == true);
+    }
+    if (map.containsKey('procure_times') && map['procure_times'] is List) {
+      final list = (map['procure_times'] as List).map((e) => e.toString()).toList();
+      await prefs.setStringList(_prefProcureTimesKey, list);
+    }
+    if (map.containsKey('daily_report_enabled')) {
+      await prefs.setBool(_prefDailyReportEnabledKey, map['daily_report_enabled'] == true);
+    }
+    if (map.containsKey('daily_report_time') && map['daily_report_time'] is String) {
+      await prefs.setString(_prefDailyReportTimeKey, map['daily_report_time'] as String);
+    }
+    if (map.containsKey('price_caution_enabled')) {
+      await prefs.setBool('price_caution_enabled', map['price_caution_enabled'] == true);
+    }
+    if (map.containsKey('price_caution_days') && map['price_caution_days'] is num) {
+      await prefs.setInt('price_caution_days', (map['price_caution_days'] as num).toInt());
+    }
+    await rescheduleBackgroundNotifications();
+    debugPrint('[AppNotificationService] Applied cloud notification settings & rescheduled alarms.');
   }
 
   /// Registers native Android AlarmManager exact background alarms that fire
@@ -258,6 +353,10 @@ class AppNotificationService {
       importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF0F766E),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(''),
     );
 
@@ -268,6 +367,10 @@ class AppNotificationService {
       importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFFE11D48),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(''),
     );
 
@@ -278,6 +381,10 @@ class AppNotificationService {
       importance: Importance.max,
       priority: Priority.high,
       color: Color(0xFF3B82F6),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      visibility: NotificationVisibility.public,
       styleInformation: BigTextStyleInformation(''),
     );
 

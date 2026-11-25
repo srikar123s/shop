@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/database/database_helper.dart';
@@ -102,6 +103,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     }
   }
 
+  void _syncNotificationSchedule() {
+    if (ShopSyncService.instance.isConnected) {
+      unawaited(ShopSyncService.instance.syncNotificationSettingsToCloud());
+    }
+  }
+
   Future<void> _addPendingTime() async {
     final picked = await showTimePicker(
       context: context,
@@ -112,6 +119,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       _pendingTimes.add(picked);
       _pendingTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      _syncNotificationSchedule();
       if (!mounted) return;
       setState(() {});
     }
@@ -121,6 +129,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (index >= 0 && index < _pendingTimes.length) {
       _pendingTimes.removeAt(index);
       await AppNotificationService.instance.setPendingOrdersTimes(_pendingTimes);
+      _syncNotificationSchedule();
       if (!mounted) return;
       setState(() {});
     }
@@ -136,6 +145,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
       _procurementTimes.add(picked);
       _procurementTimes.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
       await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      _syncNotificationSchedule();
       if (!mounted) return;
       setState(() {});
     }
@@ -145,6 +155,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (index >= 0 && index < _procurementTimes.length) {
       _procurementTimes.removeAt(index);
       await AppNotificationService.instance.setProcurementTimes(_procurementTimes);
+      _syncNotificationSchedule();
       if (!mounted) return;
       setState(() {});
     }
@@ -752,6 +763,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   value: _remindersEnabled,
                   onChanged: (val) async {
                     await AppNotificationService.instance.setEnabled(val);
+                    _syncNotificationSchedule();
                     if (!mounted) return;
                     setState(() => _remindersEnabled = val);
                   },
@@ -786,6 +798,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setPendingOrdersEnabled(val);
+                                _syncNotificationSchedule();
                                 if (!mounted) return;
                                 setState(() => _pendingOrdersEnabled = val);
                               },
@@ -813,6 +826,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('scheduled');
+                                    _syncNotificationSchedule();
                                     if (!mounted) return;
                                     setState(() => _pendingMode = 'scheduled');
                                   }
@@ -825,6 +839,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('hourly');
+                                    _syncNotificationSchedule();
                                     if (!mounted) return;
                                     setState(() => _pendingMode = 'hourly');
                                   }
@@ -837,6 +852,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                   if (sel) {
                                     await AppNotificationService.instance
                                         .setPendingOrdersMode('two_hours');
+                                    _syncNotificationSchedule();
                                     if (!mounted) return;
                                     setState(() => _pendingMode = 'two_hours');
                                   }
@@ -877,6 +893,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                         await AppNotificationService.instance
                                             .setPendingOrdersTimes(
                                                 _pendingTimes);
+                                        _syncNotificationSchedule();
                                         if (!mounted) return;
                                         setState(() {});
                                       },
@@ -933,6 +950,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setProcurementEnabled(val);
+                                _syncNotificationSchedule();
                                 if (!mounted) return;
                                 setState(() => _procurementEnabled = val);
                               },
@@ -972,6 +990,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                       await AppNotificationService.instance
                                           .setProcurementTimes(
                                               _procurementTimes);
+                                      _syncNotificationSchedule();
                                       if (!mounted) return;
                                       setState(() {});
                                     },
@@ -1019,6 +1038,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                               onChanged: (val) async {
                                 await AppNotificationService.instance
                                     .setDailyReportEnabled(val);
+                                _syncNotificationSchedule();
                                 if (!mounted) return;
                                 setState(() => _dailyReportEnabled = val);
                               },
@@ -1043,6 +1063,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                                 _dailyReportTime = t;
                                 await AppNotificationService.instance
                                     .setDailyReportTime(t);
+                                _syncNotificationSchedule();
                                 if (!mounted) return;
                                 setState(() {});
                               },
@@ -1221,6 +1242,34 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         );
                       }
                     },
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.battery_charging_full_rounded,
+                        color: Colors.amber.shade800),
+                  ),
+                  title: const Text('Autostart & Battery Saver Guide',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  subtitle: const Text(
+                    'Ensure alarms ring when app is closed on Xiaomi, Vivo, Samsung, Realme devices.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  trailing: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _showBatteryGuideDialog,
+                    child: const Text('Guide'),
                   ),
                 ),
               ],
@@ -1525,6 +1574,95 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showBatteryGuideDialog() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFCCFBF1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.battery_saver, color: Color(0xFF0F766E)),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Ensure Closed-App Notifications Ring',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Phones with aggressive power-saving (Xiaomi HyperOS/MIUI, Vivo FuntouchOS, Samsung OneUI, Realme) can delay alarms when apps are swiped away. Follow these 3 quick steps:',
+                style: TextStyle(fontSize: 12, color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+              _buildGuideStep('1', 'Long-press the Shop app icon on your home screen > Tap "App Info" (ⓘ).'),
+              const SizedBox(height: 8),
+              _buildGuideStep('2', 'Tap Battery / Battery Saver > Choose "Unrestricted" or "No restrictions".'),
+              const SizedBox(height: 8),
+              _buildGuideStep('3', 'Enable "Autostart" / "Allow background activity" if your phone shows this option.'),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('GOT IT'),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGuideStep(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 22,
+          height: 22,
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: Color(0xFF0F766E),
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            number,
+            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        ),
+      ],
     );
   }
 }
