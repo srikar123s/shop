@@ -85,8 +85,9 @@ class _HomeScreenState extends State<HomeScreen> {
     ShopSyncService.instance.addListener(_onSyncUpdate);
     ShopCustomizationService.instance.addListener(_onSyncUpdate);
 
-    // Prompt user for Android 13+ system notification permission on first launch while Activity is active
+    // Prompt user for Android 13+ system notification permission on first launch & handle notification cold-start taps
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await AppNotificationService.instance.checkAndConsumeInitialPayload();
       final enabled = await AppNotificationService.instance.areNotificationsEnabled();
       if (!enabled && mounted) {
         await AppNotificationService.instance.requestNotificationsPermission();

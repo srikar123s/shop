@@ -44,9 +44,34 @@ void main() {
     test('Custom times and modes can be configured and persisted', () async {
       final notif = AppNotificationService.instance;
 
+      // Configure pending orders mode to every 2 hours ('two_hours')
+      await notif.setPendingOrdersMode('two_hours');
+      expect(await notif.getPendingOrdersMode(), 'two_hours');
+      expect(await notif.getScheduleMode(), NotificationScheduleMode.every2Hours);
+
       // Configure pending orders mode to hourly
       await notif.setPendingOrdersMode('hourly');
       expect(await notif.getPendingOrdersMode(), 'hourly');
+
+      // Export & apply cloud settings preserve schedule cleanly
+      final exported = await notif.exportNotificationSettingsMap();
+      expect(exported['pending_mode'], 'hourly');
+      await notif.applyCloudNotificationSettings({
+        'enabled': true,
+        'pending_enabled': true,
+        'pending_mode': 'two_hours',
+        'pending_times': ['09:00', '15:00'],
+        'procure_enabled': true,
+        'procure_times': ['11:15'],
+        'daily_report_enabled': true,
+        'daily_report_time': '20:30',
+        'price_caution_enabled': true,
+        'price_caution_days': 45,
+      });
+      expect(await notif.getPendingOrdersMode(), 'two_hours');
+      expect(await notif.getScheduleMode(), NotificationScheduleMode.every2Hours);
+      expect(await notif.getPriceCautionDays(), 45);
+      await notif.setPendingOrdersMode('hourly');
 
       // Configure custom pending times
       final customPendingTimes = [

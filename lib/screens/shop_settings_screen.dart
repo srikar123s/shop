@@ -30,9 +30,14 @@ class ShopSettingsScreen extends StatefulWidget {
   State<ShopSettingsScreen> createState() => _ShopSettingsScreenState();
 }
 
-class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
+class _ShopSettingsScreenState extends State<ShopSettingsScreen>
+    with WidgetsBindingObserver {
   final _customService = ShopCustomizationService.instance;
   bool _remindersEnabled = true;
+
+  // Background delivery diagnostics
+  Map<String, dynamic> _diagnostics = const <String, dynamic>{};
+  bool _pushingCloudTest = false;
 
   // Category specific notification settings
   bool _pendingOrdersEnabled = true;
@@ -58,8 +63,25 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _customService.addListener(_onServiceUpdate);
     _loadNotificationPref();
+    _refreshDiagnostics();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshDiagnostics();
+      AppNotificationService.instance.rescheduleBackgroundNotifications();
+    }
+  }
+
+  Future<void> _refreshDiagnostics() async {
+    final diag = await AppNotificationService.instance.getNotificationDiagnostics();
+    if (mounted) {
+      setState(() => _diagnostics = diag);
+    }
   }
 
   Future<void> _loadNotificationPref() async {
@@ -109,6 +131,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     if (ShopSyncService.instance.isConnected) {
       unawaited(ShopSyncService.instance.syncNotificationSettingsToCloud());
     }
+    unawaited(_refreshDiagnostics());
   }
 
   Future<void> _addPendingTime() async {
@@ -165,6 +188,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _customService.removeListener(_onServiceUpdate);
     super.dispose();
   }
@@ -766,6 +790,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   onChanged: (val) async {
                     await AppNotificationService.instance.setEnabled(val);
                     _syncNotificationSchedule();
+                    await _refreshDiagnostics();
                     if (!mounted) return;
                     setState(() => _remindersEnabled = val);
                   },
@@ -1169,6 +1194,8 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                   ],
                 ],
                 const Divider(height: 1),
+                _buildClosedAppHealthCard(),
+                const Divider(height: 1),
                 ListTile(
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1196,6 +1223,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                     onPressed: () async {
                       final enabled = await AppNotificationService.instance
                           .showInstantTestNotification();
+                      await _refreshDiagnostics();
                       if (context.mounted) {
                         if (enabled) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -1208,7 +1236,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         } else {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('⚠️ System notifications are BLOCKED in phone settings! Please allow notifications in App Info.'),
+                              content: Text('⚠️ System notifications are BLOCKED! Tap "Fix" above to allow notifications.'),
                               backgroundColor: Colors.red,
                               duration: Duration(seconds: 5),
                             ),
@@ -1234,7 +1262,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                       style:
                           TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   subtitle: const Text(
-                    'Schedules native OS alarm in 30 seconds. Close or lock app to verify!',
+                    'Schedules native OS alarm + SQLite check in 30s. Swipe close the app to verify!',
                     style: TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   trailing: FilledButton.tonal(
@@ -1245,13 +1273,25 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                     onPressed: () async {
                       await AppNotificationService.instance
                           .scheduleTestBackgroundAlarm();
+                      await _refreshDiagnostics();
+                      final targetTime = DateFormat('hh:mm:ss a')
+                          .format(DateTime.now().add(const Duration(seconds: 30)));
+                      final batteryOk =
+                          _diagnostics['ignoringBatteryOptimizations'] != false;
+                      final exactOk =
+                          _diagnostics['exactAlarmsAllowed'] != false;
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
+                          SnackBar(
                             content: Text(
-                                '⏰ Alarm scheduled for 30s from now! Close the app or lock your phone to test.'),
-                            backgroundColor: Color(0xFF0F766E),
-                            duration: Duration(seconds: 4),
+                              batteryOk && exactOk
+                                  ? '⏰ Native closed-app alarm set for $targetTime! Close or lock the app to test.'
+                                  : '⏰ Alarm set for $targetTime — tap "Unrestricted Battery" above if phone suppresses closed-app alarms.',
+                            ),
+                            backgroundColor: batteryOk && exactOk
+                                ? const Color(0xFF0F766E)
+                                : Colors.orange.shade800,
+                            duration: const Duration(seconds: 5),
                           ),
                         );
                       }
@@ -1275,7 +1315,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                       style:
                           TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   subtitle: const Text(
-                    'Dispatches real-time cloud alert to all connected partner & owner devices.',
+                    'Tests Firestore -> Cloud Function -> FCM push delivery to closed partner devices.',
                     style: TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   trailing: Row(
@@ -1319,36 +1359,70 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                         style: FilledButton.styleFrom(
                           visualDensity: VisualDensity.compact,
                         ),
-                        child: const Text('Push All'),
-                        onPressed: () async {
-                          final currentShop = ShopSyncService.instance.currentShop;
-                          if (currentShop == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('⚠️ Link or create a shop in Cloud Sync first to push to all devices!'),
-                                backgroundColor: Colors.orange,
-                              ),
-                            );
-                            return;
-                          }
-                          await FCMService.instance.broadcastCloudAlert(
-                            shopCode: currentShop.shopCode,
-                            title: '📢 Cloud Alert: ${currentShop.shopName}',
-                            body: 'Cloud push verified across all connected devices! Delivered even when closed.',
-                            senderDeviceId: ShopSyncService.instance.deviceId,
-                            data: {'screen': 'home'},
-                          );
-                          // Also trigger instant notification locally so you immediately hear and see it
-                          await AppNotificationService.instance.showInstantTestNotification();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('☁️ Push alert dispatched to all devices in shop "${currentShop.shopCode}"!'),
-                                backgroundColor: const Color(0xFF2563EB),
-                              ),
-                            );
-                          }
-                        },
+                        onPressed: _pushingCloudTest
+                            ? null
+                            : () async {
+                                final currentShop = ShopSyncService.instance.currentShop;
+                                if (currentShop == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('⚠️ Link or create a shop in Cloud Sync first to push to all devices!'),
+                                      backgroundColor: Colors.orange,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                setState(() => _pushingCloudTest = true);
+                                final res = await FCMService.instance.broadcastCloudAlert(
+                                  shopCode: currentShop.shopCode,
+                                  title: '📢 Cloud Alert: ${currentShop.shopName}',
+                                  body: 'Cloud push verified across connected devices!',
+                                  senderDeviceId: ShopSyncService.instance.deviceId,
+                                  data: {'screen': 'home'},
+                                );
+                                if (!res.ok) {
+                                  if (mounted) setState(() => _pushingCloudTest = false);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('❌ Cloud push failed: ${res.error ?? "Firestore permission denied"}'),
+                                        backgroundColor: Colors.red,
+                                        duration: const Duration(seconds: 5),
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+
+                                final dispatchStatus = await FCMService.instance.waitForBroadcastDispatch(
+                                  shopCode: currentShop.shopCode,
+                                  docId: res.docId!,
+                                );
+                                if (mounted) setState(() => _pushingCloudTest = false);
+                                if (context.mounted) {
+                                  if (dispatchStatus.dispatched) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('☁️ FCM push dispatched by cloud to all "${currentShop.shopCode}" devices!'),
+                                        backgroundColor: const Color(0xFF2563EB),
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          dispatchStatus.error != null
+                                              ? '⚠️ Cloud Function error: ${dispatchStatus.error}'
+                                              : 'ℹ️ Queued in Firestore for open devices. Closed-device FCM push requires Firebase Functions deployed (scheduled reminders work offline via native alarms!).',
+                                        ),
+                                        backgroundColor: Colors.orange.shade800,
+                                        duration: const Duration(seconds: 6),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                        child: Text(_pushingCloudTest ? 'Sending...' : 'Push All'),
                       ),
                     ],
                   ),
@@ -1683,6 +1757,193 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildClosedAppHealthCard() {
+    final notifsOk = _diagnostics['notificationsEnabled'] != false;
+    final exactOk = _diagnostics['exactAlarmsAllowed'] != false;
+    final batteryOk = _diagnostics['ignoringBatteryOptimizations'] == true;
+    final activeAlarms = (_diagnostics['activeNativeAlarmsCount'] as int?) ?? 0;
+    final jobActive = _diagnostics['periodicJobScheduled'] == true;
+    final mfg = (_diagnostics['manufacturer'] as String?) ?? '';
+
+    final allReady = notifsOk && exactOk && batteryOk;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: allReady ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: allReady ? const Color(0xFF86EFAC) : const Color(0xFFFCD34D),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                allReady ? Icons.verified_user_rounded : Icons.tune_rounded,
+                size: 18,
+                color: allReady
+                    ? const Color(0xFF15803D)
+                    : const Color(0xFFB45309),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  allReady
+                      ? 'Closed-App Delivery Ready ($activeAlarms alarms${jobActive ? " + watchdog" : ""})'
+                      : 'Closed-App Delivery Health Check',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: allReady
+                        ? const Color(0xFF166534)
+                        : const Color(0xFF92400E),
+                  ),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: 'Refresh status',
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: _refreshDiagnostics,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildDiagRow(
+            label: 'System Notifications',
+            ok: notifsOk,
+            okText: 'Allowed',
+            badText: 'Blocked',
+            actionLabel: notifsOk ? 'Settings' : 'Enable',
+            onTap: () async {
+              if (!notifsOk) {
+                await AppNotificationService.instance
+                    .requestNotificationsPermission();
+                final nowOk = await AppNotificationService.instance
+                    .areNotificationsEnabled();
+                if (!nowOk) {
+                  await AppNotificationService.instance
+                      .openNotificationSettings();
+                }
+              } else {
+                await AppNotificationService.instance
+                    .openNotificationSettings();
+              }
+              await _refreshDiagnostics();
+            },
+          ),
+          const SizedBox(height: 6),
+          _buildDiagRow(
+            label: 'Battery Background Mode',
+            ok: batteryOk,
+            okText: 'Unrestricted',
+            badText: 'Optimized (May Kill Alarms)',
+            actionLabel: batteryOk ? 'View' : 'Fix Now',
+            onTap: () async {
+              await AppNotificationService.instance
+                  .requestIgnoreBatteryOptimizations();
+              await _refreshDiagnostics();
+            },
+          ),
+          const SizedBox(height: 6),
+          _buildDiagRow(
+            label: 'Exact Alarms Permission',
+            ok: exactOk,
+            okText: 'Allowed',
+            badText: 'Restricted',
+            actionLabel: exactOk ? 'Settings' : 'Allow',
+            onTap: () async {
+              await AppNotificationService.instance.openExactAlarmSettings();
+              await _refreshDiagnostics();
+            },
+          ),
+          if (mfg.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Device: $mfg — allow Autostart / Background Activity directly for this app:',
+                    style: const TextStyle(fontSize: 11, color: Colors.black54),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  onPressed: () async {
+                    await AppNotificationService.instance.openAutostartSettings();
+                  },
+                  child: const Text('Autostart / App Info',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiagRow({
+    required String label,
+    required bool ok,
+    required String okText,
+    required String badText,
+    required String actionLabel,
+    required VoidCallback onTap,
+  }) {
+    return Row(
+      children: [
+        Icon(
+          ok ? Icons.check_circle : Icons.warning_amber_rounded,
+          size: 16,
+          color: ok ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            '$label: ${ok ? okText : badText}',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: ok ? Colors.black87 : const Color(0xFF92400E),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 26,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              visualDensity: VisualDensity.compact,
+              side: BorderSide(
+                color: ok ? Colors.grey.shade400 : const Color(0xFFD97706),
+              ),
+            ),
+            onPressed: onTap,
+            child: Text(
+              actionLabel,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: ok ? Colors.black87 : const Color(0xFFB45309),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

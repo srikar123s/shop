@@ -51,6 +51,7 @@ class ShopSyncService extends ChangeNotifier {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _deviceSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _shopDocSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _notifSub;
+  DateTime _realtimeListenersStartedAt = DateTime.now();
 
   StaffDevice? _myDevicePermissions;
 
@@ -1105,6 +1106,7 @@ class ShopSyncService extends ChangeNotifier {
   void _startRealtimeListeners() {
     _stopRealtimeListeners();
     if (_currentShop == null || !_isFirebaseAvailable) return;
+    _realtimeListenersStartedAt = DateTime.now();
 
     final firestore = FirebaseFirestore.instance;
     final shopCode = _currentShop!.shopCode;
@@ -1170,6 +1172,7 @@ class ShopSyncService extends ChangeNotifier {
           final cloudOrderNum = (data['order_number'] as num?)?.toInt() ??
               (data['id'] as num?)?.toInt();
           final existing = await db.query('orders', where: 'cloud_order_id = ?', whereArgs: [cloudDocId]);
+          final isNewlySeenOnDevice = existing.isEmpty;
           int targetOrderId;
           if (existing.isNotEmpty) {
             targetOrderId = existing.first['id'] as int;
@@ -1207,16 +1210,23 @@ class ShopSyncService extends ChangeNotifier {
             });
           }
 
-          if (change.type == DocumentChangeType.added && data['lastUpdatedByDevice'] != _deviceId) {
-            final estTotal = (data['estimate_total'] as num?)?.toDouble() ?? 0.0;
-            final totalStr = estTotal > 0 ? ' (₹ ${estTotal.toStringAsFixed(0)})' : '';
-            final formattedOrderNum = (cloudOrderNum != null && cloudOrderNum > 0)
-                ? '#ORD-${cloudOrderNum.toString().padLeft(4, '0')} '
-                : '';
-            unawaited(AppNotificationService.instance.showLiveOrderNotification(
-              title: '📋 New Order from $incomingTakenBy',
-              body: '${formattedOrderNum}for $custName$totalStr received from connected device.',
-            ));
+          if (isNewlySeenOnDevice &&
+              !snapshot.metadata.isFromCache &&
+              data['lastUpdatedByDevice'] != _deviceId) {
+            final createdAt = DateTime.tryParse(data['created_at'] as String? ?? '');
+            final isRecentOrder = createdAt == null ||
+                DateTime.now().difference(createdAt).inMinutes.abs() <= 15;
+            if (isRecentOrder) {
+              final estTotal = (data['estimate_total'] as num?)?.toDouble() ?? 0.0;
+              final totalStr = estTotal > 0 ? ' (₹ ${estTotal.toStringAsFixed(0)})' : '';
+              final formattedOrderNum = (cloudOrderNum != null && cloudOrderNum > 0)
+                  ? '#ORD-${cloudOrderNum.toString().padLeft(4, '0')} '
+                  : '';
+              unawaited(AppNotificationService.instance.showLiveOrderNotification(
+                title: '📋 New Order from $incomingTakenBy',
+                body: '${formattedOrderNum}for $custName$totalStr received from connected device.',
+              ));
+            }
           }
 
           // Re-populate order items cleanly (delete existing to avoid duplicate items/options accumulation)
@@ -1439,11 +1449,17 @@ class ShopSyncService extends ChangeNotifier {
       }
     });
 
-    // 7. Multi-device live broadcast alert stream
+    // 7. Multi-device live broadcast alert stream (ignore historical queue entries)
     _notifSub = firestore
         .collection('shops')
         .doc(shopCode)
         .collection('outbound_notifications')
+        .where(
+          'created_at',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(
+            _realtimeListenersStartedAt.subtract(const Duration(minutes: 2)),
+          ),
+        )
         .snapshots()
         .listen((snapshot) {
       for (final change in snapshot.docChanges) {
@@ -1457,6 +1473,8 @@ class ShopSyncService extends ChangeNotifier {
           }
         }
       }
+    }, onError: (e) {
+      debugPrint('[ShopSyncService] Outbound notifications stream error: $e');
     });
   }
 

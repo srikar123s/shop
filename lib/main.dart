@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,6 +30,30 @@ void main() async {
     debugPrint('Flutter Error: ${details.exceptionAsString()}');
   };
 
+  // Initialize Firebase first when running in Cloud Sync mode so no plugin ever hits [core/no-app].
+  if (!kPureOfflineMode) {
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+    } catch (fbErr) {
+      debugPrint('Firebase primary init error: $fbErr');
+      try {
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp();
+        }
+      } catch (e2) {
+        debugPrint('Firebase init fallback: $e2');
+      }
+    }
+
+    if (Firebase.apps.isNotEmpty) {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    }
+  }
+
   try {
     await DatabaseHelper.instance.database;
     await ShopCustomizationService.instance.initialize();
@@ -38,21 +63,6 @@ void main() async {
     if (kPureOfflineMode) {
       await ShopCustomizationService.instance.setPureOfflineMode(true);
     } else {
-      try {
-        if (Firebase.apps.isEmpty) {
-          await Firebase.initializeApp(
-            options: DefaultFirebaseOptions.currentPlatform,
-          );
-        }
-      } catch (fbErr) {
-        try {
-          if (Firebase.apps.isEmpty) {
-            await Firebase.initializeApp();
-          }
-        } catch (e2) {
-          debugPrint('Firebase init fallback: $e2');
-        }
-      }
       unawaited(ShopSyncService.instance.initialize().catchError((e) {
         debugPrint('Sync service init error: $e');
       }));

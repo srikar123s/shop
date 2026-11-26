@@ -77,6 +77,11 @@ service cloud.firestore {
       match /payments/{paymentId} {
         allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
+
+      // Multi-device FCM outbound push notifications queue
+      match /outbound_notifications/{notifId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
     }
   }
 }
