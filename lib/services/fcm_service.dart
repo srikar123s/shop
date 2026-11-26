@@ -4,14 +4,25 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shop/firebase_options.dart';
 
 /// Top-level background message handler for FCM.
 /// This runs in an isolated background engine when the app is closed/terminated.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await Firebase.initializeApp();
-  } catch (_) {}
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+  } catch (_) {
+    try {
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp();
+      }
+    } catch (_) {}
+  }
   debugPrint('[FCMService] Background message received: ${message.messageId}');
   debugPrint('[FCMService] Title: ${message.notification?.title}, Body: ${message.notification?.body}');
 }
@@ -20,7 +31,7 @@ class FCMService {
   FCMService._();
   static final FCMService instance = FCMService._();
 
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  FirebaseMessaging? _fcm;
   final FlutterLocalNotificationsPlugin _localNotifs = FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
@@ -37,14 +48,34 @@ class FCMService {
   /// Initializes FCM listeners, permissions, and background message handling
   Future<void> initialize() async {
     if (_initialized) return;
-    _initialized = true;
 
     try {
+      // Ensure Firebase is initialized
+      if (Firebase.apps.isEmpty) {
+        try {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+        } catch (_) {
+          if (Firebase.apps.isEmpty) {
+            await Firebase.initializeApp();
+          }
+        }
+      }
+
+      if (Firebase.apps.isEmpty) {
+        debugPrint('[FCMService] Firebase apps empty, skipping FCM initialization.');
+        return;
+      }
+
+      _fcm = FirebaseMessaging.instance;
+      _initialized = true;
+
       // 1. Register top-level background message handler
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       // 2. Request user notification permissions
-      final settings = await _fcm.requestPermission(
+      final settings = await _fcm!.requestPermission(
         alert: true,
         announcement: false,
         badge: true,
@@ -56,7 +87,7 @@ class FCMService {
       debugPrint('[FCMService] User permission status: ${settings.authorizationStatus}');
 
       // 3. Configure foreground presentation options (for when app is open)
-      await _fcm.setForegroundNotificationPresentationOptions(
+      await _fcm!.setForegroundNotificationPresentationOptions(
         alert: true,
         badge: true,
         sound: true,
@@ -64,14 +95,14 @@ class FCMService {
 
       // 4. Retrieve and log FCM device token
       try {
-        _fcmToken = await _fcm.getToken();
+        _fcmToken = await _fcm!.getToken();
         debugPrint('[FCMService] FCM Token: $_fcmToken');
       } catch (e) {
         debugPrint('[FCMService] Failed to get FCM token: $e');
       }
 
       // Listen for token refreshes
-      _fcm.onTokenRefresh.listen((newToken) {
+      _fcm!.onTokenRefresh.listen((newToken) {
         _fcmToken = newToken;
         debugPrint('[FCMService] FCM Token refreshed: $newToken');
       });
@@ -89,7 +120,7 @@ class FCMService {
       });
 
       // 7. Check for initial message (cold-start from killed state)
-      final initialMessage = await _fcm.getInitialMessage();
+      final initialMessage = await _fcm!.getInitialMessage();
       if (initialMessage != null) {
         debugPrint('[FCMService] Initial message from cold-start: ${initialMessage.data}');
         _handleNotificationPayload(initialMessage.data);
@@ -146,10 +177,12 @@ class FCMService {
     if (_currentSubscribedTopic == topic) return;
 
     try {
+      final fcm = _fcm ?? (Firebase.apps.isNotEmpty ? FirebaseMessaging.instance : null);
+      if (fcm == null) return;
       if (_currentSubscribedTopic != null) {
-        await _fcm.unsubscribeFromTopic(_currentSubscribedTopic!);
+        await fcm.unsubscribeFromTopic(_currentSubscribedTopic!);
       }
-      await _fcm.subscribeToTopic(topic);
+      await fcm.subscribeToTopic(topic);
       _currentSubscribedTopic = topic;
       debugPrint('[FCMService] Successfully subscribed to topic: $topic');
     } catch (e) {
@@ -162,7 +195,9 @@ class FCMService {
     if (shopCode.trim().isEmpty) return;
     final topic = 'shop_${sanitizeTopic(shopCode)}_alerts';
     try {
-      await _fcm.unsubscribeFromTopic(topic);
+      final fcm = _fcm ?? (Firebase.apps.isNotEmpty ? FirebaseMessaging.instance : null);
+      if (fcm == null) return;
+      await fcm.unsubscribeFromTopic(topic);
       if (_currentSubscribedTopic == topic) {
         _currentSubscribedTopic = null;
       }
@@ -181,6 +216,7 @@ class FCMService {
     Map<String, dynamic>? data,
   }) async {
     if (shopCode.trim().isEmpty) return;
+    if (Firebase.apps.isEmpty) return;
     try {
       final firestore = FirebaseFirestore.instance;
       await firestore.collection('shops').doc(shopCode).collection('outbound_notifications').add({

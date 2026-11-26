@@ -1,10 +1,12 @@
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/app_keys.dart';
+import 'package:shop/firebase_options.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
@@ -36,6 +38,21 @@ void main() async {
     if (kPureOfflineMode) {
       await ShopCustomizationService.instance.setPureOfflineMode(true);
     } else {
+      try {
+        if (Firebase.apps.isEmpty) {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+        }
+      } catch (fbErr) {
+        try {
+          if (Firebase.apps.isEmpty) {
+            await Firebase.initializeApp();
+          }
+        } catch (e2) {
+          debugPrint('Firebase init fallback: $e2');
+        }
+      }
       unawaited(ShopSyncService.instance.initialize().catchError((e) {
         debugPrint('Sync service init error: $e');
       }));
