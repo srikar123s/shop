@@ -596,7 +596,12 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
       return;
     }
     setState(() => _saving = false);
-    final orderIdFormatted = '#ORD-${newOrderId.toString().padLeft(4, '0')}';
+    final createdOrderDetails = await widget.orderRepository.getOrderDetails(newOrderId);
+    if (!mounted) {
+      return;
+    }
+    final orderIdFormatted = createdOrderDetails?.order.formattedOrderId ??
+        '#ORD-${newOrderId.toString().padLeft(4, '0')}';
 
     if (widget.existingOrderId != null) {
       // Pop back to OrderDetailsScreen so the user sees the updated order with added items

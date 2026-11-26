@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 4;
+  static const int dbVersion = 5;
 
   Database? _database;
   Future<Database>? _initDbFuture;
@@ -104,6 +104,15 @@ class DatabaseHelper {
             WHERE order_item_id NOT IN (SELECT id FROM order_items)
           ''');
         } catch (_) {}
+        try {
+          await db.execute('ALTER TABLE orders ADD COLUMN order_number INTEGER');
+        } catch (_) {}
+        try {
+          await db.execute('UPDATE orders SET order_number = id WHERE order_number IS NULL');
+        } catch (_) {}
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)');
+        } catch (_) {}
         await _seedInitialProducts(db);
       },
     );
@@ -193,6 +202,17 @@ class DatabaseHelper {
         }
       } catch (_) {}
     }
+    if (oldVersion < 5) {
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN order_number INTEGER');
+      } catch (_) {}
+      try {
+        await db.execute('UPDATE orders SET order_number = id WHERE order_number IS NULL');
+      } catch (_) {}
+      try {
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)');
+      } catch (_) {}
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -234,6 +254,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number INTEGER,
         cloud_order_id TEXT UNIQUE,
         customer_id INTEGER NOT NULL,
         customer_name_snapshot TEXT NOT NULL,
@@ -627,13 +648,14 @@ class DatabaseHelper {
 
       final added = paidAmount - prevPaid;
       final customerId = order.first['customer_id'] as int?;
+      final displayNum = (order.first['order_number'] as num?)?.toInt() ?? orderId;
       if (added > 0.001 && customerId != null) {
         final now = DateTime.now().toIso8601String();
         newPaymentId = await txn.insert('customer_payments', {
           'customer_id': customerId,
           'amount': added,
           'payment_mode': paymentMode.toLowerCase(),
-          'notes': 'Payment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
+          'notes': 'Payment for Order #ORD-${displayNum.toString().padLeft(4, "0")}',
           'created_at': now,
         });
       } else if (added < -0.001 && customerId != null) {
@@ -643,7 +665,7 @@ class DatabaseHelper {
           'customer_id': customerId,
           'amount': added,
           'payment_mode': paymentMode.toLowerCase(),
-          'notes': 'Refund/Adjustment for Order #ORD-${orderId.toString().padLeft(4, "0")}',
+          'notes': 'Refund/Adjustment for Order #ORD-${displayNum.toString().padLeft(4, "0")}',
           'created_at': now,
         });
       }
@@ -895,6 +917,7 @@ class DatabaseHelper {
     final orderRows = await db.rawQuery('''
       SELECT 
         o.id,
+        o.order_number,
         o.estimate_total,
         o.paid_amount,
         o.created_at,
@@ -948,7 +971,8 @@ class DatabaseHelper {
         'type': 'debit', // You Gave (Bill)
         'id': o['id'],
         'order_id': o['id'],
-        'title': 'Bill #${o['id']}',
+        'order_number': (o['order_number'] as num?)?.toInt() ?? o['id'],
+        'title': 'Bill #${(o['order_number'] as num?)?.toInt() ?? o['id']}',
         'subtitle': subtitle,
         'date': DateTime.tryParse(o['created_at'] as String? ?? '') ?? DateTime.now(),
         'amount': total,
@@ -1214,6 +1238,10 @@ class DatabaseHelper {
       );
 
       final todayOrderIds = orderRows.map((r) => r['id'] as int).toSet();
+      final todayOrderNumbers = orderRows
+          .map((r) => (r['order_number'] as num?)?.toInt())
+          .whereType<int>()
+          .toSet();
       double directPayments = 0;
       for (final p in paymentRows) {
         final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
@@ -1224,7 +1252,9 @@ class DatabaseHelper {
         final match = RegExp(r'Order #ORD-(\d+)').firstMatch(notes);
         if (match != null) {
           final matchedOrderId = int.tryParse(match.group(1) ?? '');
-          if (matchedOrderId != null && todayOrderIds.contains(matchedOrderId)) {
+          if (matchedOrderId != null &&
+              (todayOrderIds.contains(matchedOrderId) ||
+                  todayOrderNumbers.contains(matchedOrderId))) {
             alreadyCountedInTodayOrders = true;
           }
         }

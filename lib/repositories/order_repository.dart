@@ -58,7 +58,10 @@ class OrderRepository {
           0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity);
       final calculatedGrandTotal = billBreakdown?.grandTotal ?? calculatedSubtotal;
 
+      final nextOrderNumber = await ShopSyncService.instance.getNextSequentialOrderNumber(txn);
+
       final orderId = await txn.insert('orders', {
+        'order_number': nextOrderNumber,
         'customer_id': draftOrder.customer.id,
         'customer_name_snapshot': draftOrder.customer.name,
         'customer_phone': phone,
@@ -289,6 +292,7 @@ class OrderRepository {
       summaries.add(
         OrderSummary(
           orderId: orderId,
+          orderNumber: (row['order_number'] as num?)?.toInt(),
           customerId: row['customer_id'] as int,
           customerName: row['customer_name_snapshot'] as String,
           customerPhone: customerPhone,
@@ -682,6 +686,7 @@ class OrderRepository {
 
     var order = OrderEntity(
       id: orderId,
+      orderNumber: (orderRow['order_number'] as num?)?.toInt(),
       customerId: orderRow['customer_id'] as int,
       customerNameSnapshot: orderRow['customer_name_snapshot'] as String,
       customerPhone: customerPhone,
@@ -851,6 +856,7 @@ class OrderRepository {
         oi.quantity_ordered,
         oi.quantity_given,
         oi.product_snapshot,
+        o.order_number,
         o.customer_name_snapshot,
         o.customer_phone,
         o.taken_by,
@@ -869,6 +875,7 @@ class OrderRepository {
     for (final row in results) {
       final orderId = row['order_id'] as int;
       final itemId = row['item_id'] as int;
+      final orderNumber = (row['order_number'] as num?)?.toInt();
       final customerName =
           (row['customer_name_snapshot'] as String?) ?? 'Customer';
       final orderNotes = row['order_notes'] as String?;
@@ -909,6 +916,7 @@ class OrderRepository {
         ProcurementItem(
           itemId: itemId,
           orderId: orderId,
+          orderNumber: orderNumber,
           customerName: customerName,
           customerPhone: customerPhone,
           customerAddress: customerAddress,

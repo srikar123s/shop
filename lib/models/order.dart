@@ -422,6 +422,7 @@ class DraftOrderItem {
 class OrderEntity {
   const OrderEntity({
     this.id,
+    this.orderNumber,
     required this.customerId,
     required this.customerNameSnapshot,
     this.customerPhone,
@@ -437,6 +438,7 @@ class OrderEntity {
   });
 
   final int? id;
+  final int? orderNumber;
   final int customerId;
   final String customerNameSnapshot;
   final String? customerPhone;
@@ -450,8 +452,12 @@ class OrderEntity {
   final String paymentMode;
   final String paymentStatus;
 
-  String get formattedOrderId =>
-      id != null ? '#ORD-${id.toString().padLeft(4, '0')}' : '#ORD-NEW';
+  int get displayOrderNumber =>
+      (orderNumber != null && orderNumber! > 0) ? orderNumber! : (id ?? 0);
+
+  String get formattedOrderId => displayOrderNumber > 0
+      ? '#ORD-${displayOrderNumber.toString().padLeft(4, '0')}'
+      : (id != null ? '#ORD-${id.toString().padLeft(4, '0')}' : '#ORD-NEW');
 
   BillBreakdown? get billBreakdown => BillBreakdown.fromJsonString(notes);
 
@@ -460,6 +466,7 @@ class OrderEntity {
 
   OrderEntity copyWith({
     int? id,
+    int? orderNumber,
     int? customerId,
     String? customerNameSnapshot,
     String? customerPhone,
@@ -474,6 +481,7 @@ class OrderEntity {
   }) {
     return OrderEntity(
       id: id ?? this.id,
+      orderNumber: orderNumber ?? this.orderNumber,
       customerId: customerId ?? this.customerId,
       customerNameSnapshot: customerNameSnapshot ?? this.customerNameSnapshot,
       customerPhone: customerPhone ?? this.customerPhone,
@@ -491,6 +499,7 @@ class OrderEntity {
   Map<String, Object?> toMap() {
     return {
       'id': id,
+      'order_number': orderNumber,
       'customer_id': customerId,
       'customer_name_snapshot': customerNameSnapshot,
       'customer_phone': customerPhone,
@@ -609,6 +618,7 @@ class OrderItemOptionEntity {
 class OrderSummary {
   const OrderSummary({
     required this.orderId,
+    this.orderNumber,
     required this.customerId,
     required this.customerName,
     this.customerPhone,
@@ -626,6 +636,7 @@ class OrderSummary {
   });
 
   final int orderId;
+  final int? orderNumber;
   final int customerId;
   final String customerName;
   final String? customerPhone;
@@ -645,7 +656,11 @@ class OrderSummary {
       (estimateTotal - paidAmount).clamp(0.0, double.infinity);
   bool get isFullyPaid => estimateTotal >= 0 && dueAmount <= 0.01;
 
-  String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
+  int get displayOrderNumber =>
+      (orderNumber != null && orderNumber! > 0) ? orderNumber! : orderId;
+
+  String get formattedOrderId =>
+      displayOrderNumber > 0 ? '#ORD-${displayOrderNumber.toString().padLeft(4, '0')}' : '#ORD-${orderId.toString().padLeft(4, '0')}';
 }
 
 class OrderDetails {
@@ -659,6 +674,7 @@ class ProcurementItem {
   const ProcurementItem({
     required this.itemId,
     required this.orderId,
+    this.orderNumber,
     required this.customerName,
     this.customerPhone,
     this.customerAddress,
@@ -675,6 +691,7 @@ class ProcurementItem {
 
   final int itemId;
   final int orderId;
+  final int? orderNumber;
   final String customerName;
   final String? customerPhone;
   final String? customerAddress;
@@ -690,5 +707,10 @@ class ProcurementItem {
 
   double get quantityPending =>
       (quantityOrdered - quantityGiven).clamp(0.0, double.infinity);
-  String get formattedOrderId => '#ORD-${orderId.toString().padLeft(4, '0')}';
+
+  int get displayOrderNumber =>
+      (orderNumber != null && orderNumber! > 0) ? orderNumber! : orderId;
+
+  String get formattedOrderId =>
+      displayOrderNumber > 0 ? '#ORD-${displayOrderNumber.toString().padLeft(4, '0')}' : '#ORD-${orderId.toString().padLeft(4, '0')}';
 }

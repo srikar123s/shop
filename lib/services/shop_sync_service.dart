@@ -439,6 +439,52 @@ class ShopSyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Generates the next sequential order number across all connected devices in the shop.
+  /// Coordinates with Cloud Firestore via atomic transaction when connected, ensuring
+  /// Phone 1 -> Order 1, Phone 2 -> Order 2, Phone 1 -> Order 3 in strictly sequential order.
+  /// Falls back to local maximum + 1 when offline.
+  Future<int> getNextSequentialOrderNumber([DatabaseExecutor? executor]) async {
+    final db = executor ?? await _dbHelper.database;
+    int localMax = 0;
+    try {
+      final maxRows = await db.rawQuery(
+        'SELECT MAX(COALESCE(order_number, id)) as max_num FROM orders',
+      );
+      if (maxRows.isNotEmpty && maxRows.first['max_num'] != null) {
+        localMax = (maxRows.first['max_num'] as num).toInt();
+      }
+    } catch (e) {
+      debugPrint('Error getting local max order number: $e');
+    }
+
+    if (_currentShop == null || !_isFirebaseAvailable) {
+      return localMax + 1;
+    }
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final shopRef = firestore.collection('shops').doc(_currentShop!.shopCode);
+      final nextNumber = await firestore.runTransaction<int>((transaction) async {
+        final snapshot = await transaction.get(shopRef);
+        int cloudLast = 0;
+        if (snapshot.exists && snapshot.data() != null) {
+          cloudLast = (snapshot.data()!['last_order_number'] as num?)?.toInt() ?? 0;
+        }
+        final next = max(cloudLast, localMax) + 1;
+        transaction.set(shopRef, {
+          'last_order_number': next,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        return next;
+      }).timeout(const Duration(seconds: 4));
+
+      return nextNumber;
+    } catch (e) {
+      debugPrint('Error getting cloud sequential order number (fallback to local): $e');
+      return localMax + 1;
+    }
+  }
+
   /// Uploads all local SQLite products, customers, and orders to Firestore
   Future<void> uploadLocalDataToCloud() async {
     if (_currentShop == null || !_isFirebaseAvailable) return;
@@ -501,8 +547,13 @@ class ShopSyncService extends ChangeNotifier {
 
     // 3. Orders with items
     final orders = await db.query('orders');
+    int maxSeenLocalOrderNum = 0;
     for (final o in orders) {
       final orderId = o['id'] as int;
+      final orderNumber = (o['order_number'] as num?)?.toInt() ?? orderId;
+      if (orderNumber > maxSeenLocalOrderNum) {
+        maxSeenLocalOrderNum = orderNumber;
+      }
       final items = await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
       
       final itemsPayload = <Map<String, dynamic>>[];
@@ -555,6 +606,7 @@ class ShopSyncService extends ChangeNotifier {
 
       await firestore.collection('shops').doc(shopCode).collection('orders').doc(cloudDocId).set({
         'id': o['id'],
+        'order_number': orderNumber,
         'cloud_order_id': cloudDocId,
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
@@ -571,6 +623,17 @@ class ShopSyncService extends ChangeNotifier {
         'updatedAt': FieldValue.serverTimestamp(),
         'lastUpdatedByDevice': _deviceId,
       }, SetOptions(merge: true));
+    }
+
+    if (maxSeenLocalOrderNum > 0) {
+      try {
+        final shopDocRef = firestore.collection('shops').doc(shopCode);
+        final shopSnap = await shopDocRef.get();
+        final currentCloudLast = (shopSnap.data()?['last_order_number'] as num?)?.toInt() ?? 0;
+        if (maxSeenLocalOrderNum > currentCloudLast) {
+          await shopDocRef.set({'last_order_number': maxSeenLocalOrderNum}, SetOptions(merge: true));
+        }
+      } catch (_) {}
     }
 
     // 4. Payments (chunked into batches of 400 with customer phone resolution snapshot)
@@ -721,11 +784,13 @@ class ShopSyncService extends ChangeNotifier {
       }
 
       final cloudDocId = doc.id;
+      final cloudOrderNum = (data['order_number'] as num?)?.toInt() ??
+          (data['id'] as num?)?.toInt();
       final existingOrder = await db.query('orders', where: 'cloud_order_id = ?', whereArgs: [cloudDocId]);
       int targetOrderId;
       if (existingOrder.isNotEmpty) {
         targetOrderId = existingOrder.first['id'] as int;
-        await db.update('orders', {
+        final updateMap = <String, dynamic>{
           'customer_id': localCustId,
           'customer_name_snapshot': custName,
           'customer_phone': incomingPhone,
@@ -736,10 +801,15 @@ class ShopSyncService extends ChangeNotifier {
           'paid_amount': data['paid_amount'] ?? 0.0,
           'payment_mode': data['payment_mode'] ?? 'unpaid',
           'payment_status': data['payment_status'] ?? 'unpaid',
-        }, where: 'id = ?', whereArgs: [targetOrderId]);
+        };
+        if (cloudOrderNum != null && cloudOrderNum > 0) {
+          updateMap['order_number'] = cloudOrderNum;
+        }
+        await db.update('orders', updateMap, where: 'id = ?', whereArgs: [targetOrderId]);
       } else {
         targetOrderId = await db.insert('orders', {
           'cloud_order_id': cloudDocId,
+          'order_number': cloudOrderNum,
           'customer_id': localCustId,
           'customer_name_snapshot': custName,
           'customer_phone': incomingPhone,
@@ -915,6 +985,7 @@ class ShopSyncService extends ChangeNotifier {
       final takenBy =
           (o['taken_by'] as String?) ?? breakdown?.takenBy ?? 'Store';
 
+      final orderNumber = (o['order_number'] as num?)?.toInt() ?? orderId;
       final cloudDocId = (o['cloud_order_id'] as String?) ?? '${_deviceId}_$orderId';
       if (o['cloud_order_id'] == null) {
         await db.update('orders', {'cloud_order_id': cloudDocId}, where: 'id = ?', whereArgs: [orderId]);
@@ -922,6 +993,7 @@ class ShopSyncService extends ChangeNotifier {
 
       await firestore.collection('shops').doc(shopCode).collection('orders').doc(cloudDocId).set({
         'id': o['id'],
+        'order_number': orderNumber,
         'cloud_order_id': cloudDocId,
         'customer_id': o['customer_id'],
         'customer_name_snapshot': o['customer_name_snapshot'],
@@ -938,6 +1010,17 @@ class ShopSyncService extends ChangeNotifier {
         'updatedAt': FieldValue.serverTimestamp(),
         'lastUpdatedByDevice': _deviceId,
       }, SetOptions(merge: true));
+
+      if (orderNumber > 0) {
+        unawaited(firestore.runTransaction((txn) async {
+          final shopRef = firestore.collection('shops').doc(shopCode);
+          final snap = await txn.get(shopRef);
+          final cur = (snap.data()?['last_order_number'] as num?)?.toInt() ?? 0;
+          if (orderNumber > cur) {
+            txn.set(shopRef, {'last_order_number': orderNumber}, SetOptions(merge: true));
+          }
+        }).catchError((_) {}));
+      }
 
       _lastSyncTime = DateTime.now();
       notifyListeners();
@@ -1084,11 +1167,13 @@ class ShopSyncService extends ChangeNotifier {
           }
 
           final cloudDocId = change.doc.id;
+          final cloudOrderNum = (data['order_number'] as num?)?.toInt() ??
+              (data['id'] as num?)?.toInt();
           final existing = await db.query('orders', where: 'cloud_order_id = ?', whereArgs: [cloudDocId]);
           int targetOrderId;
           if (existing.isNotEmpty) {
             targetOrderId = existing.first['id'] as int;
-            await db.update('orders', {
+            final updateMap = <String, dynamic>{
               'customer_id': localCustId,
               'customer_name_snapshot': custName,
               'customer_phone': incomingPhone,
@@ -1099,10 +1184,15 @@ class ShopSyncService extends ChangeNotifier {
               'paid_amount': data['paid_amount'] ?? 0.0,
               'payment_mode': data['payment_mode'] ?? 'unpaid',
               'payment_status': data['payment_status'] ?? 'unpaid',
-            }, where: 'id = ?', whereArgs: [targetOrderId]);
+            };
+            if (cloudOrderNum != null && cloudOrderNum > 0) {
+              updateMap['order_number'] = cloudOrderNum;
+            }
+            await db.update('orders', updateMap, where: 'id = ?', whereArgs: [targetOrderId]);
           } else {
             targetOrderId = await db.insert('orders', {
               'cloud_order_id': cloudDocId,
+              'order_number': cloudOrderNum,
               'customer_id': localCustId,
               'customer_name_snapshot': custName,
               'customer_phone': incomingPhone,
@@ -1120,9 +1210,12 @@ class ShopSyncService extends ChangeNotifier {
           if (change.type == DocumentChangeType.added && data['lastUpdatedByDevice'] != _deviceId) {
             final estTotal = (data['estimate_total'] as num?)?.toDouble() ?? 0.0;
             final totalStr = estTotal > 0 ? ' (₹ ${estTotal.toStringAsFixed(0)})' : '';
+            final formattedOrderNum = (cloudOrderNum != null && cloudOrderNum > 0)
+                ? '#ORD-${cloudOrderNum.toString().padLeft(4, '0')} '
+                : '';
             unawaited(AppNotificationService.instance.showLiveOrderNotification(
               title: '📋 New Order from $incomingTakenBy',
-              body: 'Order for $custName$totalStr received from connected device.',
+              body: '${formattedOrderNum}for $custName$totalStr received from connected device.',
             ));
           }
 

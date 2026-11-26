@@ -963,8 +963,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       _buildStaffGroupCard(sGroup, canViewTotals, s))
                                 else
                                   ...monthOrders.map((order) {
-                                    final formattedId =
-                                        '#ORD-${order.orderId.toString().padLeft(4, '0')}';
+                                    final formattedId = order.formattedOrderId;
                                     final displayTakenBy = (order.takenBy != null &&
                                             order.takenBy!.trim().isNotEmpty &&
                                             order.takenBy!.trim() != "Store")
@@ -1268,8 +1267,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             ),
           ),
           children: group.orders.map((o) {
-            final formattedId =
-                '#ORD-${o.orderId.toString().padLeft(4, '0')}';
+            final formattedId = o.formattedOrderId;
             return Container(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(

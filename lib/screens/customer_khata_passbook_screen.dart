@@ -1218,6 +1218,8 @@ class _CustomerKhataPassbookScreenState
                               (item['running_balance'] as num?)?.toDouble() ??
                                   0.0;
                           final orderId = item['id'] as int?;
+                          final displayOrderNum =
+                              (item['order_number'] as num?)?.toInt() ?? orderId;
                           final rawMode = (item['payment_mode'] as String?)?.toUpperCase() ?? '';
                           final modeLabel = rawMode.contains('UPI')
                               ? '📱 UPI'
@@ -1468,7 +1470,7 @@ class _CustomerKhataPassbookScreenState
                                                           border: Border.all(color: Colors.grey.shade300),
                                                         ),
                                                         child: Text(
-                                                          '#ORD-${orderId.toString().padLeft(4, "0")}',
+                                                          '#ORD-${(displayOrderNum ?? orderId).toString().padLeft(4, "0")}',
                                                           style: TextStyle(
                                                             fontSize: 9.5,
                                                             color: Colors.grey.shade700,
