@@ -105,7 +105,7 @@ class ShopSyncService extends ChangeNotifier {
       if (shop.isOwner) {
         return shop.ownerName.trim().isNotEmpty ? shop.ownerName.trim() : 'Srikar';
       } else {
-        return shop.staffName.trim().isNotEmpty ? shop.staffName.trim() : 'Staff';
+        return shop.staffName.trim().isNotEmpty ? shop.staffName.trim() : 'Partner Device';
       }
     }
     return 'Srikar';
@@ -1388,6 +1388,18 @@ class ShopSyncService extends ChangeNotifier {
       }
       final data = snap.data()!;
       _myDevicePermissions = StaffDevice.fromMap(data);
+      final remoteDeviceName = (data['staffName'] as String?)?.trim();
+      if (remoteDeviceName != null &&
+          remoteDeviceName.isNotEmpty &&
+          _currentShop != null) {
+        if (!_currentShop!.isOwner &&
+            _currentShop!.staffName != remoteDeviceName) {
+          _currentShop = _currentShop!.copyWith(staffName: remoteDeviceName);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_prefKeyShopProfile, _currentShop!.toJson());
+          notifyListeners();
+        }
+      }
       final devStatus = (data['status'] as String? ?? 'pending').toLowerCase();
       if (devStatus == 'approved') {
         if (_currentShop != null && _currentShop!.isPending) {
@@ -1550,6 +1562,59 @@ class ShopSyncService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error updating device permission: $e');
     }
+  }
+
+  /// Updates the name of a primary (master) or secondary (partner) device
+  Future<void> updateDeviceName({
+    required String targetDeviceId,
+    required String newName,
+  }) async {
+    final cleanName = newName.trim();
+    if (cleanName.isEmpty) return;
+    if (_currentShop == null) return;
+
+    final isMe = targetDeviceId == _deviceId;
+
+    // 1. If this is the current device, update local profile and SharedPreferences
+    if (isMe) {
+      if (_currentShop!.isOwner) {
+        _currentShop = _currentShop!.copyWith(ownerName: cleanName);
+      } else {
+        _currentShop = _currentShop!.copyWith(staffName: cleanName);
+      }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefKeyShopProfile, _currentShop!.toJson());
+    }
+
+    // 2. If Firebase is available, update Firestore
+    if (_isFirebaseAvailable) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('shops')
+            .doc(_currentShop!.shopCode)
+            .collection('devices')
+            .doc(targetDeviceId)
+            .set({
+          'staffName': cleanName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // If the owner renamed their own primary device, update ownerName on the root shop document
+        if (_currentShop!.isOwner && isMe) {
+          await FirebaseFirestore.instance
+              .collection('shops')
+              .doc(_currentShop!.shopCode)
+              .set({
+            'ownerName': cleanName,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('Error updating device name in Firestore: $e');
+      }
+    }
+
+    notifyListeners();
   }
 
   Future<void> updateShopProfileDetails({

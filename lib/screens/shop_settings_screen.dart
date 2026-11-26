@@ -1275,7 +1275,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
                       style:
                           TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   subtitle: const Text(
-                    'Dispatches real-time cloud alert to all connected staff & owner devices.',
+                    'Dispatches real-time cloud alert to all connected partner & owner devices.',
                     style: TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   trailing: Row(
@@ -1432,12 +1432,12 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
           ),
           const SizedBox(height: 20),
 
-          // Shop Cloud Sync & Staff Access
+          // Shop Cloud Sync & Partner Access
           if (!_customService.isPureOfflineMode &&
               !const bool.fromEnvironment('STANDALONE_LOCAL',
                   defaultValue: false)) ...[
             Text(
-              'SHOP CLOUD SYNC & TEAM',
+              'SHOP CLOUD SYNC & PARTNERS',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,

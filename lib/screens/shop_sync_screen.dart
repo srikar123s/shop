@@ -212,7 +212,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Shop Sync & Team Access'),
+        title: const Text('Shop Sync & Partner Access'),
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
@@ -259,12 +259,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                       _buildDeviceRoleCard(shop),
                       const SizedBox(height: 18),
 
-                      // Connected Staff & Permissions (Owner manages staff; Staff sees permissions overview)
+                      // Connected Partner Devices & Permissions (Owner manages devices; Partner sees permissions overview)
                       if (shop.isOwner) ...[
                         _buildConnectedDevicesCard(shop),
                         const SizedBox(height: 24),
                       ] else ...[
-                        _buildStaffPermissionsOverviewCard(),
+                        _buildPartnerPermissionsOverviewCard(),
                         const SizedBox(height: 24),
                       ],
 
@@ -623,8 +623,125 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               ],
             ),
           ),
+          IconButton(
+            tooltip: 'Change Device Name',
+            icon: const Icon(Icons.edit_outlined, color: Color(0xFF0F766E), size: 20),
+            onPressed: () => _showEditDeviceNameDialog(
+              currentName: displayName,
+              deviceId: _syncService.deviceId,
+              isPrimaryDevice: isOwner,
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showEditDeviceNameDialog({
+    required String currentName,
+    required String deviceId,
+    required bool isPrimaryDevice,
+  }) async {
+    final controller = TextEditingController(text: currentName);
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.edit_note_rounded, color: Color(0xFF0F766E), size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isPrimaryDevice ? 'Change Master Device Name' : 'Change Partner Device Name',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isPrimaryDevice
+                      ? 'Give this primary device an identifiable name (e.g. Master Counter, Office PC, Srikar).'
+                      : 'Give this partner device an identifiable counter/person name (e.g. Billing Counter 1, Godown Counter, Partner Rahul).',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: controller,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    labelText: 'Device / Counter Name *',
+                    hintText: isPrimaryDevice ? 'e.g. Master Counter' : 'e.g. Counter 1, Billing 2',
+                    prefixIcon: const Icon(Icons.badge_outlined, color: Color(0xFF0F766E)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Please enter a device/counter name';
+                    }
+                    return null;
+                  },
+                ),
+                if (deviceId.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Device ID: $deviceId',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8), fontFamily: 'monospace'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                if (formKey.currentState?.validate() ?? false) {
+                  final newName = controller.text.trim();
+                  Navigator.pop(ctx);
+                  await _syncService.updateDeviceName(
+                    targetDeviceId: deviceId,
+                    newName: newName,
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Device name updated to "$newName"'),
+                        backgroundColor: const Color(0xFF0F766E),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: const Text('SAVE NAME'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -685,7 +802,20 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               children: [
                 _buildPendingInfoRow('Shop Name', shop.shopName),
                 const Divider(height: 16),
-                _buildPendingInfoRow('Your Member Name', shop.staffName),
+                Row(
+                  children: [
+                    Expanded(child: _buildPendingInfoRow('Your Partner Device Name', shop.staffName)),
+                    IconButton(
+                      tooltip: 'Change Device Name',
+                      icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF0F766E)),
+                      onPressed: () => _showEditDeviceNameDialog(
+                        currentName: shop.staffName,
+                        deviceId: _syncService.deviceId,
+                        isPrimaryDevice: false,
+                      ),
+                    ),
+                  ],
+                ),
                 const Divider(height: 16),
                 _buildPendingInfoRow('Device ID', _syncService.deviceId),
                 const Divider(height: 16),
@@ -934,7 +1064,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                     Text(
                       device.staffName.isNotEmpty
                           ? device.staffName
-                          : 'New Staff Member',
+                          : 'New Partner Device',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
@@ -1057,7 +1187,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                           child: Text(
                             device.staffName.isNotEmpty
                                 ? device.staffName
-                                : (isOwnerDevice ? 'Owner' : 'Staff Counter'),
+                                : (isOwnerDevice ? 'Owner' : 'Partner Device'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -1082,10 +1212,26 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                                     color: Color(0xFF166534))),
                           ),
                         ],
+                        if (shop.isOwner || isCurrentDevice) ...[
+                          const SizedBox(width: 4),
+                          IconButton(
+                            tooltip: 'Rename Device',
+                            icon: const Icon(Icons.edit_outlined, size: 17, color: Color(0xFF0F766E)),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _showEditDeviceNameDialog(
+                              currentName: device.staffName.isNotEmpty
+                                  ? device.staffName
+                                  : (isOwnerDevice ? 'Owner' : 'Partner Device'),
+                              deviceId: device.deviceId,
+                              isPrimaryDevice: isOwnerDevice,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     Text(
-                      'ID: ${device.deviceId} • ${isOwnerDevice ? "Owner / Master" : "Staff Member"}',
+                      'ID: ${device.deviceId} • ${isOwnerDevice ? "Owner / Primary Device" : "Partner Device"}',
                       style:
                           TextStyle(fontSize: 11, color: Colors.grey.shade600),
                     ),
@@ -1212,7 +1358,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                 },
                 icon: const Icon(Icons.person_remove_rounded,
                     color: Colors.red, size: 16),
-                label: const Text('Revoke Access / Remove Staff',
+                label: const Text('Revoke Access / Remove Partner Device',
                     style: TextStyle(color: Colors.red, fontSize: 12)),
               ),
             ),
@@ -1222,7 +1368,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildStaffPermissionsOverviewCard() {
+  Widget _buildPartnerPermissionsOverviewCard() {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -1335,12 +1481,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               Icon(Icons.hub_rounded, color: Colors.white, size: 36),
               SizedBox(height: 12),
               Text(
-                'Connect Your Shop Team',
+                'Connect Your Partner Devices',
                 style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
               ),
               SizedBox(height: 6),
               Text(
-                'Allow multiple staff members to take orders simultaneously. All products, prices, and order history update in real-time across everyone\'s phones.',
+                'Allow multiple partner devices and counters to take orders simultaneously. All products, prices, and order history update in real-time across everyone\'s phones.',
                 style: TextStyle(color: Color(0xFFCCFBF1), fontSize: 13, height: 1.4),
               ),
             ],
@@ -1618,12 +1764,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
             TextFormField(
               controller: _staffNameController,
               decoration: const InputDecoration(
-                labelText: 'Your Name or Counter *',
-                hintText: 'e.g. Sridevi, Srikar, Counter 1',
+                labelText: 'Your Partner Device / Counter Name *',
+                hintText: 'e.g. Counter 1, Billing 2, Srikar',
                 prefixIcon: Icon(Icons.person_pin_rounded),
                 border: OutlineInputBorder(),
               ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your name/counter' : null,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your partner device/counter name' : null,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
@@ -1669,7 +1815,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
               Text(
                 '1. Firebase Cloud Firestore powers instant syncing between multiple devices with zero server cost on the free tier.\n'
                 '2. To activate live cloud sync across all phones, download `google-services.json` from your Firebase project and place it inside the `android/app/` folder.\n'
-                '3. Once configured, every order taken by any staff member instantly pops up in Order History across all phones in the shop!\n'
+                '3. Once configured, every order taken by any partner device instantly pops up in Order History across all phones in the shop!\n'
                 '4. Offline Safe: When internet is not available, all orders and products stay safely stored on this phone and sync automatically when internet is back.',
                 style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF334155)),
               ),

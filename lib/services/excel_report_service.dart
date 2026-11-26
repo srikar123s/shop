@@ -69,7 +69,7 @@ class ExcelReportService {
     sheet.appendRow([xl.TextCellValue('Generated On'), xl.TextCellValue(DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()))]);
     sheet.appendRow([xl.TextCellValue('Date Range Filter'), xl.TextCellValue(dateRange)]);
     if (location != null) sheet.appendRow([xl.TextCellValue('Location Filter'), xl.TextCellValue(location)]);
-    if (staff != null) sheet.appendRow([xl.TextCellValue('Staff Filter'), xl.TextCellValue(staff)]);
+    if (staff != null) sheet.appendRow([xl.TextCellValue('Partner Filter'), xl.TextCellValue(staff)]);
     sheet.appendRow([xl.TextCellValue('')]);
 
     // Financial Health Grade
@@ -335,9 +335,9 @@ class ExcelReportService {
   }
 
   void _buildStaffSheet(xl.Excel excel, Map<String, dynamic> r) {
-    final sheet = excel['Staff Performance'];
+    final sheet = excel['Partner Performance'];
     sheet.appendRow([
-      xl.TextCellValue('Staff / Counter / Device'),
+      xl.TextCellValue('Partner / Counter / Device'),
       xl.TextCellValue('Orders Taken'),
       xl.TextCellValue('Total Sales Billed (Rs.)'),
       xl.TextCellValue('Direct Payments Collected (Rs.)'),

@@ -4,7 +4,7 @@ import 'package:shop/models/order.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 
-/// Clean, simple Order Packing Preview / Slip designed for shop staff
+/// Clean, simple Order Packing Preview / Slip designed for shop partners and counters
 /// to pick and pack goods without confusing financial or procurement controls.
 class OrderPackingSlipScreen extends StatefulWidget {
   const OrderPackingSlipScreen({

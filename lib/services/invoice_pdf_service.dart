@@ -1830,10 +1830,10 @@ class InvoicePdfService {
           ],
 
           if (staffLeaderboard.isNotEmpty) ...[
-            pw.Text('STAFF PERFORMANCE LEADERBOARD', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.Text('PARTNER & DEVICE PERFORMANCE LEADERBOARD', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
             pw.SizedBox(height: 6),
             pw.TableHelper.fromTextArray(
-              headers: ['Staff / Counter', 'Orders Taken', 'Total Billed', 'Direct Collected'],
+              headers: ['Partner / Counter', 'Orders Taken', 'Total Billed', 'Direct Collected'],
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
               headerDecoration: const pw.BoxDecoration(color: PdfColors.teal700),
               cellStyle: const pw.TextStyle(fontSize: 8),

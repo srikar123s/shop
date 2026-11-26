@@ -361,7 +361,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   if (!isLocalMode)
                     const ButtonSegment(
                       value: HistoryViewMode.byStaff,
-                      label: Text('By Member', style: TextStyle(fontSize: 12)),
+                      label: Text('By Partner', style: TextStyle(fontSize: 12)),
                       icon: Icon(Icons.person_pin_outlined, size: 16),
                     ),
                   const ButtonSegment(

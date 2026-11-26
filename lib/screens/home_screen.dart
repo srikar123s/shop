@@ -1912,7 +1912,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   if (!isOffline) ...[
                     ListTile(
                       leading: const Icon(Icons.cloud_sync_outlined, color: Color(0xFF0F766E)),
-                      title: const Text('Shop Cloud Sync & Staff', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      title: const Text('Shop Cloud Sync & Partner Devices', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ShopSyncScreen()));

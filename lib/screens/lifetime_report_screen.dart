@@ -323,7 +323,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                 Tab(text: 'Financial Health & KPIs'),
                 Tab(text: 'Customer Loyalty & Risk'),
                 Tab(text: 'Products & Inventory'),
-                Tab(text: 'Staff Leaderboard'),
+                Tab(text: 'Partner Leaderboard'),
                 Tab(text: 'Collections Ledger'),
               ],
             ),
@@ -503,14 +503,14 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                           child: DropdownButton<String?>(
                             value: _selectedTakenBy,
                             isDense: true,
-                            hint: const Text('All Staff',
+                            hint: const Text('All Partners',
                                 style: TextStyle(fontSize: 11)),
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.black87),
                             items: [
                               const DropdownMenuItem<String?>(
                                 value: null,
-                                child: Text('All Staff / Devices',
+                                child: Text('All Partner Devices / Counters',
                                     style: TextStyle(fontSize: 11)),
                               ),
                               ...staffItems.map(
@@ -1465,12 +1465,12 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
     return ListView(
       padding: const EdgeInsets.all(14),
       children: [
-        _buildSectionHeader('Staff Member & Counter Leaderboard', Icons.military_tech_outlined),
+        _buildSectionHeader('Partner Device & Counter Leaderboard', Icons.military_tech_outlined),
         const SizedBox(height: 4),
-        const Text('Track sales productivity, orders taken, and payments recovered per staff phone/counter.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+        const Text('Track sales productivity, orders taken, and payments recovered per partner phone/counter.', style: TextStyle(fontSize: 11, color: Colors.grey)),
         const SizedBox(height: 12),
         if (staffList.isEmpty)
-          _buildEmptyCard('No staff orders recorded.')
+          _buildEmptyCard('No partner device orders recorded.')
         else
           ...staffList.asMap().entries.map((entry) {
             final idx = entry.key + 1;

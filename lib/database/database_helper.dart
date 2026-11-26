@@ -1357,7 +1357,9 @@ class DatabaseHelper {
 
     final bool isStaffFiltered = staffFilter != null &&
         staffFilter.trim().isNotEmpty &&
-        staffFilter.trim() != 'All Staff';
+        staffFilter.trim() != 'All Staff' &&
+        staffFilter.trim() != 'All Partners' &&
+        staffFilter.trim() != 'All Partner Devices / Counters';
     final String? cleanStaff = isStaffFiltered ? staffFilter.trim() : null;
 
     if (cleanLoc != null) {
