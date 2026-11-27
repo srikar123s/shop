@@ -307,6 +307,8 @@ class OrderRepository {
           paymentMode: row['payment_mode'] as String?,
           paymentStatus: row['payment_status'] as String?,
           unfulfilledItemNames: unfulfilledItems,
+          deliveryPartnerName: row['delivery_partner_name'] as String?,
+          boxCount: (row['box_count'] as num?)?.toInt() ?? 0,
         ),
       );
     }
@@ -698,6 +700,8 @@ class OrderRepository {
       paidAmount: (orderRow['paid_amount'] as num?)?.toDouble() ?? 0,
       paymentMode: (orderRow['payment_mode'] as String?) ?? 'unpaid',
       paymentStatus: (orderRow['payment_status'] as String?) ?? 'unpaid',
+      deliveryPartnerName: orderRow['delivery_partner_name'] as String?,
+      boxCount: (orderRow['box_count'] as num?)?.toInt() ?? 0,
     );
 
     // Auto-heal if billBreakdown subtotal is 0 but items have non-zero prices

@@ -6,7 +6,9 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/repositories/customer_repository.dart';
+import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/lifetime_report_screen.dart';
@@ -33,6 +35,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
   final GlobalKey _reportKey = GlobalKey();
   DateTime _selectedDate = DateTime.now();
   Map<String, dynamic>? _report;
+  Map<String, dynamic> _deliverySummary = const {};
   bool _loading = true;
   bool _isSharing = false;
 
@@ -45,11 +48,17 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
   Future<void> _loadReport() async {
     setState(() => _loading = true);
     try {
-      final report =
-          await DatabaseHelper.instance.getEveningClosingReport(_selectedDate);
+      final dayStart =
+          DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+      final dayEnd = dayStart.add(const Duration(days: 1));
+      final results = await Future.wait([
+        DatabaseHelper.instance.getEveningClosingReport(_selectedDate),
+        DeliveryRepository().getDeliverySummary(start: dayStart, end: dayEnd),
+      ]);
       if (!mounted) return;
       setState(() {
-        _report = report;
+        _report = results[0];
+        _deliverySummary = results[1];
         _loading = false;
       });
     } catch (e) {
@@ -718,6 +727,23 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                       'Top Selling Product',
                                       '${_report!['topItemName']} (${_report!['topItemQty']} ${_report!['topItemUnit']})',
                                       Colors.amber.shade900,
+                                    ),
+                                  ],
+                                  if (((_deliverySummary['totalEarned'] as num?) ?? 0) > 0 ||
+                                      ((_deliverySummary['totalPaid'] as num?) ?? 0) > 0) ...[
+                                    const Divider(height: 1),
+                                    _buildReportRow(
+                                      Icons.local_shipping_outlined,
+                                      AppLocalizations.of(context).t('deliveryExpense'),
+                                      '₹${((_deliverySummary['totalEarned'] as num?) ?? 0).toStringAsFixed(0)} (${(_deliverySummary['totalBoxes'] as num?) ?? 0} boxes)',
+                                      Colors.indigo.shade700,
+                                    ),
+                                    const Divider(height: 1),
+                                    _buildReportRow(
+                                      Icons.payments_outlined,
+                                      AppLocalizations.of(context).t('driverCashPaid'),
+                                      '₹${((_deliverySummary['totalPaid'] as num?) ?? 0).toStringAsFixed(0)}',
+                                      Colors.teal.shade700,
                                     ),
                                   ],
                                 ],

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/delivery_partner.dart';
 import 'package:shop/repositories/delivery_repository.dart';
+import 'package:shop/services/shop_sync_service.dart';
 import 'package:shop/services/voice_search_service.dart';
 
 class DeliveryPartnerPassbookScreen extends StatefulWidget {
@@ -29,12 +33,84 @@ class _DeliveryPartnerPassbookScreenState
   List<DeliveryTransaction> _transactions = [];
   List<String> _locations = [];
   bool _loading = true;
+  bool _isLocked = false;
+  final LocalAuthentication _localAuth = LocalAuthentication();
 
   @override
   void initState() {
     super.initState();
     _repo = widget._repository ?? DeliveryRepository();
+    ShopSyncService.instance.addListener(_onSyncUpdate);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    ShopSyncService.instance.removeListener(_onSyncUpdate);
+    super.dispose();
+  }
+
+  void _onSyncUpdate() {
+    if (mounted) _loadData();
+  }
+
+  Future<void> _enableLock() async {
+    try {
+      final supported = await _localAuth.isDeviceSupported();
+      if (!supported) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please enable a Phone Screen Lock (PIN, Pattern, or Fingerprint) in Settings first.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _isLocked = true);
+  }
+
+  Future<void> _unlockView() async {
+    try {
+      final ok = await _localAuth.authenticate(
+        localizedReason: 'Verify phone screen lock to unlock',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
+      );
+      if (ok && mounted) {
+        setState(() => _isLocked = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not verify screen lock: $e')),
+      );
+    }
+  }
+
+  Future<void> _sharePartnerSummary() async {
+    final p = _partner;
+    if (p == null) return;
+    final totalBoxes =
+        _transactions.fold<int>(0, (sum, tx) => sum + tx.totalBoxes);
+    final statusLine = p.advanceBalance > 0
+        ? 'Advance Balance: ₹${_currency.format(p.advanceBalance)}'
+        : p.payableBalance > 0
+            ? 'Payable Balance: ₹${_currency.format(p.payableBalance)}'
+            : 'Settled (₹0)';
+    final text = StringBuffer()
+      ..writeln('🚚 *${p.name}* — Delivery Summary')
+      ..writeln('Total Boxes: $totalBoxes')
+      ..writeln('Total Earned: ₹${_currency.format(p.totalEarned)}')
+      ..writeln('Total Paid: ₹${_currency.format(p.totalPaid)}')
+      ..writeln(statusLine);
+    await Share.share(text.toString());
   }
 
   Future<void> _loadData() async {
@@ -268,7 +344,8 @@ class _DeliveryPartnerPassbookScreenState
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _locations.contains(selectedLocation)
+                          key: ValueKey('pb_$selectedLocation'),
+                          initialValue: _locations.contains(selectedLocation)
                               ? selectedLocation
                               : null,
                           decoration: const InputDecoration(
@@ -564,7 +641,8 @@ class _DeliveryPartnerPassbookScreenState
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          value: _locations.contains(selectedLocation)
+                          key: ValueKey('pb_$selectedLocation'),
+                          initialValue: _locations.contains(selectedLocation)
                               ? selectedLocation
                               : null,
                           decoration: const InputDecoration(
@@ -846,91 +924,165 @@ class _DeliveryPartnerPassbookScreenState
 
   @override
   Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
     final partner = _partner;
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: Text(
-          partner?.name ?? 'Driver Passbook',
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddOptionsSheet,
-        icon: const Icon(Icons.add),
-        label: const Text('Add'),
-      ),
-      body: _loading || partner == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                children: [
-                  _BalanceHeaderCard(partner: partner, currency: _currency),
-                  const SizedBox(height: 12),
-
-                  // Quick Add Row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _openPerBoxSheet,
-                          icon: const Icon(Icons.inventory_2_outlined, size: 18),
-                          label: const Text('Per Box'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _openLineSheet,
-                          icon: const Icon(Icons.route_outlined, size: 18),
-                          label: const Text('Line'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _openPayoutSheet,
-                          icon: const Icon(Icons.payments_outlined, size: 18),
-                          label: const Text('Advance'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  const Text(
-                    'Transactions',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 8),
-
-                  if (_transactions.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(28),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'No transactions yet. Tap "+ Add" to record a Per-Box, Line, or Advance entry.',
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    )
-                  else
-                    ..._transactions.map((tx) => _TransactionCard(
-                          tx: tx,
-                          currency: _currency,
-                          dateFmt: _dateFmt,
-                          onDelete: () => _confirmDeleteTx(tx),
-                        )),
-                ],
-              ),
+    return PopScope(
+      canPop: !_isLocked,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isLocked && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Locked! Tap Unlock at the top to go back.'),
+              duration: Duration(seconds: 2),
             ),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          automaticallyImplyLeading: !_isLocked,
+          title: Text(
+            partner?.name ?? s.t('driverPassbook'),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          actions: [
+            if (_isLocked)
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.amberAccent),
+                icon: const Icon(Icons.lock_rounded, size: 18),
+                label: Text(
+                  s.t('unlockScreen'),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                onPressed: _unlockView,
+              )
+            else ...[
+              IconButton(
+                tooltip: s.t('lockScreen'),
+                icon: const Icon(Icons.lock_open_rounded),
+                onPressed: _enableLock,
+              ),
+              IconButton(
+                tooltip: s.t('shareSummary'),
+                icon: const Icon(Icons.share_outlined),
+                onPressed: _sharePartnerSummary,
+              ),
+            ],
+          ],
+        ),
+        floatingActionButton: _isLocked
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: _showAddOptionsSheet,
+                icon: const Icon(Icons.add),
+                label: Text(s.t('add')),
+              ),
+        body: _loading || partner == null
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadData,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                  children: [
+                    if (_isLocked)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.lock_outline,
+                                size: 16, color: Color(0xFF92400E)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${s.t('driverViewLocked')} • ${partner.name}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF92400E),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    _BalanceHeaderCard(partner: partner, currency: _currency),
+                    const SizedBox(height: 12),
+
+                    // Quick Add Row
+                    if (!_isLocked) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _openPerBoxSheet,
+                              icon: const Icon(Icons.inventory_2_outlined,
+                                  size: 18),
+                              label: Text(s.t('perBox')),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _openLineSheet,
+                              icon: const Icon(Icons.route_outlined, size: 18),
+                              label: Text(s.t('line')),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _openPayoutSheet,
+                              icon: const Icon(Icons.payments_outlined,
+                                  size: 18),
+                              label: Text(s.t('advance')),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    Text(
+                      s.t('transactions'),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+
+                    if (_transactions.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(28),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: const Center(
+                          child: Text(
+                            'No transactions yet. Tap "+ Add" to record a Per-Box, Line, or Advance entry.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      )
+                    else
+                      ..._transactions.map((tx) => _TransactionCard(
+                            tx: tx,
+                            currency: _currency,
+                            dateFmt: _dateFmt,
+                            onDelete:
+                                _isLocked ? null : () => _confirmDeleteTx(tx),
+                          )),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 }
@@ -1160,13 +1312,13 @@ class _TransactionCard extends StatelessWidget {
     required this.tx,
     required this.currency,
     required this.dateFmt,
-    required this.onDelete,
+    this.onDelete,
   });
 
   final DeliveryTransaction tx;
   final NumberFormat currency;
   final DateFormat dateFmt;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1229,13 +1381,14 @@ class _TransactionCard extends StatelessWidget {
                   )
                 else
                   const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  color: Colors.grey.shade500,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: onDelete,
-                ),
+                if (onDelete != null)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    color: Colors.grey.shade500,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: onDelete,
+                  ),
               ],
             ),
             const SizedBox(height: 6),

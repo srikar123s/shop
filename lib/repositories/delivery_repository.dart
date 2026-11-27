@@ -243,4 +243,65 @@ class DeliveryRepository {
           .catchError((_) {}));
     }
   }
+
+  /// Returns delivery expense (earned), cash/UPI paid, boxes, and trip count.
+  /// If [start] and [end] are provided, filters by `created_at` range.
+  Future<Map<String, dynamic>> getDeliverySummary({
+    DateTime? start,
+    DateTime? end,
+  }) async {
+    final db = await _dbHelper.database;
+    String? where;
+    List<Object?>? whereArgs;
+    if (start != null && end != null) {
+      where = 'created_at >= ? AND created_at < ?';
+      whereArgs = [start.toIso8601String(), end.toIso8601String()];
+    }
+    final rows = await db.query(
+      'delivery_transactions',
+      columns: [
+        'COALESCE(SUM(earned_amount), 0.0) AS total_earned',
+        'COALESCE(SUM(paid_amount), 0.0) AS total_paid',
+        'COALESCE(SUM(total_boxes), 0) AS total_boxes',
+        'COUNT(*) AS tx_count',
+      ],
+      where: where,
+      whereArgs: whereArgs,
+    );
+    if (rows.isEmpty) {
+      return {
+        'totalEarned': 0.0,
+        'totalPaid': 0.0,
+        'totalBoxes': 0,
+        'txCount': 0,
+      };
+    }
+    final r = rows.first;
+    return {
+      'totalEarned': (r['total_earned'] as num?)?.toDouble() ?? 0.0,
+      'totalPaid': (r['total_paid'] as num?)?.toDouble() ?? 0.0,
+      'totalBoxes': (r['total_boxes'] as num?)?.toInt() ?? 0,
+      'txCount': (r['tx_count'] as num?)?.toInt() ?? 0,
+    };
+  }
+
+  /// Saves delivery partner name and/or box count on an order and syncs to cloud.
+  Future<void> updateOrderDeliveryInfo({
+    required int orderId,
+    String? deliveryPartnerName,
+    int? boxCount,
+  }) async {
+    final db = await _dbHelper.database;
+    final updates = <String, Object?>{};
+    if (deliveryPartnerName != null) {
+      final clean = deliveryPartnerName.trim();
+      updates['delivery_partner_name'] = clean.isEmpty ? null : clean;
+    }
+    if (boxCount != null) {
+      updates['box_count'] = boxCount < 0 ? 0 : boxCount;
+    }
+    if (updates.isEmpty) return;
+    await db.update('orders', updates, where: 'id = ?', whereArgs: [orderId]);
+    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((_) {}));
+  }
 }

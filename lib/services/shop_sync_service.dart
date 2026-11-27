@@ -784,6 +784,8 @@ class ShopSyncService extends ChangeNotifier {
           'paid_amount': data['paid_amount'] ?? 0.0,
           'payment_mode': data['payment_mode'] ?? 'unpaid',
           'payment_status': data['payment_status'] ?? 'unpaid',
+          'delivery_partner_name': data['delivery_partner_name'],
+          'box_count': (data['box_count'] as num?)?.toInt() ?? 0,
         };
         if (cloudOrderNum != null && cloudOrderNum > 0) {
           updateMap['order_number'] = cloudOrderNum;
@@ -804,6 +806,8 @@ class ShopSyncService extends ChangeNotifier {
           'paid_amount': data['paid_amount'] ?? 0.0,
           'payment_mode': data['payment_mode'] ?? 'unpaid',
           'payment_status': data['payment_status'] ?? 'unpaid',
+          'delivery_partner_name': data['delivery_partner_name'],
+          'box_count': (data['box_count'] as num?)?.toInt() ?? 0,
         });
       }
 
@@ -1011,6 +1015,14 @@ class ShopSyncService extends ChangeNotifier {
     final paidAmt = (o['paid_amount'] as num?)?.toDouble() ?? 0.0;
     if (paidAmt != 0.0) {
       map['paid_amount'] = paidAmt;
+    }
+    final delivPartner = (o['delivery_partner_name'] as String?)?.trim();
+    if (delivPartner != null && delivPartner.isNotEmpty) {
+      map['delivery_partner_name'] = delivPartner;
+    }
+    final boxCount = (o['box_count'] as num?)?.toInt() ?? 0;
+    if (boxCount > 0) {
+      map['box_count'] = boxCount;
     }
     return map;
   }
@@ -1225,6 +1237,8 @@ class ShopSyncService extends ChangeNotifier {
               'paid_amount': data['paid_amount'] ?? 0.0,
               'payment_mode': data['payment_mode'] ?? 'unpaid',
               'payment_status': data['payment_status'] ?? 'unpaid',
+              'delivery_partner_name': data['delivery_partner_name'],
+              'box_count': (data['box_count'] as num?)?.toInt() ?? 0,
             };
             if (cloudOrderNum != null && cloudOrderNum > 0) {
               updateMap['order_number'] = cloudOrderNum;
@@ -1245,6 +1259,8 @@ class ShopSyncService extends ChangeNotifier {
               'paid_amount': data['paid_amount'] ?? 0.0,
               'payment_mode': data['payment_mode'] ?? 'unpaid',
               'payment_status': data['payment_status'] ?? 'unpaid',
+              'delivery_partner_name': data['delivery_partner_name'],
+              'box_count': (data['box_count'] as num?)?.toInt() ?? 0,
             });
           }
 

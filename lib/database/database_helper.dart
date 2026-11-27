@@ -14,7 +14,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 7;
+  static const int dbVersion = 8;
 
   Database? _database;
   Future<Database>? _initDbFuture;
@@ -377,6 +377,14 @@ class DatabaseHelper {
         await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_delivery_tx_cloud_id ON delivery_transactions(cloud_tx_id)');
       } catch (_) {}
     }
+    if (oldVersion < 8) {
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN delivery_partner_name TEXT');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE orders ADD COLUMN box_count INTEGER NOT NULL DEFAULT 0');
+      } catch (_) {}
+    }
   }
 
   Future<void> _createDeliveryTables(Database db) async {
@@ -480,6 +488,8 @@ class DatabaseHelper {
         paid_amount REAL NOT NULL DEFAULT 0,
         payment_mode TEXT NOT NULL DEFAULT 'unpaid',
         payment_status TEXT NOT NULL DEFAULT 'unpaid',
+        delivery_partner_name TEXT,
+        box_count INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY(customer_id) REFERENCES customers(id)
       )
     ''');

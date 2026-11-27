@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/l10n/app_localizations.dart';
+import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/services/excel_report_service.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
@@ -23,6 +25,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
   String? _selectedTakenBy;
 
   Map<String, dynamic>? _reportData;
+  Map<String, dynamic> _deliverySummary = const {};
   bool _loading = true;
   bool _isSharingPdf = false;
   bool _isExportingExcel = false;
@@ -103,15 +106,22 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
   Future<void> _loadReport() async {
     setState(() => _loading = true);
     try {
-      final data = await DatabaseHelper.instance.getLifetimeBusinessReport(
-        startDate: _effectiveStartDate,
-        endDate: _effectiveEndDate,
-        locationFilter: _selectedLocation,
-        staffFilter: _selectedTakenBy,
-      );
+      final results = await Future.wait([
+        DatabaseHelper.instance.getLifetimeBusinessReport(
+          startDate: _effectiveStartDate,
+          endDate: _effectiveEndDate,
+          locationFilter: _selectedLocation,
+          staffFilter: _selectedTakenBy,
+        ),
+        DeliveryRepository().getDeliverySummary(
+          start: _effectiveStartDate,
+          end: _effectiveEndDate,
+        ),
+      ]);
       if (!mounted) return;
       setState(() {
-        _reportData = data;
+        _reportData = results[0];
+        _deliverySummary = results[1];
         _loading = false;
       });
     } catch (e, stack) {
@@ -338,6 +348,48 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
                   children: [
                     // Filter Bar: Date Range + Location + Staff
                     _buildFilterControls(),
+
+                    if (((_deliverySummary['totalEarned'] as num?) ?? 0) > 0 ||
+                        ((_deliverySummary['totalPaid'] as num?) ?? 0) > 0)
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.indigo.shade100),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.local_shipping_outlined,
+                                    size: 16, color: Colors.indigo.shade700),
+                                const SizedBox(width: 6),
+                                Text(
+                                  AppLocalizations.of(context)
+                                      .t('deliveryExpense'),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.indigo.shade900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              '₹${((_deliverySummary['totalEarned'] as num?) ?? 0).toStringAsFixed(0)} • Paid: ₹${((_deliverySummary['totalPaid'] as num?) ?? 0).toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.indigo.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
                     // Tab View Body
                     Expanded(

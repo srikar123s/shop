@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/customer.dart';
@@ -908,9 +909,9 @@ class _CustomerKhataPassbookScreenState
                   foregroundColor: Colors.amberAccent,
                 ),
                 icon: const Icon(Icons.lock_rounded, size: 18),
-                label: const Text(
-                  'Unlock',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                label: Text(
+                  AppLocalizations.of(context).t('unlockScreen'),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 onPressed: _unlockCustomerView,
               ),
@@ -979,7 +980,7 @@ class _CustomerKhataPassbookScreenState
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Customer View Locked • Showing only ${widget.customerName}',
+                      '${AppLocalizations.of(context).t('customerViewLocked')} • ${widget.customerName}',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1372,6 +1373,7 @@ class _CustomerKhataPassbookScreenState
                                           productRepository:
                                               widget.productRepository,
                                           customerBillNumber: item['bill_number'] as int?,
+                                          isReadOnly: _isCustomerLocked,
                                         ),
                                       ),
                                     );

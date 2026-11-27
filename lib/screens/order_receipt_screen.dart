@@ -17,6 +17,7 @@ class OrderReceiptScreen extends StatefulWidget {
     required this.customerRepository,
     required this.productRepository,
     this.customerBillNumber,
+    this.isReadOnly = false,
   });
 
   final int orderId;
@@ -24,6 +25,7 @@ class OrderReceiptScreen extends StatefulWidget {
   final CustomerRepository customerRepository;
   final ProductRepository productRepository;
   final int? customerBillNumber;
+  final bool isReadOnly;
 
   @override
   State<OrderReceiptScreen> createState() => _OrderReceiptScreenState();
@@ -211,9 +213,11 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
               : 'Bill ${order.formattedOrderId}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Share on WhatsApp',
+        actions: widget.isReadOnly
+            ? const []
+            : [
+                IconButton(
+                  tooltip: 'Share on WhatsApp',
             icon: const Icon(Icons.share_rounded),
             onPressed: () {
               if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
@@ -240,7 +244,7 @@ class _OrderReceiptScreenState extends State<OrderReceiptScreen> {
               InvoicePdfService.instance.sharePdf(details, customerBillNumber: _customerBillNumber);
             },
           ),
-        ],
+              ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),

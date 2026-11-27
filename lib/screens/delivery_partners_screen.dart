@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/delivery_partner.dart';
 import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/screens/delivery_partner_passbook_screen.dart';
+import 'package:shop/services/shop_sync_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class DeliveryPartnersScreen extends StatefulWidget {
@@ -30,13 +32,19 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
   void initState() {
     super.initState();
     _repo = widget._repository ?? DeliveryRepository();
+    ShopSyncService.instance.addListener(_onSyncUpdate);
     _loadPartners();
   }
 
   @override
   void dispose() {
+    ShopSyncService.instance.removeListener(_onSyncUpdate);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSyncUpdate() {
+    if (mounted) _loadPartners();
   }
 
   Future<void> _loadPartners() async {
@@ -182,17 +190,18 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text(
-          'Delivery Partners',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          s.t('deliveryPartners'),
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add_alt_1_rounded),
-            tooltip: 'Add Partner',
+            tooltip: s.t('addPartner'),
             onPressed: () => _showPartnerDialog(),
           ),
         ],
@@ -200,7 +209,7 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showPartnerDialog(),
         icon: const Icon(Icons.person_add_rounded),
-        label: const Text('Add Partner'),
+        label: Text(s.t('addPartner')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -214,7 +223,7 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
                     children: [
                       Expanded(
                         child: _SummaryCard(
-                          title: 'To Pay Drivers',
+                          title: s.t('toPayDrivers'),
                           amount: '₹${_currency.format(_totalPayable)}',
                           color: const Color(0xFFEA580C),
                           bgColor: const Color(0xFFFFF7ED),
@@ -224,7 +233,7 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _SummaryCard(
-                          title: 'Advance Given',
+                          title: s.t('advanceGiven'),
                           amount: '₹${_currency.format(_totalAdvance)}',
                           color: const Color(0xFF0D9488),
                           bgColor: const Color(0xFFF0FDFA),
@@ -240,7 +249,7 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
                     controller: _searchController,
                     onChanged: (_) => setState(_applyFilter),
                     decoration: InputDecoration(
-                      hintText: 'Search delivery partner or vehicle...',
+                      hintText: s.t('searchPartnerHint'),
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(

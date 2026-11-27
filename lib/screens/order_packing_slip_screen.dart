@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/order.dart';
+import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 
@@ -22,11 +25,16 @@ class OrderPackingSlipScreen extends StatefulWidget {
 
 class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
   late final Set<int> _packedItemIndices;
+  final DeliveryRepository _deliveryRepo = DeliveryRepository();
+  late int _boxCount;
+  String? _deliveryPartnerName;
 
   @override
   void initState() {
     super.initState();
     _packedItemIndices = <int>{};
+    _boxCount = widget.details.order.boxCount;
+    _deliveryPartnerName = widget.details.order.deliveryPartnerName;
     // Pre-check items that have already been marked given
     for (int i = 0; i < widget.details.items.length; i++) {
       final item = widget.details.items[i];
@@ -34,6 +42,101 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
         _packedItemIndices.add(i);
       }
     }
+  }
+
+  Future<void> _updateBoxCount(int next) async {
+    final clamped = next < 0 ? 0 : next;
+    setState(() => _boxCount = clamped);
+    final orderId = widget.details.order.id;
+    if (orderId != null) {
+      await _deliveryRepo.updateOrderDeliveryInfo(
+        orderId: orderId,
+        boxCount: clamped,
+      );
+    }
+  }
+
+  Future<void> _pickDeliveryPartner() async {
+    final s = AppLocalizations.of(context);
+    final partners = await _deliveryRepo.getPartnersWithSummary();
+    if (!mounted) return;
+    final ctrl = TextEditingController(text: _deliveryPartnerName ?? '');
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('assignDeliveryPartner')),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (partners.isNotEmpty) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: partners.map((p) {
+                    return ActionChip(
+                      avatar: const Icon(Icons.local_shipping_outlined, size: 16),
+                      label: Text(p.name),
+                      onPressed: () => Navigator.pop(ctx, p.name),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextField(
+                controller: ctrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: s.t('deliveryPartnerLabel'),
+                  hintText: 'e.g. Raju Auto',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.t('cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(s.t('save')),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (chosen != null && chosen.isNotEmpty) {
+      setState(() => _deliveryPartnerName = chosen);
+      final orderId = widget.details.order.id;
+      if (orderId != null) {
+        await _deliveryRepo.updateOrderDeliveryInfo(
+          orderId: orderId,
+          deliveryPartnerName: chosen,
+        );
+      }
+    }
+  }
+
+  Future<void> _shareBoxLabels() async {
+    final order = widget.details.order;
+    final billLabel = widget.customerBillNumber != null
+        ? 'Bill #${widget.customerBillNumber}'
+        : order.formattedOrderId;
+    final count = _boxCount > 0 ? _boxCount : 1;
+    final buf = StringBuffer()
+      ..writeln('📦 *${order.customerNameSnapshot}* ($billLabel)')
+      ..writeln('Total Boxes: $count');
+    if (_deliveryPartnerName != null && _deliveryPartnerName!.isNotEmpty) {
+      buf.writeln('Delivery: $_deliveryPartnerName');
+    }
+    for (var i = 1; i <= count; i++) {
+      buf.writeln('• ${order.customerNameSnapshot} — Box $i / $count');
+    }
+    await Share.share(buf.toString());
   }
 
   void _togglePacked(int index) {
@@ -182,6 +285,70 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
                     backgroundColor: Colors.grey.shade200,
                     color: allPacked ? const Color(0xFF16A34A) : const Color(0xFF0F766E),
                   ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline, size: 18),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: _boxCount > 0
+                                ? () => _updateBoxCount(_boxCount - 1)
+                                : null,
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              '$_boxCount ${AppLocalizations.of(context).t('boxes')}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline, size: 18),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _updateBoxCount(_boxCount + 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _pickDeliveryPartner,
+                      icon: const Icon(Icons.local_shipping_outlined, size: 16),
+                      label: Text(
+                        (_deliveryPartnerName != null &&
+                                _deliveryPartnerName!.isNotEmpty)
+                            ? _deliveryPartnerName!
+                            : AppLocalizations.of(context).t('deliveryPartnerLabel'),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _shareBoxLabels,
+                      icon: const Icon(Icons.qr_code_2_outlined, size: 16),
+                      label: Text(
+                        AppLocalizations.of(context).t('boxLabels'),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

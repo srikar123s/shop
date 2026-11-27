@@ -435,6 +435,8 @@ class OrderEntity {
     this.paidAmount = 0,
     this.paymentMode = 'unpaid',
     this.paymentStatus = 'unpaid',
+    this.deliveryPartnerName,
+    this.boxCount = 0,
   });
 
   final int? id;
@@ -451,6 +453,8 @@ class OrderEntity {
   final double paidAmount;
   final String paymentMode;
   final String paymentStatus;
+  final String? deliveryPartnerName;
+  final int boxCount;
 
   int get displayOrderNumber =>
       (orderNumber != null && orderNumber! > 0) ? orderNumber! : (id ?? 0);
@@ -478,6 +482,8 @@ class OrderEntity {
     double? paidAmount,
     String? paymentMode,
     String? paymentStatus,
+    String? deliveryPartnerName,
+    int? boxCount,
   }) {
     return OrderEntity(
       id: id ?? this.id,
@@ -493,6 +499,8 @@ class OrderEntity {
       paidAmount: paidAmount ?? this.paidAmount,
       paymentMode: paymentMode ?? this.paymentMode,
       paymentStatus: paymentStatus ?? this.paymentStatus,
+      deliveryPartnerName: deliveryPartnerName ?? this.deliveryPartnerName,
+      boxCount: boxCount ?? this.boxCount,
     );
   }
 
@@ -511,6 +519,8 @@ class OrderEntity {
       'paid_amount': paidAmount,
       'payment_mode': paymentMode,
       'payment_status': paymentStatus,
+      'delivery_partner_name': deliveryPartnerName,
+      'box_count': boxCount,
     };
   }
 }
@@ -633,6 +643,8 @@ class OrderSummary {
     this.paymentMode,
     this.paymentStatus,
     this.unfulfilledItemNames = const [],
+    this.deliveryPartnerName,
+    this.boxCount = 0,
   });
 
   final int orderId;
@@ -651,6 +663,8 @@ class OrderSummary {
   final String? paymentMode;
   final String? paymentStatus;
   final List<String> unfulfilledItemNames;
+  final String? deliveryPartnerName;
+  final int boxCount;
 
   double get dueAmount =>
       (estimateTotal - paidAmount).clamp(0.0, double.infinity);

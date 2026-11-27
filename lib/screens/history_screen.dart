@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/customer_repository.dart';
+import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/customer_orders_screen.dart';
@@ -107,6 +108,75 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _filter = widget.initialFilter;
     _load();
+  }
+
+  Future<void> _assignDeliveryPartner(OrderSummary order) async {
+    final s = AppLocalizations.of(context);
+    final repo = DeliveryRepository();
+    final partners = await repo.getPartnersWithSummary();
+    if (!mounted) return;
+    final ctrl = TextEditingController(text: order.deliveryPartnerName ?? '');
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('assignDeliveryPartner')),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (partners.isNotEmpty) ...[
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: partners.map((p) {
+                    return ActionChip(
+                      avatar: const Icon(Icons.local_shipping_outlined, size: 16),
+                      label: Text(p.name),
+                      onPressed: () => Navigator.pop(ctx, p.name),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+              ],
+              TextField(
+                controller: ctrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: s.t('deliveryPartnerLabel'),
+                  hintText: 'e.g. Raju Auto',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.t('cancel')),
+          ),
+          if (order.deliveryPartnerName != null &&
+              order.deliveryPartnerName!.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('Clear'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: Text(s.t('save')),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (chosen != null) {
+      await repo.updateOrderDeliveryInfo(
+        orderId: order.orderId,
+        deliveryPartnerName: chosen,
+      );
+      await _load();
+    }
   }
 
   Future<void> _load() async {
@@ -1068,6 +1138,56 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                                     ],
                                                   ),
                                                 ],
+                                                const SizedBox(height: 4),
+                                                InkWell(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  onTap: () => _assignDeliveryPartner(order),
+                                                  child: Container(
+                                                    padding: const EdgeInsets.symmetric(
+                                                        horizontal: 8, vertical: 3),
+                                                    decoration: BoxDecoration(
+                                                      color: (order.deliveryPartnerName != null &&
+                                                              order.deliveryPartnerName!.isNotEmpty)
+                                                          ? Colors.teal.shade50
+                                                          : Colors.grey.shade100,
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      border: Border.all(
+                                                        color: (order.deliveryPartnerName != null &&
+                                                                order.deliveryPartnerName!.isNotEmpty)
+                                                            ? Colors.teal.shade200
+                                                            : Colors.grey.shade300,
+                                                      ),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.local_shipping_outlined,
+                                                          size: 12,
+                                                          color: (order.deliveryPartnerName != null &&
+                                                                  order.deliveryPartnerName!.isNotEmpty)
+                                                              ? Colors.teal.shade800
+                                                              : Colors.grey.shade700,
+                                                        ),
+                                                        const SizedBox(width: 4),
+                                                        Text(
+                                                          (order.deliveryPartnerName != null &&
+                                                                  order.deliveryPartnerName!.isNotEmpty)
+                                                              ? '${order.deliveryPartnerName}${order.boxCount > 0 ? ' • ${order.boxCount} ${s.t('boxes')}' : ''}'
+                                                              : '+ ${s.t('deliveryPartnerLabel')}',
+                                                          style: TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight: FontWeight.w600,
+                                                            color: (order.deliveryPartnerName != null &&
+                                                                    order.deliveryPartnerName!.isNotEmpty)
+                                                                ? Colors.teal.shade900
+                                                                : Colors.grey.shade700,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   mainAxisAlignment:

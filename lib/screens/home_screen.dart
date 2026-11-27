@@ -1047,16 +1047,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'Delivery Partners',
-                                  style: TextStyle(
+                                Text(
+                                  s.t('deliveryPartners'),
+                                  style: const TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 15,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Per-box, line trips, advances & settlements',
+                                  s.t('deliveryPartnersSubtitle'),
                                   style: TextStyle(
                                     color: Colors.grey.shade600,
                                     fontSize: 12,
