@@ -122,9 +122,9 @@ class ShopCustomizationService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopName, _shopName);
 
-    // Also update current ShopProfile if available
+    // Also update current ShopProfile if owner
     final current = ShopSyncService.instance.currentShop;
-    if (current != null) {
+    if (current != null && ShopSyncService.instance.isOwner) {
       await ShopSyncService.instance.updateShopName(_shopName);
     }
     notifyListeners();
@@ -197,7 +197,7 @@ class ShopCustomizationService extends ChangeNotifier {
     _upiId = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyUpiId, _upiId);
-    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop && ShopSyncService.instance.isOwner) {
       unawaited(ShopSyncService.instance.updateShopProfileDetails(upiId: _upiId).catchError((e) {
         debugPrint('Error updating shop UPI ID: $e');
       }));
@@ -209,7 +209,7 @@ class ShopCustomizationService extends ChangeNotifier {
     _shopPhone = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopPhone, _shopPhone);
-    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop && ShopSyncService.instance.isOwner) {
       unawaited(ShopSyncService.instance.updateShopProfileDetails(phone: _shopPhone).catchError((e) {
         debugPrint('Error updating shop phone: $e');
       }));
@@ -221,7 +221,7 @@ class ShopCustomizationService extends ChangeNotifier {
     _shopAddress = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyShopAddress, _shopAddress);
-    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop && ShopSyncService.instance.isOwner) {
       unawaited(ShopSyncService.instance.updateShopProfileDetails(address: _shopAddress).catchError((e) {
         debugPrint('Error updating shop address: $e');
       }));
@@ -233,7 +233,7 @@ class ShopCustomizationService extends ChangeNotifier {
     _gstin = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyGstin, _gstin);
-    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop && ShopSyncService.instance.isOwner) {
       unawaited(ShopSyncService.instance.updateShopProfileDetails(gstin: _gstin).catchError((e) {
         debugPrint('Error updating shop GSTIN: $e');
       }));
@@ -245,7 +245,7 @@ class ShopCustomizationService extends ChangeNotifier {
     _digitalStamp = val.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKeyDigitalStamp, _digitalStamp);
-    if (!isPureOfflineMode && ShopSyncService.instance.hasShop) {
+    if (!isPureOfflineMode && ShopSyncService.instance.hasShop && ShopSyncService.instance.isOwner) {
       unawaited(ShopSyncService.instance.updateShopProfileDetails(digitalStamp: _digitalStamp).catchError((e) {
         debugPrint('Error updating shop digital stamp: $e');
       }));

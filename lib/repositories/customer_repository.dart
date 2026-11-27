@@ -15,8 +15,12 @@ class CustomerRepository {
     final normalized = query.trim();
     final result = await db.query(
       'customers',
-      where: normalized.isEmpty ? null : 'name LIKE ? OR phone LIKE ? OR address LIKE ?',
-      whereArgs: normalized.isEmpty ? null : ['%$normalized%', '%$normalized%', '%$normalized%'],
+      where: normalized.isEmpty
+          ? 'is_active = 1'
+          : 'is_active = 1 AND (name LIKE ? OR phone LIKE ? OR address LIKE ?)',
+      whereArgs: normalized.isEmpty
+          ? null
+          : ['%$normalized%', '%$normalized%', '%$normalized%'],
       orderBy: 'name COLLATE NOCASE ASC',
     );
     return result.map(Customer.fromMap).toList();
@@ -75,7 +79,7 @@ class CustomerRepository {
       final db = await _databaseHelper.database;
       final result = await db.query(
         'customers',
-        where: 'LOWER(TRIM(name)) = ?',
+        where: 'is_active = 1 AND LOWER(TRIM(name)) = ?',
         whereArgs: [normalizedName],
         limit: 1,
       );
@@ -192,11 +196,37 @@ class CustomerRepository {
       throw Exception('Cannot delete customer with active Khata balance of ₹${balance.toStringAsFixed(2)}');
     }
     final db = await _databaseHelper.database;
-    await db.delete(
-      'customers',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.transaction((txn) async {
+      final orderCheck = await txn.query(
+        'orders',
+        columns: ['id'],
+        where: 'customer_id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      final payCheck = await txn.query(
+        'customer_payments',
+        columns: ['id'],
+        where: 'customer_id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (orderCheck.isEmpty && payCheck.isEmpty) {
+        await txn.delete(
+          'customers',
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      } else {
+        // Archive/hide settled customer record so historical orders keep valid FK links
+        await txn.update(
+          'customers',
+          {'is_active': 0},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    });
   }
 
   Future<Customer?> getCustomerById(int id) async {
@@ -224,7 +254,7 @@ class CustomerRepository {
     final candidates = await db.query(
       'customers',
       where:
-          "REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ?",
+          "is_active = 1 AND REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ?",
       whereArgs: ['%$tail%'],
       limit: 50,
     );

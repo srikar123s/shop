@@ -654,7 +654,8 @@ class _CustomerKhataPassbookScreenState
 
       if (sendReceiptOnWhatsApp) {
         final shopName = ShopCustomizationService.instance.shopName;
-        final remainingDue = _totalDue - amount;
+        // _loadLedger() already updated _totalDue to the post-payment balance
+        final remainingDue = _totalDue;
         final remainingStr = remainingDue <= 0
             ? (remainingDue < 0
                 ? '₹ 0.00 (Advance Credit: ₹${(-remainingDue).toStringAsFixed(2)} - will settle with future bills)'
@@ -823,7 +824,18 @@ class _CustomerKhataPassbookScreenState
     );
 
     if (updated == true && mounted) {
-      final newLimit = double.tryParse(limitCtrl.text.trim()) ?? 0.0;
+      final rawText = limitCtrl.text.trim();
+      final parsedLimit = rawText.isEmpty ? 0.0 : double.tryParse(rawText);
+      if (parsedLimit == null || parsedLimit < 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Credit limit cannot be negative.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      final newLimit = parsedLimit;
       await DatabaseHelper.instance.updateCustomerCreditLimit(
         widget.customerId,
         newLimit,

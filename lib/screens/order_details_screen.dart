@@ -112,6 +112,22 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
       }
     }
     if (!mounted) return;
+    if (details != null) {
+      final activeKeys = <int>{};
+      for (var i = 0; i < details.items.length; i++) {
+        activeKeys.add(details.items[i].id ?? i);
+      }
+      final staleKeys =
+          _itemPriceControllers.keys.where((k) => !activeKeys.contains(k)).toList();
+      for (final k in staleKeys) {
+        _itemPriceControllers.remove(k)?.dispose();
+      }
+    } else {
+      for (final c in _itemPriceControllers.values) {
+        c.dispose();
+      }
+      _itemPriceControllers.clear();
+    }
     setState(() {
       _details = details;
       _customerBillNumber = seq;
@@ -303,6 +319,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             applyGst: existingBreakdown.applyGst,
             gstRate: existingBreakdown.gstRate,
             otherCharges: existingBreakdown.otherCharges,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
           )
         : BillBreakdown.calculate(subtotal: deliveredSubtotal);
 
@@ -312,6 +331,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             applyGst: existingBreakdown.applyGst,
             gstRate: existingBreakdown.gstRate,
             otherCharges: existingBreakdown.otherCharges,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
           )
         : BillBreakdown.calculate(subtotal: orderedSubtotal);
 
@@ -2078,8 +2100,15 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               }
               final pending = (item.quantityOrdered - item.quantityGiven)
                   .clamp(0, item.quantityOrdered);
-              final snapshot =
-                  jsonDecode(item.productSnapshot) as Map<String, dynamic>;
+              Map<String, dynamic> snapshot = const {};
+              if (item.productSnapshot.trim().isNotEmpty) {
+                try {
+                  final decoded = jsonDecode(item.productSnapshot);
+                  if (decoded is Map) {
+                    snapshot = Map<String, dynamic>.from(decoded);
+                  }
+                } catch (_) {}
+              }
               final detailsText =
                   item.description ?? snapshot['description'] as String?;
               final isOrderClosed = order.status == OrderStatus.completed || order.status == OrderStatus.closed;

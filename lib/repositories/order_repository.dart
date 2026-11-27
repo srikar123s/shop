@@ -5,11 +5,28 @@ import 'dart:convert';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/services/shop_sync_service.dart';
+import 'package:sqflite/sqflite.dart';
 
 class OrderRepository {
   const OrderRepository(this._databaseHelper);
 
   final DatabaseHelper _databaseHelper;
+
+  double _extractRowUnitPrice(Map<String, Object?> row) {
+    var unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
+    if (unitPrice <= 0.0) {
+      final snapRaw = row['product_snapshot'] as String?;
+      if (snapRaw != null && snapRaw.isNotEmpty) {
+        try {
+          final snapMap = jsonDecode(snapRaw);
+          if (snapMap is Map) {
+            unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
+          }
+        } catch (_) {}
+      }
+    }
+    return unitPrice;
+  }
 
   Future<int> createOrder(
     DraftOrder draftOrder, {
@@ -18,6 +35,20 @@ class OrderRepository {
     String? takenBy,
   }) async {
     final db = await _databaseHelper.database;
+    int localMaxHint = 0;
+    try {
+      final maxRows = await db.rawQuery(
+        'SELECT MAX(COALESCE(order_number, id)) as max_num FROM orders',
+      );
+      if (maxRows.isNotEmpty && maxRows.first['max_num'] != null) {
+        localMaxHint = (maxRows.first['max_num'] as num).toInt();
+      }
+    } catch (_) {}
+
+    // Allocate cloud order number BEFORE acquiring SQLite's exclusive write lock
+    final cloudOrderNumber = await ShopSyncService.instance
+        .allocateCloudOrderNumber(localMaxHint: localMaxHint);
+
     final createdOrderId = await db.transaction((txn) async {
       final now = DateTime.now();
       final effectiveTakenBy =
@@ -58,7 +89,19 @@ class OrderRepository {
           0, (sum, i) => sum + (i.unitPrice ?? 0) * i.quantity);
       final calculatedGrandTotal = billBreakdown?.grandTotal ?? calculatedSubtotal;
 
-      final nextOrderNumber = await ShopSyncService.instance.getNextSequentialOrderNumber(txn);
+      int nextOrderNumber;
+      if (cloudOrderNumber != null && cloudOrderNumber > 0) {
+        nextOrderNumber = cloudOrderNumber;
+      } else {
+        final txnMaxRows = await txn.rawQuery(
+          'SELECT MAX(COALESCE(order_number, id)) as max_num FROM orders',
+        );
+        final txnLocalMax =
+            (txnMaxRows.isNotEmpty && txnMaxRows.first['max_num'] != null)
+                ? (txnMaxRows.first['max_num'] as num).toInt()
+                : 0;
+        nextOrderNumber = txnLocalMax + 1;
+      }
 
       final orderId = await txn.insert('orders', {
         'order_number': nextOrderNumber,
@@ -165,17 +208,7 @@ class OrderRepository {
       double combinedSubtotal = 0.0;
       for (final row in allItemRows) {
         final qty = (row['quantity_ordered'] as num).toDouble();
-        double uPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
-        if (uPrice <= 0.0) {
-          final snapRaw = row['product_snapshot'] as String?;
-          if (snapRaw != null && snapRaw.isNotEmpty) {
-            try {
-              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-              uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-            } catch (_) {}
-          }
-        }
-        combinedSubtotal += uPrice * qty;
+        combinedSubtotal += _extractRowUnitPrice(row) * qty;
       }
 
       final combinedBreakdown = billBreakdown != null
@@ -246,6 +279,25 @@ class OrderRepository {
       ORDER BY o.created_at DESC
     ''', normalized.isEmpty ? null : ['%$normalized%']);
 
+    final orderIds = orderRows.map((r) => r['id'] as int).toList();
+    final itemsByOrderId = <int, List<Map<String, Object?>>>{};
+    for (var i = 0; i < orderIds.length; i += 400) {
+      final chunk = orderIds.sublist(
+        i,
+        i + 400 > orderIds.length ? orderIds.length : i + 400,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(',');
+      final itemRows = await db.query(
+        'order_items',
+        where: 'order_id IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final itemRow in itemRows) {
+        final oid = itemRow['order_id'] as int;
+        itemsByOrderId.putIfAbsent(oid, () => []).add(itemRow);
+      }
+    }
+
     final summaries = <OrderSummary>[];
     for (final row in orderRows) {
       final orderId = row['id'] as int;
@@ -261,11 +313,7 @@ class OrderRepository {
           ? rawTakenBy.trim()
           : ShopSyncService.instance.currentUserOrDeviceName;
 
-      final itemRows = await db.query(
-        'order_items',
-        where: 'order_id = ?',
-        whereArgs: [orderId],
-      );
+      final itemRows = itemsByOrderId[orderId] ?? const <Map<String, Object?>>[];
       final statuses = itemRows
           .map((e) => _itemStatusFromLabel(e['status'] as String))
           .toList();
@@ -771,6 +819,7 @@ class OrderRepository {
           'order_items',
           {
             'quantity_given': item.quantityGiven,
+            'unit_price': item.unitPrice,
             'status': itemStatusLabel(status),
             'procurement_status': procurement.name,
             'product_snapshot': item.productSnapshot,
@@ -780,29 +829,20 @@ class OrderRepository {
         );
       }
 
-      // Fetch all items belonging to this order to calculate true total and status
+      // Fetch all items belonging to this order to calculate true ordered total and status
       final allDbItems = await txn.query(
         'order_items',
         where: 'order_id = ?',
         whereArgs: [orderId],
       );
 
-      double allItemsSubtotal = 0;
+      double orderedSubtotal = 0;
       final allStatuses = <ItemStatus>[];
       for (final row in allDbItems) {
         final qGiven = (row['quantity_given'] as num?)?.toDouble() ?? 0.0;
         final qOrd = (row['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
-        double uPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
-        if (uPrice <= 0.0) {
-          final snapRaw = row['product_snapshot'] as String?;
-          if (snapRaw != null && snapRaw.isNotEmpty) {
-            try {
-              final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-              uPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-            } catch (_) {}
-          }
-        }
-        allItemsSubtotal += uPrice * qGiven;
+        final uPrice = _extractRowUnitPrice(row);
+        orderedSubtotal += uPrice * qOrd;
         allStatuses.add(_statusFromGiven(qOrd, qGiven));
       }
 
@@ -812,27 +852,47 @@ class OrderRepository {
       };
 
       final orderRows = await txn.query('orders',
-          columns: ['notes'], where: 'id = ?', whereArgs: [orderId]);
+          columns: ['notes', 'estimate_total'],
+          where: 'id = ?',
+          whereArgs: [orderId]);
       if (orderRows.isNotEmpty) {
         final existingNotes = orderRows.first['notes'] as String?;
+        final existingEstimate =
+            (orderRows.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
         final existingBreakdown = BillBreakdown.fromJsonString(existingNotes);
         if (existingBreakdown != null) {
-          final updatedBreakdown = BillBreakdown.calculate(
-            subtotal: allItemsSubtotal,
+          final calcWithoutOverride = BillBreakdown.calculate(
+            subtotal: existingBreakdown.subtotal,
             applyGst: existingBreakdown.applyGst,
             gstRate: existingBreakdown.gstRate,
             otherCharges: existingBreakdown.otherCharges,
             applyDiscount: existingBreakdown.applyDiscount,
             discountType: existingBreakdown.discountType,
             discountValue: existingBreakdown.discountValue,
+          ).grandTotal;
+          final hadManualOverride =
+              (existingEstimate - calcWithoutOverride).abs() > 0.01;
+          final orderedChanged =
+              (orderedSubtotal - existingBreakdown.subtotal).abs() > 0.01;
+
+          final updatedBreakdown = BillBreakdown.calculate(
+            subtotal: orderedSubtotal,
+            applyGst: existingBreakdown.applyGst,
+            gstRate: existingBreakdown.gstRate,
+            otherCharges: existingBreakdown.otherCharges,
+            applyDiscount: existingBreakdown.applyDiscount,
+            discountType: existingBreakdown.discountType,
+            discountValue: existingBreakdown.discountValue,
+            grandTotalOverride:
+                (hadManualOverride && !orderedChanged) ? existingEstimate : null,
             customerPhone: existingBreakdown.customerPhone,
             takenBy: existingBreakdown.takenBy,
             note: existingBreakdown.note,
           );
           updateData['notes'] = jsonEncode(updatedBreakdown.toMap());
           updateData['estimate_total'] = updatedBreakdown.grandTotal;
-        } else if (allItemsSubtotal > 0) {
-          updateData['estimate_total'] = allItemsSubtotal;
+        } else if (orderedSubtotal > 0) {
+          updateData['estimate_total'] = orderedSubtotal;
         }
       }
 
@@ -857,6 +917,7 @@ class OrderRepository {
         oi.order_id,
         oi.item_name,
         oi.unit,
+        oi.unit_price,
         oi.quantity_ordered,
         oi.quantity_given,
         oi.product_snapshot,
@@ -874,6 +935,27 @@ class OrderRepository {
         AND (oi.quantity_ordered - oi.quantity_given) > 0
       ORDER BY o.created_at ASC
     ''');
+
+    final itemIds = results.map((r) => r['item_id'] as int).toList();
+    final optionsByItemId = <int, List<String>>{};
+    for (var i = 0; i < itemIds.length; i += 400) {
+      final chunk = itemIds.sublist(
+        i,
+        i + 400 > itemIds.length ? itemIds.length : i + 400,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(',');
+      final optRows = await db.query(
+        'order_item_options',
+        where: 'order_item_id IN ($placeholders)',
+        whereArgs: chunk,
+      );
+      for (final o in optRows) {
+        final oid = o['order_item_id'] as int;
+        optionsByItemId
+            .putIfAbsent(oid, () => [])
+            .add('${o['option_name']}: ${o['option_value']}');
+      }
+    }
 
     final result = <ProcurementItem>[];
     for (final row in results) {
@@ -898,23 +980,9 @@ class OrderRepository {
           DateTime.tryParse(row['created_at'] as String? ?? '') ??
               DateTime.now();
 
-      final optRows = await db.query(
-        'order_item_options',
-        where: 'order_item_id = ?',
-        whereArgs: [itemId],
-      );
-      final options = optRows
-          .map((o) => '${o['option_name']}: ${o['option_value']}')
-          .toList();
-
+      final options = optionsByItemId[itemId] ?? const <String>[];
       final snapRaw = row['product_snapshot'] as String?;
-      double unitPrice = (row['unit_price'] as num?)?.toDouble() ?? 0.0;
-      if (unitPrice <= 0.0 && snapRaw != null && snapRaw.isNotEmpty) {
-        try {
-          final snapMap = jsonDecode(snapRaw) as Map<String, dynamic>;
-          unitPrice = (snapMap['unitPrice'] as num?)?.toDouble() ?? 0.0;
-        } catch (_) {}
-      }
+      final unitPrice = _extractRowUnitPrice(row);
 
       result.add(
         ProcurementItem(
@@ -994,8 +1062,129 @@ class OrderRepository {
     );
   }
 
+  Future<void> _markItemProcuredInTxn(
+    DatabaseExecutor txn, {
+    required int itemId,
+    required int orderId,
+    double? customQuantityGiven,
+  }) async {
+    final orderRows = await txn.query(
+      'orders',
+      columns: ['status', 'notes', 'estimate_total'],
+      where: 'id = ?',
+      whereArgs: [orderId],
+      limit: 1,
+    );
+    final rawOrderStatus =
+        orderRows.isNotEmpty ? (orderRows.first['status'] as String? ?? '') : '';
+    final existingOrderStatus = _orderStatusFromLabel(rawOrderStatus);
+    final wasAlreadyClosed = existingOrderStatus == OrderStatus.completed ||
+        existingOrderStatus == OrderStatus.closed;
+
+    final itemRows = await txn.query(
+      'order_items',
+      where: 'id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+    final ordered = itemRows.isNotEmpty
+        ? (itemRows.first['quantity_ordered'] as num).toDouble()
+        : 0.0;
+    final currentGiven = itemRows.isNotEmpty
+        ? (itemRows.first['quantity_given'] as num?)?.toDouble() ?? 0.0
+        : 0.0;
+
+    if (wasAlreadyClosed && customQuantityGiven == null) {
+      // Closed orders already billed only for delivered goods; clear procurement queue flag
+      // without changing the customer's closed invoice or delivered quantities.
+      await txn.update(
+        'order_items',
+        {'procurement_status': ProcurementStatus.notRequired.name},
+        where: 'id = ?',
+        whereArgs: [itemId],
+      );
+      return;
+    }
+
+    final effectiveGiven = customQuantityGiven ?? ordered;
+    final status = _statusFromGiven(ordered, effectiveGiven);
+    final procurementStatus = effectiveGiven < ordered
+        ? ProcurementStatus.toProcure
+        : ProcurementStatus.notRequired;
+
+    await txn.update(
+      'order_items',
+      {
+        'procurement_status': procurementStatus.name,
+        'quantity_given': effectiveGiven,
+        'status': itemStatusLabel(status),
+      },
+      where: 'id = ?',
+      whereArgs: [itemId],
+    );
+
+    if (wasAlreadyClosed) {
+      return;
+    }
+
+    final allItems = await txn.query(
+      'order_items',
+      where: 'order_id = ?',
+      whereArgs: [orderId],
+    );
+    double orderedSubtotal = 0.0;
+    final itemStatuses = <ItemStatus>[];
+    for (final i in allItems) {
+      final ord = (i['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
+      final giv = (i['quantity_given'] as num?)?.toDouble() ?? 0.0;
+      orderedSubtotal += _extractRowUnitPrice(i) * ord;
+      itemStatuses.add(_statusFromGiven(ord, giv));
+    }
+
+    final newOrderStatus = _calculateOrderStatus(itemStatuses);
+    final orderUpdates = <String, Object?>{
+      'status': orderStatusLabel(newOrderStatus),
+    };
+
+    if (orderRows.isNotEmpty) {
+      final existingTotal =
+          (orderRows.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final existingBreakdown =
+          BillBreakdown.fromJsonString(orderRows.first['notes'] as String?);
+      if ((existingTotal <= 0.01 && orderedSubtotal > 0) ||
+          (currentGiven != effectiveGiven &&
+              existingBreakdown != null &&
+              existingBreakdown.subtotal <= 0.01 &&
+              orderedSubtotal > 0)) {
+        final restoredBreakdown = existingBreakdown != null
+            ? BillBreakdown.calculate(
+                subtotal: orderedSubtotal,
+                applyGst: existingBreakdown.applyGst,
+                gstRate: existingBreakdown.gstRate,
+                otherCharges: existingBreakdown.otherCharges,
+                applyDiscount: existingBreakdown.applyDiscount,
+                discountType: existingBreakdown.discountType,
+                discountValue: existingBreakdown.discountValue,
+                customerPhone: existingBreakdown.customerPhone,
+                takenBy: existingBreakdown.takenBy,
+                note: existingBreakdown.note,
+              )
+            : BillBreakdown.calculate(subtotal: orderedSubtotal);
+        orderUpdates['estimate_total'] = restoredBreakdown.grandTotal;
+        orderUpdates['notes'] = jsonEncode(restoredBreakdown.toMap());
+      }
+    }
+
+    await txn.update(
+      'orders',
+      orderUpdates,
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+  }
+
   /// Marks a specific order item as procured in the procurement list.
-  /// Automatically updates line item to delivered and marks order completed when all items arrive.
+  /// Preserves already-closed customer bills; updates open orders accurately.
   Future<void> markItemAsProcured({
     required int itemId,
     required int orderId,
@@ -1003,63 +1192,38 @@ class OrderRepository {
   }) async {
     final db = await _databaseHelper.database;
     await db.transaction((txn) async {
-      final itemRows = await txn.query(
-        'order_items',
-        where: 'id = ?',
-        whereArgs: [itemId],
-        limit: 1,
-      );
-      final ordered = itemRows.isNotEmpty
-          ? (itemRows.first['quantity_ordered'] as num).toDouble()
-          : 0.0;
-      final effectiveGiven = customQuantityGiven ?? ordered;
-
-      final status = _statusFromGiven(ordered, effectiveGiven);
-      final procurementStatus = effectiveGiven < ordered
-          ? ProcurementStatus.toProcure
-          : ProcurementStatus.notRequired;
-
-      await txn.update(
-        'order_items',
-        {
-          'procurement_status': procurementStatus.name,
-          'quantity_given': effectiveGiven,
-          'status': itemStatusLabel(status),
-        },
-        where: 'id = ?',
-        whereArgs: [itemId],
-      );
-
-      // Check all items in the order to determine true fulfillment status
-      final allItems = await txn.query(
-        'order_items',
-        where: 'order_id = ?',
-        whereArgs: [orderId],
-      );
-      final itemStatuses = allItems.map((i) {
-        final ord = (i['quantity_ordered'] as num?)?.toDouble() ?? 0.0;
-        final giv = (i['quantity_given'] as num?)?.toDouble() ?? 0.0;
-        return _statusFromGiven(ord, giv);
-      }).toList();
-
-      final newOrderStatus = _calculateOrderStatus(itemStatuses);
-      await txn.update(
-        'orders',
-        {'status': orderStatusLabel(newOrderStatus)},
-        where: 'id = ?',
-        whereArgs: [orderId],
+      await _markItemProcuredInTxn(
+        txn,
+        itemId: itemId,
+        orderId: orderId,
+        customQuantityGiven: customQuantityGiven,
       );
     });
     unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
-      debugPrint('Error syncing order in addItemsToOrder: $e');
+      debugPrint('Error syncing order in markItemAsProcured: $e');
     }));
   }
 
-  /// Marks ALL currently pending items across all open orders as procured in the procurement list.
+  /// Marks ALL currently pending items across all open orders as procured in a single transaction.
   Future<void> markAllItemsAsProcured() async {
     final items = await getProcurementItems();
-    for (final item in items) {
-      await markItemAsProcured(itemId: item.itemId, orderId: item.orderId);
+    if (items.isEmpty) return;
+    final db = await _databaseHelper.database;
+    final affectedOrderIds = <int>{};
+    await db.transaction((txn) async {
+      for (final item in items) {
+        await _markItemProcuredInTxn(
+          txn,
+          itemId: item.itemId,
+          orderId: item.orderId,
+        );
+        affectedOrderIds.add(item.orderId);
+      }
+    });
+    for (final oid in affectedOrderIds) {
+      unawaited(ShopSyncService.instance.syncOrder(oid).catchError((e) {
+        debugPrint('Error syncing order $oid in markAllItemsAsProcured: $e');
+      }));
     }
   }
 

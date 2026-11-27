@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/l10n/app_localizations.dart';
+import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/services/excel_report_service.dart';
 import 'package:shop/services/invoice_pdf_service.dart';
@@ -116,6 +117,7 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
         DeliveryRepository().getDeliverySummary(
           start: _effectiveStartDate,
           end: _effectiveEndDate,
+          locationFilter: _selectedLocation,
         ),
       ]);
       if (!mounted) return;
@@ -199,31 +201,55 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
     }
   }
 
+  String? _firstCleanPhone(String rawPhone) {
+    final numbers = Customer.extractNumbers(rawPhone);
+    final candidate = numbers.isNotEmpty ? numbers.first : rawPhone;
+    final clean = candidate.replaceAll(RegExp(r'[^0-9]'), '');
+    if (clean.length < 6) return null;
+    return clean;
+  }
+
+  Future<void> _launchWhatsAppMessage(String rawPhone, String text) async {
+    final clean = _firstCleanPhone(rawPhone);
+    if (clean == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid phone number for WhatsApp.')),
+        );
+      }
+      return;
+    }
+    final target = clean.length == 10 ? '91$clean' : clean;
+    final encoded = Uri.encodeComponent(text);
+    final url = Uri.parse('whatsapp://send?phone=$target&text=$encoded');
+    final webUrl =
+        Uri.parse('https://api.whatsapp.com/send?phone=$target&text=$encoded');
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url);
+      } else {
+        await launchUrl(webUrl, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open WhatsApp: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _sendPaymentReminderWhatsApp({
     required String customerName,
     required String phone,
     required double dueAmount,
   }) async {
-    final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (clean.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid phone number for WhatsApp.')),
-      );
-      return;
-    }
-    final target = clean.length == 10 ? '91$clean' : clean;
     final shopName = ShopCustomizationService.instance.currentShopName;
     final upiId = ShopCustomizationService.instance.upiId;
     final upiLine = upiId.isNotEmpty ? '\nUPI ID: $upiId' : '';
-    final text = 'Dear $customerName,\n\nGreetings from $shopName! 🙏\nYour current outstanding balance is ₹ ${dueAmount.toStringAsFixed(2)}.$upiLine\n\nPlease settle at your earliest convenience. Thank you!';
-    final encoded = Uri.encodeComponent(text);
-    final url = Uri.parse('whatsapp://send?phone=$target&text=$encoded');
-    final webUrl = Uri.parse('https://api.whatsapp.com/send?phone=$target&text=$encoded');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url);
-    } else {
-      await launchUrl(webUrl, mode: LaunchMode.externalApplication);
-    }
+    final text =
+        'Dear $customerName,\n\nGreetings from $shopName! 🙏\nYour current outstanding balance is ₹ ${dueAmount.toStringAsFixed(2)}.$upiLine\n\nPlease settle at your earliest convenience. Thank you!';
+    await _launchWhatsAppMessage(phone, text);
   }
 
   Future<void> _sendWinBackWhatsApp({
@@ -231,32 +257,25 @@ class _LifetimeReportScreenState extends State<LifetimeReportScreen>
     required String phone,
     required int daysInactive,
   }) async {
-    final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (clean.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid phone number for WhatsApp.')),
-      );
-      return;
-    }
-    final target = clean.length == 10 ? '91$clean' : clean;
     final shopName = ShopCustomizationService.instance.currentShopName;
-    final text = 'Hello $customerName,\n\nWe missed seeing you at $shopName over the past few weeks! 😊\nWe have new stock and best wholesale prices available. Please let us know if you need any goods today.\n\nThank you!';
-    final encoded = Uri.encodeComponent(text);
-    final url = Uri.parse('whatsapp://send?phone=$target&text=$encoded');
-    final webUrl = Uri.parse('https://api.whatsapp.com/send?phone=$target&text=$encoded');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url);
-    } else {
-      await launchUrl(webUrl, mode: LaunchMode.externalApplication);
-    }
+    final text =
+        'Hello $customerName,\n\nWe missed seeing you at $shopName over the past few weeks! 😊\nWe have new stock and best wholesale prices available. Please let us know if you need any goods today.\n\nThank you!';
+    await _launchWhatsAppMessage(phone, text);
   }
 
   Future<void> _callPhone(String phone) async {
-    final clean = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (clean.isNotEmpty) {
+    final clean = _firstCleanPhone(phone);
+    if (clean == null) return;
+    try {
       final url = Uri.parse('tel:$clean');
       if (await canLaunchUrl(url)) {
         await launchUrl(url);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not initiate call: $e')),
+        );
       }
     }
   }

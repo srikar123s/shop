@@ -7,6 +7,7 @@ import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/services/draft_order_service.dart';
 import 'package:shop/services/share_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
+import 'package:shop/services/shop_sync_service.dart';
 import 'package:shop/services/top_notification_service.dart';
 import 'package:shop/widgets/large_action_button.dart';
 
@@ -277,10 +278,10 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                 FilledButton(
                   onPressed: () {
                     final parsed = double.tryParse(rateCtrl.text.trim());
-                    if (parsed == null || parsed < 0) {
+                    if (parsed == null || parsed < 0 || parsed > 100) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text('Please enter a valid percentage')),
+                            content: Text('Please enter a valid GST percentage (0–100%)')),
                       );
                       return;
                     }
@@ -576,27 +577,41 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     );
 
     int newOrderId = 0;
-    if (widget.existingOrderId == null) {
-      newOrderId = await widget.orderRepository.createOrder(
-        updatedDraft,
-        estimateTotal: estimate,
-        billBreakdown: breakdown,
-      );
-      await DraftOrderService().clearDraft();
-    } else {
-      newOrderId = widget.existingOrderId!;
-      await widget.orderRepository.addItemsToOrder(
-        orderId: widget.existingOrderId!,
-        items: widget.draftOrder.items,
-        estimateTotalAddition: estimate,
-        billBreakdown: breakdown,
-      );
-    }
-    if (!mounted) {
+    OrderDetails? createdOrderDetails;
+    try {
+      if (widget.existingOrderId == null) {
+        newOrderId = await widget.orderRepository.createOrder(
+          updatedDraft,
+          estimateTotal: estimate,
+          billBreakdown: breakdown,
+        );
+        await DraftOrderService().clearDraft();
+      } else {
+        newOrderId = widget.existingOrderId!;
+        await widget.orderRepository.addItemsToOrder(
+          orderId: widget.existingOrderId!,
+          items: widget.draftOrder.items,
+          estimateTotalAddition: estimate,
+          billBreakdown: breakdown,
+        );
+      }
+      createdOrderDetails =
+          await widget.orderRepository.getOrderDetails(newOrderId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save order: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
-    setState(() => _saving = false);
-    final createdOrderDetails = await widget.orderRepository.getOrderDetails(newOrderId);
     if (!mounted) {
       return;
     }
@@ -620,16 +635,21 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
     Navigator.popUntil(context, (route) => route.isFirst);
 
     // Trigger top notification after home screen finishes rendering
+    final savedDetails = createdOrderDetails;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       TopNotificationService.showTopNotification(
         message: 'Order $orderIdFormatted created successfully!',
         actionLabel: 'SHARE',
         onAction: () {
-          ShareService.shareDraftEstimate(
-            updatedDraft,
-            totalOverride: estimate,
-            billBreakdown: breakdown,
-          );
+          if (savedDetails != null) {
+            ShareService.shareOrderDetails(savedDetails);
+          } else {
+            ShareService.shareDraftEstimate(
+              updatedDraft,
+              totalOverride: estimate,
+              billBreakdown: breakdown,
+            );
+          }
         },
       );
     });
@@ -889,6 +909,7 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 SizedBox(
                                   width: 120,
                                   child: TextField(
+                                    enabled: ShopSyncService.instance.canChangePrice,
                                     controller: priceCtrl,
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -1205,6 +1226,8 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                     onSelectionChanged: (set) {
                                       setState(() {
                                         _discountType = set.first;
+                                        _discountValue = 0.0;
+                                        _discountController.clear();
                                         _recalculateEstimate();
                                       });
                                     },

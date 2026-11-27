@@ -2037,8 +2037,10 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                             Switch(
                                 value: product.isActive,
                                 onChanged: (value) async {
+                                  final pid = product.id;
+                                  if (pid == null) return;
                                   await widget.productRepository
-                                      .setProductActive(product.id!, value);
+                                      .setProductActive(pid, value);
                                   await _load();
                                 }),
                             IconButton(

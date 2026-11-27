@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -14,21 +15,33 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
+
+  @visibleForTesting
+  static String? testDbPathOverride;
 
   Database? _database;
   Future<Database>? _initDbFuture;
 
   Future<Database> get database async {
-    if (_database != null) {
+    if (_database != null && _database!.isOpen) {
       return _database!;
     }
     _initDbFuture ??= _initDb();
-    _database = await _initDbFuture!;
-    return _database!;
+    try {
+      _database = await _initDbFuture!;
+      return _database!;
+    } catch (_) {
+      _initDbFuture = null;
+      _database = null;
+      rethrow;
+    }
   }
 
   Future<String> getDatabaseFullPath() async {
+    if (testDbPathOverride != null && testDbPathOverride!.isNotEmpty) {
+      return testDbPathOverride!;
+    }
     final dir = await getDatabasesPath();
     return p.join(dir, dbName);
   }
@@ -388,6 +401,33 @@ class DatabaseHelper {
     if (oldVersion < 9) {
       await _createStorageManagementTables(db);
     }
+    if (oldVersion < 10) {
+      try {
+        await db.execute(
+          'ALTER TABLE customers ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1',
+        );
+      } catch (_) {}
+      await _createPerformanceIndexes(db);
+    }
+  }
+
+  Future<void> _createPerformanceIndexes(Database db) async {
+    try {
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customer_payments_created_at ON customer_payments(created_at)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_order_items_proc_status ON order_items(procurement_status)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id)',
+      );
+    } catch (e) {
+      debugPrint('Error creating performance indexes: $e');
+    }
   }
 
   Future<void> _createStorageManagementTables(Database db) async {
@@ -484,6 +524,7 @@ class DatabaseHelper {
         phone TEXT,
         address TEXT,
         credit_limit REAL NOT NULL DEFAULT 0.0,
+        is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL
       )
     ''');
@@ -601,6 +642,7 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX idx_customer_payments_customer_id ON customer_payments(customer_id)',
     );
+    await _createPerformanceIndexes(db);
   }
 
   Future<void> _seedInitialProducts(Database db) async {
@@ -988,12 +1030,23 @@ class DatabaseHelper {
           final newPaid = alreadyPaid + payingForThis;
           final newStatus = newPaid >= total ? 'paid' : 'partial';
 
+          final existingMode =
+              (row['payment_mode'] as String?)?.trim().toLowerCase() ?? '';
+          final newModeLower = paymentMode.trim().toLowerCase();
+          final resolvedMode = (alreadyPaid > 0.001 &&
+                  existingMode.isNotEmpty &&
+                  existingMode != 'unpaid' &&
+                  existingMode != 'khata' &&
+                  existingMode != newModeLower)
+              ? 'split'
+              : paymentMode;
+
           await txn.update(
             'orders',
             {
               'paid_amount': newPaid,
               'payment_status': newStatus,
-              'payment_mode': paymentMode,
+              'payment_mode': resolvedMode,
             },
             where: 'id = ?',
             whereArgs: [orderId],
@@ -1053,10 +1106,16 @@ class DatabaseHelper {
         FROM customer_payments p1
         GROUP BY p1.customer_id
       ) p ON c.id = p.customer_id
-      WHERE ABS(COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01 
-         OR COALESCE(b.total_billed, 0.0) > 0 
-         OR COALESCE(p.total_paid, 0.0) > 0
-         OR c.credit_limit > 0
+      WHERE (
+          ABS(COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01 
+          OR COALESCE(b.total_billed, 0.0) > 0 
+          OR COALESCE(p.total_paid, 0.0) > 0
+          OR c.credit_limit > 0
+        )
+        AND (
+          c.is_active = 1
+          OR ABS(COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01
+        )
       ORDER BY (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) DESC, c.name ASC
     ''';
     final rows = await db.rawQuery(query);
@@ -1116,6 +1175,13 @@ class DatabaseHelper {
 
   /// Updates a customer's maximum credit limit (Khata limit)
   Future<void> updateCustomerCreditLimit(int customerId, double creditLimit) async {
+    if (creditLimit < 0) {
+      throw ArgumentError.value(
+        creditLimit,
+        'creditLimit',
+        'Credit limit cannot be negative',
+      );
+    }
     final db = await database;
     await db.update(
       'customers',
@@ -1451,6 +1517,117 @@ class DatabaseHelper {
     };
   }
 
+  Future<Map<int, double>> _getCustomerBalancesBatch(
+    DatabaseExecutor db,
+    Iterable<int> customerIds,
+  ) async {
+    final uniqueIds = customerIds.toSet().toList();
+    if (uniqueIds.isEmpty) return const <int, double>{};
+    final result = <int, double>{for (final id in uniqueIds) id: 0.0};
+
+    for (var i = 0; i < uniqueIds.length; i += 400) {
+      final chunk = uniqueIds.sublist(
+        i,
+        i + 400 > uniqueIds.length ? uniqueIds.length : i + 400,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(',');
+
+      final billedRows = await db.rawQuery('''
+        SELECT customer_id, COALESCE(SUM(estimate_total), 0.0) AS total_billed
+        FROM orders
+        WHERE customer_id IN ($placeholders)
+          AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
+        GROUP BY customer_id
+      ''', chunk);
+      for (final r in billedRows) {
+        final cid = (r['customer_id'] as num?)?.toInt();
+        if (cid != null) {
+          result[cid] =
+              (result[cid] ?? 0.0) + ((r['total_billed'] as num?)?.toDouble() ?? 0.0);
+        }
+      }
+
+      final paidRows = await db.rawQuery('''
+        SELECT customer_id, COALESCE(SUM(amount), 0.0) AS total_paid
+        FROM customer_payments
+        WHERE customer_id IN ($placeholders)
+        GROUP BY customer_id
+      ''', chunk);
+      for (final r in paidRows) {
+        final cid = (r['customer_id'] as num?)?.toInt();
+        if (cid != null) {
+          result[cid] =
+              (result[cid] ?? 0.0) - ((r['total_paid'] as num?)?.toDouble() ?? 0.0);
+        }
+      }
+    }
+    return result;
+  }
+
+  /// Pure FIFO Days-Sales-Outstanding calculator from chronological order & payment rows.
+  @visibleForTesting
+  static double? computeAverageDsoFromRows(
+    List<Map<String, Object?>> orders,
+    List<Map<String, Object?>> payments,
+  ) {
+    final ordersByCust = <int, List<({DateTime createdAt, double total})>>{};
+    for (final o in orders) {
+      final cid = (o['customer_id'] as num?)?.toInt();
+      final total = (o['estimate_total'] as num?)?.toDouble() ?? 0.0;
+      final dt = DateTime.tryParse(o['created_at'] as String? ?? '');
+      if (cid == null || total <= 0.01 || dt == null) continue;
+      ordersByCust.putIfAbsent(cid, () => []).add((createdAt: dt, total: total));
+    }
+
+    final paymentsByCust = <int, List<({DateTime createdAt, double amount})>>{};
+    for (final p in payments) {
+      final cid = (p['customer_id'] as num?)?.toInt();
+      final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
+      final dt = DateTime.tryParse(p['created_at'] as String? ?? '');
+      if (cid == null || amt <= 0.01 || dt == null) continue;
+      paymentsByCust.putIfAbsent(cid, () => []).add((createdAt: dt, amount: amt));
+    }
+
+    double weightedDayRupees = 0.0;
+    double totalAllocated = 0.0;
+
+    for (final entry in ordersByCust.entries) {
+      final custOrders = entry.value..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final custPays = paymentsByCust[entry.key];
+      if (custPays == null || custPays.isEmpty) continue;
+      custPays.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      var oIdx = 0;
+      var pIdx = 0;
+      var oRem = custOrders[0].total;
+      var pRem = custPays[0].amount;
+
+      while (oIdx < custOrders.length && pIdx < custPays.length) {
+        final alloc = math.min(oRem, pRem);
+        if (alloc > 0.001) {
+          final hours =
+              custPays[pIdx].createdAt.difference(custOrders[oIdx].createdAt).inHours;
+          final days = hours <= 0 ? 0.0 : (hours / 24.0).clamp(0.0, 365.0);
+          weightedDayRupees += days * alloc;
+          totalAllocated += alloc;
+        }
+        oRem -= alloc;
+        pRem -= alloc;
+        if (oRem <= 0.001) {
+          oIdx++;
+          if (oIdx < custOrders.length) oRem = custOrders[oIdx].total;
+        }
+        if (pRem <= 0.001) {
+          pIdx++;
+          if (pIdx < custPays.length) pRem = custPays[pIdx].amount;
+        }
+      }
+    }
+
+    if (totalAllocated <= 0.01) return null;
+    return weightedDayRupees / totalAllocated;
+  }
+
   Future<Map<String, dynamic>> getEveningClosingReport(DateTime date) async {
     try {
       final db = await database;
@@ -1466,16 +1643,20 @@ class DatabaseHelper {
       );
 
       double totalSales = 0;
-      double cashSales = 0;
-      double upiSales = 0;
       double creditSales = 0;
       int completedCount = 0;
       int pendingCount = 0;
+      final todayOrderIds = <int>{};
+      final todayOrderNumbers = <int>{};
 
       for (final row in orderRows) {
+        final oid = (row['id'] as num?)?.toInt();
+        final oNum = (row['order_number'] as num?)?.toInt();
+        if (oid != null) todayOrderIds.add(oid);
+        if (oNum != null) todayOrderNumbers.add(oNum);
+
         final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
         final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
-        final mode = (row['payment_mode'] as String?)?.toLowerCase() ?? 'unpaid';
         final status = (row['status'] as String?)?.trim().toUpperCase() ?? '';
 
         totalSales += total;
@@ -1485,50 +1666,78 @@ class DatabaseHelper {
           pendingCount++;
         }
 
-        if (mode == 'cash') {
-          cashSales += paid;
-        } else if (mode == 'upi') {
-          upiSales += paid;
-        }
         final due = total - paid;
         if (due > 0) {
           creditSales += due;
         }
       }
 
-      // Direct Khata payments received today (avoiding double-counting today's order payments)
+      // Derive all collections strictly from customer_payments to preserve per-payment modes
+      // (cash / upi / cheque / bank_transfer) and eliminate same-day Khata double-counting.
       final paymentRows = await db.query(
         'customer_payments',
         where: 'created_at >= ? AND created_at < ?',
         whereArgs: [startOfDay, nextDay],
       );
 
-      final todayOrderIds = orderRows.map((r) => r['id'] as int).toSet();
-      final todayOrderNumbers = orderRows
-          .map((r) => (r['order_number'] as num?)?.toInt())
-          .whereType<int>()
-          .toSet();
+      double cashSales = 0;
+      double upiSales = 0;
+      double otherSales = 0;
       double directPayments = 0;
+      final matchedOrderRefsToday = <int>{};
+      final paidCustomerIdsToday = <int>{};
+
       for (final p in paymentRows) {
+        final cid = (p['customer_id'] as num?)?.toInt();
+        if (cid != null) paidCustomerIdsToday.add(cid);
         final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
-        final mode = (p['payment_mode'] as String?)?.toLowerCase() ?? '';
+        final mode = (p['payment_mode'] as String?)?.trim().toLowerCase() ?? '';
         final notes = (p['notes'] as String?) ?? '';
 
-        bool alreadyCountedInTodayOrders = false;
+        if (mode == 'cash') {
+          cashSales += amt;
+        } else if (mode == 'upi') {
+          upiSales += amt;
+        } else {
+          otherSales += amt;
+        }
+
+        bool isTodayOrderPayment = false;
         final match = RegExp(r'Order #ORD-(\d+)').firstMatch(notes);
         if (match != null) {
-          final matchedOrderId = int.tryParse(match.group(1) ?? '');
-          if (matchedOrderId != null &&
-              (todayOrderIds.contains(matchedOrderId) ||
-                  todayOrderNumbers.contains(matchedOrderId))) {
-            alreadyCountedInTodayOrders = true;
+          final matchedOrderNum = int.tryParse(match.group(1) ?? '');
+          if (matchedOrderNum != null &&
+              (todayOrderIds.contains(matchedOrderNum) ||
+                  todayOrderNumbers.contains(matchedOrderNum))) {
+            isTodayOrderPayment = true;
+            matchedOrderRefsToday.add(matchedOrderNum);
           }
         }
 
-        if (!alreadyCountedInTodayOrders) {
+        if (!isTodayOrderPayment) {
           directPayments += amt;
-          if (mode == 'cash') cashSales += amt;
-          if (mode == 'upi') upiSales += amt;
+        }
+      }
+
+      // Fallback only for legacy rows that set orders.paid_amount directly without any customer_payments entry
+      for (final row in orderRows) {
+        final oid = (row['id'] as num?)?.toInt();
+        final oNum = (row['order_number'] as num?)?.toInt();
+        final cid = (row['customer_id'] as num?)?.toInt();
+        final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
+        if (paid <= 0.001) continue;
+        final hasMatchedPayment = (oid != null && matchedOrderRefsToday.contains(oid)) ||
+            (oNum != null && matchedOrderRefsToday.contains(oNum)) ||
+            (cid != null && paidCustomerIdsToday.contains(cid));
+        if (!hasMatchedPayment) {
+          final mode = (row['payment_mode'] as String?)?.trim().toLowerCase() ?? 'unpaid';
+          if (mode == 'cash') {
+            cashSales += paid;
+          } else if (mode == 'upi') {
+            upiSales += paid;
+          } else if (mode != 'unpaid' && mode != 'khata' && mode.isNotEmpty) {
+            otherSales += paid;
+          }
         }
       }
 
@@ -1556,6 +1765,8 @@ class DatabaseHelper {
         debugPrint('Top product calculation error in evening report: $e');
       }
 
+      final totalCollectedToday = cashSales + upiSales + otherSales;
+
       return {
         'date': date,
         'totalOrders': orderRows.length,
@@ -1564,9 +1775,10 @@ class DatabaseHelper {
         'totalSales': totalSales,
         'cashSales': cashSales,
         'upiSales': upiSales,
+        'otherSales': otherSales,
         'creditSales': creditSales,
         'directPayments': directPayments,
-        'totalCollectedToday': (cashSales + upiSales),
+        'totalCollectedToday': totalCollectedToday,
         'topItemName': topItem?.itemName ?? 'None',
         'topItemQty': topItem?.totalQuantity ?? 0,
         'topItemUnit': topItem?.unit ?? '',
@@ -1581,6 +1793,7 @@ class DatabaseHelper {
         'totalSales': 0.0,
         'cashSales': 0.0,
         'upiSales': 0.0,
+        'otherSales': 0.0,
         'creditSales': 0.0,
         'directPayments': 0.0,
         'totalCollectedToday': 0.0,
@@ -1614,12 +1827,15 @@ class DatabaseHelper {
       ORDER BY cp.created_at DESC
     ''', [startOfDay, nextDay]);
 
+    final balancesByCustomer = await _getCustomerBalancesBatch(
+      db,
+      rows.map((r) => r['customer_id'] as int),
+    );
     final list = <Map<String, dynamic>>[];
     for (final row in rows) {
       final map = Map<String, dynamic>.from(row);
       final cid = row['customer_id'] as int;
-      final remainingDue = await getCustomerKhataBalance(cid);
-      map['remaining_due'] = remainingDue;
+      map['remaining_due'] = balancesByCustomer[cid] ?? 0.0;
       list.add(map);
     }
     return list;
@@ -1705,6 +1921,12 @@ class DatabaseHelper {
       payWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
       payWhereArgs.add(cleanLoc);
     }
+    if (cleanStaff != null) {
+      payWhereParts.add(
+        'cp.customer_id IN (SELECT DISTINCT o.customer_id FROM orders o WHERE TRIM(o.taken_by) = ? COLLATE NOCASE)',
+      );
+      payWhereArgs.add(cleanStaff);
+    }
 
     final payWhereClause = payWhereParts.isNotEmpty
         ? 'WHERE ${payWhereParts.join(' AND ')}'
@@ -1721,13 +1943,31 @@ class DatabaseHelper {
         ? (payAggRows.first['total_collected'] as num?)?.toDouble() ?? 0.0
         : 0.0;
 
-    // 3. Outstanding Market Due & Advance Pool (Filtered by location if specified)
+    // 3. Outstanding Market Due & Advance Pool (Filtered by location & staff if specified)
     final rawKhataList = await getCustomerKhataList();
+    Set<int>? staffCustomerIds;
+    if (cleanStaff != null) {
+      final staffCustRows = await db.rawQuery(
+        'SELECT DISTINCT customer_id FROM orders WHERE TRIM(taken_by) = ? COLLATE NOCASE',
+        [cleanStaff],
+      );
+      staffCustomerIds = staffCustRows
+          .map((r) => (r['customer_id'] as num?)?.toInt())
+          .whereType<int>()
+          .toSet();
+    }
     final targetLocLower = cleanLoc?.toLowerCase();
-    final khataList = cleanLoc != null
+    final khataList = (cleanLoc != null || staffCustomerIds != null)
         ? rawKhataList.where((item) {
-            final loc = (item['customer_location'] as String?)?.trim().toLowerCase();
-            return loc == targetLocLower;
+            if (targetLocLower != null) {
+              final loc = (item['customer_location'] as String?)?.trim().toLowerCase();
+              if (loc != targetLocLower) return false;
+            }
+            if (staffCustomerIds != null) {
+              final cid = (item['customer_id'] as num?)?.toInt();
+              if (cid == null || !staffCustomerIds.contains(cid)) return false;
+            }
+            return true;
           }).toList()
         : rawKhataList;
 
@@ -1847,16 +2087,21 @@ class DatabaseHelper {
     final oneTimeCustomerCount = uniqueCustomerCount - repeatCustomerCount;
     final repeatRatePercentage = uniqueCustomerCount > 0 ? (repeatCustomerCount / uniqueCustomerCount) * 100 : 0.0;
 
-    // 7. Dormant / Lost Customers (Inactive 30+ days, sorted by past spend)
+    // 7. Dormant / Lost Customers (Inactive 30+ days, sorted by past spend, using local device clock)
     final dormantWhereParts = <String>[];
     final dormantWhereArgs = <Object?>[];
     if (cleanLoc != null) {
       dormantWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
       dormantWhereArgs.add(cleanLoc);
     }
+    if (cleanStaff != null) {
+      dormantWhereParts.add('TRIM(o.taken_by) = ? COLLATE NOCASE');
+      dormantWhereArgs.add(cleanStaff);
+    }
     final dormantWhereClause = dormantWhereParts.isNotEmpty
         ? 'WHERE ${dormantWhereParts.join(' AND ')}'
         : '';
+    final nowLocalIso = DateTime.now().toIso8601String();
     final dormantQuery = '''
       SELECT 
         c.id as customer_id,
@@ -1866,39 +2111,50 @@ class DatabaseHelper {
         MAX(o.created_at) as last_order_date,
         SUM(o.estimate_total) as past_total_bought,
         COUNT(o.id) as past_order_count,
-        CAST((julianday('now') - julianday(MAX(o.created_at))) as INTEGER) as days_since_last_order
+        CAST((julianday(?) - julianday(MAX(o.created_at))) as INTEGER) as days_since_last_order
       FROM orders o
       JOIN customers c ON o.customer_id = c.id
       $dormantWhereClause
       GROUP BY c.id
-      HAVING (julianday('now') - julianday(MAX(o.created_at))) >= 30
+      HAVING (julianday(?) - julianday(MAX(o.created_at))) >= 30
       ORDER BY past_total_bought DESC
       LIMIT 20
     ''';
-    final dormantCustomers = await db.rawQuery(dormantQuery, dormantWhereArgs);
+    final dormantCustomers = await db.rawQuery(
+      dormantQuery,
+      [nowLocalIso, ...dormantWhereArgs, nowLocalIso],
+    );
 
-    // 8. Average Udhaar Clearance Cycle (DSO)
-    final dsoWhereParts = <String>[
-      'julianday(cp.created_at) >= julianday(o.created_at)',
-      '(julianday(cp.created_at) - julianday(o.created_at)) <= 365'
-    ];
-    final dsoWhereArgs = <Object?>[];
-    if (cleanLoc != null) {
-      dsoWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
-      dsoWhereArgs.add(cleanLoc);
-    }
-    final dsoQuery = '''
-      SELECT AVG(julianday(cp.created_at) - julianday(o.created_at)) as avg_dso
-      FROM customer_payments cp
-      JOIN orders o ON cp.customer_id = o.customer_id
+    // 8. Average Udhaar Clearance Cycle (FIFO DSO per customer, avoiding M×N join explosion)
+    final dsoOrderRows = await db.rawQuery('''
+      SELECT o.id, o.customer_id, o.created_at, o.estimate_total
+      FROM orders o
       LEFT JOIN customers c ON o.customer_id = c.id
-      WHERE ${dsoWhereParts.join(' AND ')}
-    ''';
-    final dsoRows = await db.rawQuery(dsoQuery, dsoWhereArgs);
-    final rawDso = (dsoRows.isNotEmpty && dsoRows.first['avg_dso'] != null)
-        ? (dsoRows.first['avg_dso'] as num).toDouble()
-        : null;
-    final avgDsoDays = (rawDso != null && rawDso > 0)
+      $orderWhereClause
+      ORDER BY o.customer_id ASC, o.created_at ASC, o.id ASC
+    ''', orderWhereArgs);
+    final dsoCustomerIds = dsoOrderRows
+        .map((r) => (r['customer_id'] as num?)?.toInt())
+        .whereType<int>()
+        .toSet()
+        .toList();
+    final dsoPayRows = <Map<String, Object?>>[];
+    for (var i = 0; i < dsoCustomerIds.length; i += 400) {
+      final chunk = dsoCustomerIds.sublist(
+        i,
+        i + 400 > dsoCustomerIds.length ? dsoCustomerIds.length : i + 400,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(',');
+      final rows = await db.rawQuery('''
+        SELECT cp.customer_id, cp.created_at, cp.amount
+        FROM customer_payments cp
+        WHERE cp.customer_id IN ($placeholders)
+        ORDER BY cp.created_at ASC, cp.id ASC
+      ''', chunk);
+      dsoPayRows.addAll(rows);
+    }
+    final rawDso = computeAverageDsoFromRows(dsoOrderRows, dsoPayRows);
+    final avgDsoDays = rawDso != null
         ? rawDso.round()
         : (totalMarketDue > 0 && totalSales > 0 ? ((totalMarketDue / totalSales) * 30).round() : 14);
 
@@ -1919,20 +2175,28 @@ class DatabaseHelper {
     ''';
     final topProdRows = await db.rawQuery(topProductsQuery, orderWhereArgs);
 
-    // 10. Least Selling Products / Slow moving
+    // 10. Least Selling Products / Slow moving (filtered consistently by date, location & staff)
     final leastProductsQuery = '''
       SELECT 
         p.name as item_name,
         p.category,
-        COALESCE(SUM(oi.quantity_ordered), 0.0) as total_qty
+        COALESCE(s.total_qty, 0.0) as total_qty
       FROM products p
-      LEFT JOIN order_items oi ON oi.product_id = p.id
+      LEFT JOIN (
+        SELECT 
+          oi.product_id,
+          SUM(oi.quantity_ordered) as total_qty
+        FROM order_items oi
+        INNER JOIN orders o ON oi.order_id = o.id
+        LEFT JOIN customers c ON o.customer_id = c.id
+        $orderWhereClause
+        GROUP BY oi.product_id
+      ) s ON s.product_id = p.id
       WHERE p.is_active = 1
-      GROUP BY p.id
       ORDER BY total_qty ASC, p.name ASC
       LIMIT 10
     ''';
-    final leastProdRows = await db.rawQuery(leastProductsQuery);
+    final leastProdRows = await db.rawQuery(leastProductsQuery, orderWhereArgs);
 
     // 11. Dead Stock Alert (0 sales in catalog for current filter)
     final deadStockWhereSubquery = orderWhereClause.isEmpty
@@ -2149,11 +2413,15 @@ class DatabaseHelper {
       LIMIT 100
     ''';
     final collectionRows = await db.rawQuery(collectionsQuery, payWhereArgs);
+    final batchBalances = await _getCustomerBalancesBatch(
+      db,
+      collectionRows.map((r) => r['customer_id'] as int),
+    );
     final collectionsWithDue = <Map<String, dynamic>>[];
     for (final row in collectionRows) {
       final map = Map<String, dynamic>.from(row);
       final cid = row['customer_id'] as int;
-      map['remaining_due'] = await getCustomerKhataBalance(cid);
+      map['remaining_due'] = batchBalances[cid] ?? 0.0;
       collectionsWithDue.add(map);
     }
 

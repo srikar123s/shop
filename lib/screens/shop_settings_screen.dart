@@ -205,7 +205,19 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
     return DateFormat('hh:mm a').format(dt);
   }
 
+  bool _requireOwnerForProfileEdit(String settingName) {
+    if (ShopSyncService.instance.isOwner) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Permission Denied: Only Shop Owner can edit $settingName.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return false;
+  }
+
   Future<void> _editShopNameDialog() async {
+    if (!_requireOwnerForProfileEdit('Shop Name')) return;
     final controller = TextEditingController(text: _customService.shopName);
     try {
       final saved = await showDialog<bool>(
@@ -511,14 +523,17 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                             : Colors.grey),
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => _editFieldDialog(
-                    title: 'Shop Phone Number',
-                    label: 'Phone / WhatsApp',
-                    hint: 'e.g. 9392449356',
-                    initialValue: _customService.shopPhone,
-                    keyboardType: TextInputType.phone,
-                    onSave: _customService.setShopPhone,
-                  ),
+                  onTap: () {
+                    if (!_requireOwnerForProfileEdit('Shop Phone Number')) return;
+                    _editFieldDialog(
+                      title: 'Shop Phone Number',
+                      label: 'Phone / WhatsApp',
+                      hint: 'e.g. 9392449356',
+                      initialValue: _customService.shopPhone,
+                      keyboardType: TextInputType.phone,
+                      onSave: _customService.setShopPhone,
+                    );
+                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -538,13 +553,16 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                             : Colors.grey),
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => _editFieldDialog(
-                    title: 'Shop Address',
-                    label: 'Address Line',
-                    hint: 'e.g. Main Bazaar, Beside Old Bus Stand',
-                    initialValue: _customService.shopAddress,
-                    onSave: _customService.setShopAddress,
-                  ),
+                  onTap: () {
+                    if (!_requireOwnerForProfileEdit('Shop Address')) return;
+                    _editFieldDialog(
+                      title: 'Shop Address',
+                      label: 'Address Line',
+                      hint: 'e.g. Main Bazaar, Beside Old Bus Stand',
+                      initialValue: _customService.shopAddress,
+                      onSave: _customService.setShopAddress,
+                    );
+                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -565,13 +583,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
                   onTap: () {
-                    if (!ShopSyncService.instance.isOwner) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Permission Denied: Only Shop Owner can edit UPI Payment settings.'),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
+                    if (!_requireOwnerForProfileEdit('UPI Payment settings')) {
                       return;
                     }
                     _editFieldDialog(
@@ -601,13 +613,16 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                             : Colors.grey),
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => _editFieldDialog(
-                    title: 'GSTIN Number',
-                    label: '15-digit GSTIN',
-                    hint: 'e.g. 36AAACG1234F1Z5',
-                    initialValue: _customService.gstin,
-                    onSave: _customService.setGstin,
-                  ),
+                  onTap: () {
+                    if (!_requireOwnerForProfileEdit('GSTIN Number')) return;
+                    _editFieldDialog(
+                      title: 'GSTIN Number',
+                      label: '15-digit GSTIN',
+                      hint: 'e.g. 36AAACG1234F1Z5',
+                      initialValue: _customService.gstin,
+                      onSave: _customService.setGstin,
+                    );
+                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -623,14 +638,17 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                     style: const TextStyle(fontSize: 12, color: Colors.black87),
                   ),
                   trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: () => _editFieldDialog(
-                    title: 'Digital Stamp Text',
-                    label: 'Stamp / Signatory Line',
-                    hint:
-                        'e.g. Authorized Signatory / For ${_customService.shopName}',
-                    initialValue: _customService.digitalStamp,
-                    onSave: _customService.setDigitalStamp,
-                  ),
+                  onTap: () {
+                    if (!_requireOwnerForProfileEdit('Digital Stamp')) return;
+                    _editFieldDialog(
+                      title: 'Digital Stamp Text',
+                      label: 'Stamp / Signatory Line',
+                      hint:
+                          'e.g. Authorized Signatory / For ${_customService.shopName}',
+                      initialValue: _customService.digitalStamp,
+                      onSave: _customService.setDigitalStamp,
+                    );
+                  },
                 ),
               ],
             ),

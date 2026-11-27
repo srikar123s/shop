@@ -85,11 +85,21 @@ class _StorageManagementScreenState extends State<StorageManagementScreen> {
       return;
     }
 
+    if (!ShopSyncService.instance.isOwner) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only the Shop Owner can trigger manual cloud storage checks.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _busyAction = true);
     try {
       final result = await _monitor.requestBackendStorageCheck(
         shopCode: shop.shopCode,
-        deviceId: ShopSyncService.instance.currentUserOrDeviceName,
+        deviceId: ShopSyncService.instance.deviceId,
       );
       await _refreshAll();
       if (!mounted) return;
@@ -312,7 +322,10 @@ class _StorageManagementScreenState extends State<StorageManagementScreen> {
                 final rec = records[idx];
                 final col = rec['collection'] ?? 'orders';
                 final docId = rec['docId'] ?? '';
-                final data = Map<String, dynamic>.from(rec['data'] as Map);
+                final rawData = rec['data'];
+                final data = rawData is Map
+                    ? Map<String, dynamic>.from(rawData)
+                    : <String, dynamic>{};
                 final title = data['customer_name_snapshot'] ??
                     data['customer_name'] ??
                     data['pn'] ??

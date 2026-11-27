@@ -404,18 +404,30 @@ class _CustomerScreenState extends State<CustomerScreen> {
     );
 
     if (confirm == true && customer.id != null && mounted) {
-      await widget.customerRepository.deleteCustomer(customer.id!);
-      if (_selected?.id == customer.id) {
-        _selected = null;
-      }
-      await _loadCustomers();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${customer.name} deleted.'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+      try {
+        await widget.customerRepository.deleteCustomer(customer.id!);
+        if (_selected?.id == customer.id) {
+          _selected = null;
+        }
+        await _loadCustomers();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${customer.name} deleted.'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.toString().replaceFirst('Exception: ', '')),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       }
     }
   }

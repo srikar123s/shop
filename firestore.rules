@@ -1,114 +1,212 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to verify if request is authenticated
+
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Helper function to check if the caller's device is registered and approved for the shop
-    function isApprovedShopDevice(shopCode) {
-      return isAuthenticated() && 
-        exists(/databases/$(database)/documents/shops/$(shopCode)/devices/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/shops/$(shopCode)/devices/$(request.auth.uid)).data.status == 'approved';
+    function shopDoc(shopCode) {
+      return get(/databases/$(database)/documents/shops/$(shopCode));
     }
 
-    // Helper function to check if the caller is the shop owner
     function isShopOwner(shopCode) {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/shops/$(shopCode)) &&
-        get(/databases/$(database)/documents/shops/$(shopCode)).data.ownerUid == request.auth.uid;
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/shops/$(shopCode))
+        && shopDoc(shopCode).data.ownerUid == request.auth.uid;
+    }
+
+    function devicePath(shopCode, uid) {
+      return /databases/$(database)/documents/shops/$(shopCode)/devices/$(uid);
+    }
+
+    function deviceDoc(shopCode) {
+      return get(devicePath(shopCode, request.auth.uid));
+    }
+
+    function isApprovedShopDevice(shopCode) {
+      return isAuthenticated()
+        && exists(devicePath(shopCode, request.auth.uid))
+        && deviceDoc(shopCode).data.status == 'approved';
+    }
+
+    function isApprovedShopMember(shopCode) {
+      return isShopOwner(shopCode) || isApprovedShopDevice(shopCode);
+    }
+
+    function staffHasPermission(shopCode, permKey) {
+      return isShopOwner(shopCode) || (
+        isApprovedShopDevice(shopCode)
+        && deviceDoc(shopCode).data.get(permKey, false) == true
+      );
+    }
+
+    function isClosedStatus(data) {
+      return data.get('status', '') in ['COMPLETED', 'CLOSED'];
+    }
+
+    // Minimal public join metadata (shopCode, shopName, ownerName only; no phone/UPI/GSTIN/UID)
+    match /shop_invites/{shopCode} {
+      allow get: if isAuthenticated();
+      allow list: if false;
+      allow create: if isAuthenticated()
+        && (!exists(/databases/$(database)/documents/shops/$(shopCode))
+          || shopDoc(shopCode).data.ownerUid == request.auth.uid)
+        && request.resource.data.keys().hasOnly(['shopCode', 'shopName', 'ownerName', 'updatedAt'])
+        && request.resource.data.shopCode == shopCode;
+      allow update: if isShopOwner(shopCode)
+        && request.resource.data.keys().hasOnly(['shopCode', 'shopName', 'ownerName', 'updatedAt'])
+        && request.resource.data.shopCode == shopCode;
+      allow delete: if isShopOwner(shopCode);
     }
 
     // Root shops collection
     match /shops/{shopCode} {
-      // Allow reading shop details if authenticated
-      allow read: if isAuthenticated();
-      
-      // Allow shop creation if authenticated
-      allow create: if isAuthenticated();
-      
-      // Allow update if approved device or shop owner
+      // Only approved members or the shop owner can read full shop details (phone, UPI, GSTIN, address)
+      allow get: if isApprovedShopMember(shopCode);
+      allow list: if false;
+
+      // Creator must bind their own auth UID and matching shopCode
+      allow create: if isAuthenticated()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.shopCode == shopCode;
+
+      // Owner retains administrative edits; approved staff may only advance last_order_number
       allow update: if isAuthenticated() && (
-        isApprovedShopDevice(shopCode) ||
-        resource.data.ownerUid == request.auth.uid
+        (isShopOwner(shopCode)
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.shopCode == resource.data.shopCode)
+        || (isApprovedShopDevice(shopCode)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['last_order_number', 'updatedAt', 'lastUpdatedByDevice'])
+          && request.resource.data.last_order_number is int
+          && request.resource.data.last_order_number >= resource.data.get('last_order_number', 0))
       );
-      
+      allow delete: if false;
+
       // Devices subcollection
       match /devices/{deviceId} {
-        // Any authenticated device can register itself or read device status
-        allow read: if isAuthenticated() && (
+        allow get: if isAuthenticated() && (
           request.auth.uid == deviceId ||
-          isApprovedShopDevice(shopCode) ||
           isShopOwner(shopCode)
         );
-        allow create: if isAuthenticated() && request.auth.uid == deviceId;
-        
-        // Only existing approved devices or shop owner can approve/update device statuses.
-        // Unapproved devices cannot modify their own status (privilege escalation prevention).
+        allow list: if isShopOwner(shopCode);
+
+        // Owner creates their own approved device; new staff devices must start pending with restricted defaults
+        allow create: if isAuthenticated()
+          && request.auth.uid == deviceId
+          && exists(/databases/$(database)/documents/shops/$(shopCode))
+          && request.resource.data.deviceId == request.auth.uid
+          && (
+            (isShopOwner(shopCode)
+              && request.resource.data.role == 'owner'
+              && request.resource.data.status == 'approved')
+            || (request.resource.data.role == 'staff'
+              && request.resource.data.status == 'pending'
+              && request.resource.data.get('canChangePrice', false) == false
+              && request.resource.data.get('canManageProducts', false) == false
+              && request.resource.data.get('canChangeShortcuts', false) == false)
+          );
+
+        // Only the shop owner can approve, reject, revoke, change roles, or toggle device permissions.
+        // Staff self-updates may never elevate status/role/permissions.
         allow update: if isAuthenticated() && (
-          isApprovedShopDevice(shopCode) ||
-          isShopOwner(shopCode) ||
-          (request.auth.uid == deviceId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
+          (isShopOwner(shopCode)
+            && (deviceId == request.auth.uid
+              || (request.resource.data.role == 'staff'
+                && request.resource.data.get('deviceId', deviceId) == deviceId)))
+          || (request.auth.uid == deviceId && (
+            (resource.data.status != 'rejected'
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.status == resource.data.status
+              && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                'status', 'role',
+                'canChangePrice', 'canManageProducts', 'canCloseOrders',
+                'canChangeShortcuts', 'canViewBillTotals',
+                'approvedAt', 'rejectedAt', 'revokedAt'
+              ]))
+            || (resource.data.status != 'approved'
+              && request.resource.data.deviceId == request.auth.uid
+              && request.resource.data.role == 'staff'
+              && request.resource.data.status == 'pending'
+              && request.resource.data.get('canChangePrice', false) == false
+              && request.resource.data.get('canManageProducts', false) == false
+              && request.resource.data.get('canChangeShortcuts', false) == false)
+          ))
         );
-        allow delete: if isAuthenticated() && (
-          isShopOwner(shopCode) ||
-          request.auth.uid == deviceId
-        );
+
+        allow delete: if isShopOwner(shopCode) && deviceId != request.auth.uid;
       }
 
       // Products subcollection
       match /products/{productId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow create, update: if staffHasPermission(shopCode, 'canManageProducts');
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Customers subcollection
       match /customers/{customerId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Orders subcollection
       match /orders/{orderId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow create: if isApprovedShopMember(shopCode);
+        allow update: if isShopOwner(shopCode) || (
+          isApprovedShopDevice(shopCode)
+          && (!isClosedStatus(resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
+          && (!isClosedStatus(request.resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
+        );
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Khata & Order Payments subcollection
       match /payments/{paymentId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Multi-device FCM outbound push notifications queue
       match /outbound_notifications/{notifId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Delivery Partners, Locations, and Transactions
       match /delivery_partners/{partnerId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       match /delivery_locations/{locationId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       match /delivery_transactions/{txId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow delete: if isShopOwner(shopCode);
       }
 
       // Storage Management: status, archives, audit logs, and manual check requests
       match /system/{docId} {
-        allow read: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
-        allow write: if (isApprovedShopDevice(shopCode) || isShopOwner(shopCode))
-          && docId == 'storage_check_request';
+        allow read: if isApprovedShopMember(shopCode);
+        allow create, update: if isShopOwner(shopCode) && docId == 'storage_check_request';
+        allow delete: if false;
       }
 
+      // Archives & audit logs are Cloud-Function managed (read-only on clients)
       match /storage_archives/{archiveId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow write: if false;
       }
 
       match /storage_audit_logs/{logId} {
-        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow write: if false;
       }
     }
   }

@@ -245,17 +245,23 @@ class DeliveryRepository {
   }
 
   /// Returns delivery expense (earned), cash/UPI paid, boxes, and trip count.
-  /// If [start] and [end] are provided, filters by `created_at` range.
+  /// Filters optionally by `created_at` range and case-insensitive route `location`.
   Future<Map<String, dynamic>> getDeliverySummary({
     DateTime? start,
     DateTime? end,
+    String? locationFilter,
   }) async {
     final db = await _dbHelper.database;
-    String? where;
-    List<Object?>? whereArgs;
+    final whereParts = <String>[];
+    final whereArgs = <Object?>[];
     if (start != null && end != null) {
-      where = 'created_at >= ? AND created_at < ?';
-      whereArgs = [start.toIso8601String(), end.toIso8601String()];
+      whereParts.add('created_at >= ? AND created_at < ?');
+      whereArgs.addAll([start.toIso8601String(), end.toIso8601String()]);
+    }
+    final cleanLoc = locationFilter?.trim() ?? '';
+    if (cleanLoc.isNotEmpty && cleanLoc != 'All Locations') {
+      whereParts.add('TRIM(COALESCE(location, \'\')) = ? COLLATE NOCASE');
+      whereArgs.add(cleanLoc);
     }
     final rows = await db.query(
       'delivery_transactions',
@@ -265,8 +271,8 @@ class DeliveryRepository {
         'COALESCE(SUM(total_boxes), 0) AS total_boxes',
         'COUNT(*) AS tx_count',
       ],
-      where: where,
-      whereArgs: whereArgs,
+      where: whereParts.isEmpty ? null : whereParts.join(' AND '),
+      whereArgs: whereArgs.isEmpty ? null : whereArgs,
     );
     if (rows.isEmpty) {
       return {

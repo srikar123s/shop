@@ -259,53 +259,39 @@ class _DeliveryPartnerPassbookScreenState
     String paymentMode = 'cash';
     bool manualTotalEdited = false;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          int tierBoxSum = 0;
-          double totalEarned = 0.0;
-          for (final row in rateRows) {
-            final b = int.tryParse(row.boxesCtrl.text.trim()) ?? 0;
-            final r = double.tryParse(row.rateCtrl.text.trim()) ?? 0.0;
-            tierBoxSum += b;
-            totalEarned += b * r;
-          }
-
-          if (!manualTotalEdited) {
-            totalBoxesCtrl.text = tierBoxSum > 0 ? tierBoxSum.toString() : '';
-          }
-          final enteredTotalBoxes =
-              int.tryParse(totalBoxesCtrl.text.trim()) ?? tierBoxSum;
-
-          double cutAmt = 0.0;
-          double payAmt = 0.0;
-
-          if (partner.advanceBalance > 0) {
-            if (settlementMode == 'cut_full') {
-              cutAmt = totalEarned;
-              payAmt = 0.0;
-            } else if (settlementMode == 'pay_full') {
-              cutAmt = 0.0;
-              payAmt = totalEarned;
-            } else {
-              cutAmt = double.tryParse(cutCtrl.text.trim()) ?? 0.0;
-              if (cutAmt > totalEarned) cutAmt = totalEarned;
-              payAmt = (totalEarned - cutAmt).clamp(0.0, totalEarned);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            int tierBoxSum = 0;
+            double totalEarned = 0.0;
+            for (final row in rateRows) {
+              final b = int.tryParse(row.boxesCtrl.text.trim()) ?? 0;
+              final r = double.tryParse(row.rateCtrl.text.trim()) ?? 0.0;
+              tierBoxSum += b;
+              totalEarned += b * r;
             }
-          } else {
-            if (settlementMode == 'pay_full') {
-              payAmt = totalEarned;
-            } else if (settlementMode == 'pay_later') {
-              payAmt = 0.0;
-            } else {
-              payAmt = double.tryParse(paidCtrl.text.trim()) ?? 0.0;
+
+            if (!manualTotalEdited) {
+              totalBoxesCtrl.text = tierBoxSum > 0 ? tierBoxSum.toString() : '';
             }
-          }
+            final enteredTotalBoxes =
+                int.tryParse(totalBoxesCtrl.text.trim()) ?? tierBoxSum;
+
+            final settlement = DeliverySettlement.calculate(
+              totalEarned: totalEarned,
+              advanceBalance: partner.advanceBalance,
+              settlementMode: settlementMode,
+              enteredCut: double.tryParse(cutCtrl.text.trim()) ?? 0.0,
+              enteredPaid: double.tryParse(paidCtrl.text.trim()) ?? 0.0,
+            );
+            final cutAmt = settlement.cutAmount;
+            final payAmt = settlement.paidAmount;
 
           return Padding(
             padding: EdgeInsets.fromLTRB(
@@ -569,6 +555,15 @@ class _DeliveryPartnerPassbookScreenState
         },
       ),
     );
+    } finally {
+      totalBoxesCtrl.dispose();
+      descCtrl.dispose();
+      cutCtrl.dispose();
+      paidCtrl.dispose();
+      for (final row in rateRows) {
+        row.dispose();
+      }
+    }
   }
 
   Future<void> _openLineSheet() async {
@@ -586,39 +581,25 @@ class _DeliveryPartnerPassbookScreenState
         partner.advanceBalance > 0 ? 'cut_full' : 'pay_full';
     String paymentMode = 'cash';
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final totalEarned = double.tryParse(fareCtrl.text.trim()) ?? 0.0;
-
-          double cutAmt = 0.0;
-          double payAmt = 0.0;
-          if (partner.advanceBalance > 0) {
-            if (settlementMode == 'cut_full') {
-              cutAmt = totalEarned;
-              payAmt = 0.0;
-            } else if (settlementMode == 'pay_full') {
-              cutAmt = 0.0;
-              payAmt = totalEarned;
-            } else {
-              cutAmt = double.tryParse(cutCtrl.text.trim()) ?? 0.0;
-              if (cutAmt > totalEarned) cutAmt = totalEarned;
-              payAmt = (totalEarned - cutAmt).clamp(0.0, totalEarned);
-            }
-          } else {
-            if (settlementMode == 'pay_full') {
-              payAmt = totalEarned;
-            } else if (settlementMode == 'pay_later') {
-              payAmt = 0.0;
-            } else {
-              payAmt = double.tryParse(paidCtrl.text.trim()) ?? 0.0;
-            }
-          }
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final totalEarned = double.tryParse(fareCtrl.text.trim()) ?? 0.0;
+            final settlement = DeliverySettlement.calculate(
+              totalEarned: totalEarned,
+              advanceBalance: partner.advanceBalance,
+              settlementMode: settlementMode,
+              enteredCut: double.tryParse(cutCtrl.text.trim()) ?? 0.0,
+              enteredPaid: double.tryParse(paidCtrl.text.trim()) ?? 0.0,
+            );
+            final cutAmt = settlement.cutAmount;
+            final payAmt = settlement.paidAmount;
 
           return Padding(
             padding: EdgeInsets.fromLTRB(
@@ -641,7 +622,7 @@ class _DeliveryPartnerPassbookScreenState
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          key: ValueKey('pb_$selectedLocation'),
+                          key: ValueKey('line_$selectedLocation'),
                           initialValue: _locations.contains(selectedLocation)
                               ? selectedLocation
                               : null,
@@ -789,6 +770,13 @@ class _DeliveryPartnerPassbookScreenState
         },
       ),
     );
+    } finally {
+      fareCtrl.dispose();
+      boxesCtrl.dispose();
+      descCtrl.dispose();
+      cutCtrl.dispose();
+      paidCtrl.dispose();
+    }
   }
 
   Future<void> _openPayoutSheet() async {
@@ -796,7 +784,8 @@ class _DeliveryPartnerPassbookScreenState
     final descCtrl = TextEditingController();
     String paymentMode = 'cash';
 
-    await showModalBottomSheet<void>(
+    try {
+      await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
@@ -894,6 +883,10 @@ class _DeliveryPartnerPassbookScreenState
         },
       ),
     );
+    } finally {
+      amountCtrl.dispose();
+      descCtrl.dispose();
+    }
   }
 
   Future<void> _confirmDeleteTx(DeliveryTransaction tx) async {

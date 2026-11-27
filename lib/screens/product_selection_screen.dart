@@ -590,11 +590,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
           final item = _items[itemIndex];
           return OrderItemCard(
             item: item,
-            onEdit: item.isOtherItem
+            onEdit: item.isOtherItem || item.productId == null
                 ? null
                 : () async {
-                    final product = await widget.productRepository
-                        .getProductById(item.productId!);
+                    final pid = item.productId;
+                    if (pid == null) return;
+                    final product =
+                        await widget.productRepository.getProductById(pid);
                     if (product != null && context.mounted) {
                       await _selectProduct(product, editIndex: itemIndex);
                     }
@@ -648,11 +650,13 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                         ),
-                        if (!item.isOtherItem)
+                        if (!item.isOtherItem && item.productId != null)
                           InkWell(
                             onTap: () async {
+                              final pid = item.productId;
+                              if (pid == null) return;
                               final product = await widget.productRepository
-                                  .getProductById(item.productId!);
+                                  .getProductById(pid);
                               if (product != null && context.mounted) {
                                 await _selectProduct(product, editIndex: i);
                               }

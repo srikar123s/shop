@@ -1,4 +1,46 @@
 import 'dart:convert';
+import 'dart:math' as math;
+
+class DeliverySettlement {
+  const DeliverySettlement._();
+
+  /// Computes bounded advance-deduction (`cutAmount`) and counter payout (`paidAmount`)
+  /// so partner advance deductions never exceed either earned trip pay or available advance.
+  static ({double cutAmount, double paidAmount}) calculate({
+    required double totalEarned,
+    required double advanceBalance,
+    required String settlementMode,
+    double enteredCut = 0.0,
+    double enteredPaid = 0.0,
+  }) {
+    final safeEarned = totalEarned < 0 ? 0.0 : totalEarned;
+    final safeAdvance = advanceBalance < 0 ? 0.0 : advanceBalance;
+    final maxCut = math.min(safeEarned, safeAdvance);
+
+    if (safeAdvance > 0) {
+      if (settlementMode == 'cut_full') {
+        final cutAmt = maxCut;
+        final payAmt = (safeEarned - cutAmt).clamp(0.0, safeEarned).toDouble();
+        return (cutAmount: cutAmt, paidAmount: payAmt);
+      } else if (settlementMode == 'pay_full') {
+        return (cutAmount: 0.0, paidAmount: safeEarned);
+      } else {
+        final cutAmt = enteredCut.clamp(0.0, maxCut).toDouble();
+        final payAmt = (safeEarned - cutAmt).clamp(0.0, safeEarned).toDouble();
+        return (cutAmount: cutAmt, paidAmount: payAmt);
+      }
+    } else {
+      if (settlementMode == 'pay_full') {
+        return (cutAmount: 0.0, paidAmount: safeEarned);
+      } else if (settlementMode == 'pay_later') {
+        return (cutAmount: 0.0, paidAmount: 0.0);
+      } else {
+        final payAmt = enteredPaid.clamp(0.0, safeEarned).toDouble();
+        return (cutAmount: 0.0, paidAmount: payAmt);
+      }
+    }
+  }
+}
 
 enum DeliveryTxType { perBox, line, payout }
 

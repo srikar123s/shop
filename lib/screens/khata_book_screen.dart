@@ -672,10 +672,11 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                 onPressed: () => Navigator.pop(actx, 'cancel'),
                 child: const Text('Cancel'),
               ),
-              OutlinedButton(
-                onPressed: () => Navigator.pop(actx, 'cap_due'),
-                child: Text('Cap at ₹${balanceDue.toStringAsFixed(2)}'),
-              ),
+              if (balanceDue > 0)
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(actx, 'cap_due'),
+                  child: Text('Cap at ₹${balanceDue.toStringAsFixed(2)}'),
+                ),
               FilledButton(
                 style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF0F766E)),
@@ -687,13 +688,15 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         );
 
         if (confirmAdvance == null || confirmAdvance == 'cancel') return;
-        if (confirmAdvance == 'cap_due') {
+        if (confirmAdvance == 'cap_due' && balanceDue > 0) {
           amount = balanceDue;
         }
       }
 
-      final advanceNote = amount > balanceDue && balanceDue > 0
-          ? 'Includes ₹${(amount - balanceDue).toStringAsFixed(2)} Advance Payment (to settle with future bills)'
+      final currentPending = balanceDue > 0 ? balanceDue : 0.0;
+      final advanceAmt = amount > currentPending ? (amount - currentPending) : 0.0;
+      final advanceNote = advanceAmt > 0
+          ? 'Includes ₹${advanceAmt.toStringAsFixed(2)} Advance Payment (to settle with future bills)'
           : '';
       final finalNotes = [
         if (notesCtrl.text.trim().isNotEmpty) notesCtrl.text.trim(),

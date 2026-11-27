@@ -16,6 +16,31 @@ if (keystorePropertiesFile.exists()) {
     }
 }
 
+val releaseKeyAlias = (keystoreProperties["keyAlias"] as String?)?.trim()
+val releaseKeyPassword = (keystoreProperties["keyPassword"] as String?)?.trim()
+val releaseStoreFilePath = (keystoreProperties["storeFile"] as String?)?.trim()
+val releaseStorePassword = (keystoreProperties["storePassword"] as String?)?.trim()
+val releaseStoreFile = releaseStoreFilePath?.takeIf { it.isNotEmpty() }?.let { rootProject.file(it) }
+val hasValidReleaseKeystore = keystorePropertiesFile.exists()
+        && !releaseKeyAlias.isNullOrEmpty()
+        && !releaseKeyPassword.isNullOrEmpty()
+        && !releaseStorePassword.isNullOrEmpty()
+        && releaseStoreFile != null
+        && releaseStoreFile.exists()
+
+gradle.taskGraph.whenReady {
+    val runningReleaseTask = allTasks.any { task ->
+        task.name.contains("Release", ignoreCase = true)
+    }
+    if (runningReleaseTask && !hasValidReleaseKeystore) {
+        throw GradleException(
+            "Release build blocked: missing or incomplete android/key.properties or keystore file " +
+                "(required keys: storeFile, storePassword, keyAlias, keyPassword). " +
+                "Refusing insecure debug-keystore fallback for release builds."
+        )
+    }
+}
+
 val dartDefinesRaw = if (project.hasProperty("dart-defines")) {
     project.property("dart-defines") as String
 } else {
@@ -87,25 +112,21 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            if (keystorePropertiesFile.exists()) {
-                keyAlias = keystoreProperties["keyAlias"] as String?
-                keyPassword = keystoreProperties["keyPassword"] as String?
-                storeFile = keystoreProperties["storeFile"]?.let { file(it) }
-                storePassword = keystoreProperties["storePassword"] as String?
-            } else {
-                val debugConfig = signingConfigs.getByName("debug")
-                keyAlias = debugConfig.keyAlias
-                keyPassword = debugConfig.keyPassword
-                storeFile = debugConfig.storeFile
-                storePassword = debugConfig.storePassword
+        if (hasValidReleaseKeystore) {
+            create("release") {
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasValidReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

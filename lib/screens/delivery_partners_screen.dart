@@ -314,11 +314,13 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
                           partner: partner,
                           currency: _currency,
                           onTap: () async {
+                            final pid = partner.id;
+                            if (pid == null) return;
                             await Navigator.push(
                               context,
                               MaterialPageRoute<void>(
                                 builder: (_) => DeliveryPartnerPassbookScreen(
-                                  partnerId: partner.id!,
+                                  partnerId: pid,
                                   repository: _repo,
                                 ),
                               ),
