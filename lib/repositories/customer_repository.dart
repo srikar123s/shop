@@ -23,20 +23,25 @@ class CustomerRepository {
   }
 
   static String mergePhoneNumbers(String? existingPhone, String? newPhone) {
-    final set = <String>{};
-    if (existingPhone != null && existingPhone.trim().isNotEmpty) {
-      set.addAll(existingPhone
-          .split(RegExp(r'[,/;&|\n]+'))
-          .map((p) => p.trim())
-          .where((p) => p.isNotEmpty));
+    final seenCanonical = <String>{};
+    final merged = <String>[];
+
+    void addRaw(String? raw) {
+      if (raw == null || raw.trim().isEmpty) return;
+      for (final p in raw.split(RegExp(r'[,/;&|\n]+'))) {
+        final trimmed = p.trim();
+        if (trimmed.isEmpty) continue;
+        final canonical = Customer.normalizePhoneDigits(trimmed);
+        final key = canonical.length >= 6 ? canonical : trimmed;
+        if (seenCanonical.add(key)) {
+          merged.add(trimmed);
+        }
+      }
     }
-    if (newPhone != null && newPhone.trim().isNotEmpty) {
-      set.addAll(newPhone
-          .split(RegExp(r'[,/;&|\n]+'))
-          .map((p) => p.trim())
-          .where((p) => p.isNotEmpty));
-    }
-    return set.join(', ');
+
+    addRaw(existingPhone);
+    addRaw(newPhone);
+    return merged.join(', ');
   }
 
   Future<Customer?> findByNameAndPhone(String name, [dynamic phone]) async {
@@ -209,24 +214,24 @@ class CustomerRepository {
   }
 
   Future<Customer?> findByPhone(String phone) async {
-    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '').trim();
-    if (cleanDigits.isEmpty) return null;
+    final canonical = Customer.normalizePhoneDigits(phone);
+    if (canonical.length < 6) return null;
     final db = await _databaseHelper.database;
-    // Direct filtered query on phone substring to avoid full-table scan in Dart memory
+    final tail = canonical.length >= 6
+        ? canonical.substring(canonical.length - 6)
+        : canonical;
+    // Strip spaces, dashes, and '+' in SQL so '+91 93924 49356' matches '9392449356'
     final candidates = await db.query(
       'customers',
-      where: 'phone LIKE ?',
-      whereArgs: ['%$cleanDigits%'],
-      limit: 25,
+      where:
+          "REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ?",
+      whereArgs: ['%$tail%'],
+      limit: 50,
     );
     for (final row in candidates) {
       final c = Customer.fromMap(row);
       for (final p in c.phoneNumbers) {
-        final pDigits = p.replaceAll(RegExp(r'[^0-9]'), '').trim();
-        if (pDigits.isNotEmpty &&
-            (pDigits == cleanDigits ||
-             (pDigits.length >= 7 && cleanDigits.length >= 7 &&
-              (pDigits.endsWith(cleanDigits) || cleanDigits.endsWith(pDigits))))) {
+        if (Customer.phonesMatch(p, phone)) {
           return c;
         }
       }

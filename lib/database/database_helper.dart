@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:shop/models/customer.dart';
 import 'package:shop/models/top_product_stat.dart';
 import 'package:shop/services/shop_sync_service.dart';
 import 'package:sqflite/sqflite.dart';
@@ -41,6 +42,145 @@ class DatabaseHelper {
   Future<void> reopen() async {
     await close();
     _database = await _initDb();
+  }
+
+  /// Finds a customer ID matching [rawPhone] regardless of '+91', '0', spaces, or dashes.
+  Future<int?> findCustomerIdByNormalizedPhone(
+    DatabaseExecutor db,
+    String rawPhone,
+  ) async {
+    final canonical = Customer.normalizePhoneDigits(rawPhone);
+    if (canonical.length < 6) return null;
+    final tail = canonical.length >= 6
+        ? canonical.substring(canonical.length - 6)
+        : canonical;
+    final candidates = await db.query(
+      'customers',
+      columns: ['id', 'phone'],
+      where:
+          "REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ?",
+      whereArgs: ['%$tail%'],
+      limit: 50,
+    );
+    for (final row in candidates) {
+      final phoneStr = row['phone'] as String?;
+      if (phoneStr == null) continue;
+      for (final p in Customer.extractNumbers(phoneStr)) {
+        if (Customer.phonesMatch(p, rawPhone)) {
+          return row['id'] as int?;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Merges duplicate customer rows that share the same normalized phone number
+  /// (e.g. '9392449356' and '+91 93924 49356'), preserving all orders & payments.
+  Future<void> deduplicateCustomersByPhone(Database db) async {
+    final customers = await db.query(
+      'customers',
+      columns: ['id', 'name', 'phone', 'address', 'credit_limit'],
+      where: "phone IS NOT NULL AND TRIM(phone) != ''",
+      orderBy: 'id ASC',
+    );
+    if (customers.length < 2) return;
+
+    final orderCounts = <int, int>{};
+    for (final r in await db.rawQuery(
+      'SELECT customer_id, COUNT(*) AS cnt FROM orders GROUP BY customer_id',
+    )) {
+      final cid = (r['customer_id'] as num?)?.toInt();
+      if (cid != null) orderCounts[cid] = (r['cnt'] as num?)?.toInt() ?? 0;
+    }
+
+    final paymentCounts = <int, int>{};
+    for (final r in await db.rawQuery(
+      'SELECT customer_id, COUNT(*) AS cnt FROM customer_payments GROUP BY customer_id',
+    )) {
+      final cid = (r['customer_id'] as num?)?.toInt();
+      if (cid != null) paymentCounts[cid] = (r['cnt'] as num?)?.toInt() ?? 0;
+    }
+
+    final byCanonical = <String, List<Map<String, Object?>>>{};
+    for (final c in customers) {
+      final phone = c['phone'] as String?;
+      if (phone == null) continue;
+      final nums = Customer.extractNumbers(phone);
+      if (nums.isEmpty) continue;
+      final canonical = Customer.normalizePhoneDigits(nums.first);
+      if (canonical.length < 6) continue;
+      byCanonical.putIfAbsent(canonical, () => []).add(c);
+    }
+
+    final mergedDupIds = <int>{};
+    await db.transaction((txn) async {
+      for (final group in byCanonical.values) {
+        final active = group
+            .where((c) => !mergedDupIds.contains((c['id'] as num).toInt()))
+            .toList();
+        if (active.length < 2) continue;
+
+        active.sort((a, b) {
+          final idA = (a['id'] as num).toInt();
+          final idB = (b['id'] as num).toInt();
+          final scoreA = (orderCounts[idA] ?? 0) + (paymentCounts[idA] ?? 0);
+          final scoreB = (orderCounts[idB] ?? 0) + (paymentCounts[idB] ?? 0);
+          if (scoreA != scoreB) return scoreB.compareTo(scoreA);
+          return idA.compareTo(idB);
+        });
+
+        final primary = active.first;
+        final primaryId = (primary['id'] as num).toInt();
+        var mergedAddress = (primary['address'] as String?)?.trim();
+        var mergedCredit = (primary['credit_limit'] as num?)?.toDouble() ?? 0.0;
+
+        for (final dup in active.skip(1)) {
+          final dupId = (dup['id'] as num).toInt();
+          if (mergedDupIds.contains(dupId)) continue;
+          mergedDupIds.add(dupId);
+
+          await txn.update(
+            'orders',
+            {'customer_id': primaryId},
+            where: 'customer_id = ?',
+            whereArgs: [dupId],
+          );
+          await txn.update(
+            'customer_payments',
+            {'customer_id': primaryId},
+            where: 'customer_id = ?',
+            whereArgs: [dupId],
+          );
+
+          final dupAddr = (dup['address'] as String?)?.trim();
+          if ((mergedAddress == null || mergedAddress.isEmpty) &&
+              dupAddr != null &&
+              dupAddr.isNotEmpty) {
+            mergedAddress = dupAddr;
+          }
+          final dupCredit = (dup['credit_limit'] as num?)?.toDouble() ?? 0.0;
+          if (dupCredit > mergedCredit) {
+            mergedCredit = dupCredit;
+          }
+
+          await txn.delete(
+            'customers',
+            where: 'id = ?',
+            whereArgs: [dupId],
+          );
+        }
+
+        await txn.update(
+          'customers',
+          {
+            'address': mergedAddress,
+            'credit_limit': mergedCredit,
+          },
+          where: 'id = ?',
+          whereArgs: [primaryId],
+        );
+      }
+    });
   }
 
   Future<void> clearOrderHistory() async {
@@ -119,6 +259,11 @@ class DatabaseHelper {
         try {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)');
         } catch (_) {}
+        try {
+          await deduplicateCustomersByPhone(db);
+        } catch (e) {
+          debugPrint('Customer deduplication skipped: $e');
+        }
         await _seedInitialProducts(db);
       },
     );

@@ -759,10 +759,10 @@ class ShopSyncService extends ChangeNotifier {
       final custName =
           data['customer_name_snapshot'] as String? ?? 'Customer';
       if (incomingPhone != null && incomingPhone.isNotEmpty) {
-        final existingCust = await db.query('customers',
-            where: 'phone = ?', whereArgs: [incomingPhone]);
-        if (existingCust.isNotEmpty) {
-          localCustId = existingCust.first['id'] as int;
+        final matchedId = await DatabaseHelper.instance
+            .findCustomerIdByNormalizedPhone(db, incomingPhone);
+        if (matchedId != null) {
+          localCustId = matchedId;
         } else {
           localCustId = await db.insert('customers', {
             'name': custName,
@@ -770,9 +770,9 @@ class ShopSyncService extends ChangeNotifier {
             'created_at': DateTime.now().toIso8601String(),
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
           if (localCustId <= 0) {
-            final existing = await db.query('customers',
-                where: 'phone = ?', whereArgs: [incomingPhone]);
-            localCustId = existing.isNotEmpty ? existing.first['id'] as int : 1;
+            localCustId = await DatabaseHelper.instance
+                    .findCustomerIdByNormalizedPhone(db, incomingPhone) ??
+                1;
           }
         }
       } else {
@@ -879,9 +879,10 @@ class ShopSyncService extends ChangeNotifier {
       int localCustId = data['customer_id'] as int? ?? 1;
       final incomingPhone = (data['customer_phone'] as String? ?? '').trim();
       if (incomingPhone.isNotEmpty) {
-        final existingCust = await db.query('customers', where: 'phone = ?', whereArgs: [incomingPhone], limit: 1);
-        if (existingCust.isNotEmpty) {
-          localCustId = existingCust.first['id'] as int;
+        final matchedId = await DatabaseHelper.instance
+            .findCustomerIdByNormalizedPhone(db, incomingPhone);
+        if (matchedId != null) {
+          localCustId = matchedId;
         }
       }
 
@@ -1143,10 +1144,10 @@ class ShopSyncService extends ChangeNotifier {
           final custName =
               data['customer_name_snapshot'] as String? ?? 'Customer';
           if (incomingPhone != null && incomingPhone.isNotEmpty) {
-            final existingCust = await db.query('customers',
-                where: 'phone = ?', whereArgs: [incomingPhone]);
-            if (existingCust.isNotEmpty) {
-              localCustId = existingCust.first['id'] as int;
+            final matchedId = await DatabaseHelper.instance
+                .findCustomerIdByNormalizedPhone(db, incomingPhone);
+            if (matchedId != null) {
+              localCustId = matchedId;
             } else {
               localCustId = await db.insert('customers', {
                 'name': custName,
@@ -1154,9 +1155,9 @@ class ShopSyncService extends ChangeNotifier {
                 'created_at': DateTime.now().toIso8601String(),
               }, conflictAlgorithm: ConflictAlgorithm.ignore);
               if (localCustId <= 0) {
-                final existing = await db.query('customers',
-                    where: 'phone = ?', whereArgs: [incomingPhone]);
-                localCustId = existing.isNotEmpty ? existing.first['id'] as int : 1;
+                localCustId = await DatabaseHelper.instance
+                        .findCustomerIdByNormalizedPhone(db, incomingPhone) ??
+                    1;
               }
             }
           } else {
@@ -1379,9 +1380,10 @@ class ShopSyncService extends ChangeNotifier {
           int localCustId = data['customer_id'] as int? ?? 1;
           final incomingPhone = (data['customer_phone'] as String? ?? '').trim();
           if (incomingPhone.isNotEmpty) {
-            final existingCust = await db.query('customers', where: 'phone = ?', whereArgs: [incomingPhone], limit: 1);
-            if (existingCust.isNotEmpty) {
-              localCustId = existingCust.first['id'] as int;
+            final matchedId = await DatabaseHelper.instance
+                .findCustomerIdByNormalizedPhone(db, incomingPhone);
+            if (matchedId != null) {
+              localCustId = matchedId;
             }
           }
 

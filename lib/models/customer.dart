@@ -21,12 +21,37 @@ class Customer {
   /// Helper to extract list of cleaned individual phone numbers from a raw string
   static List<String> extractNumbers(String? raw) {
     if (raw == null || raw.trim().isEmpty) return const [];
-    return raw
-        .split(RegExp(r'[,/;&|\n]+'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toSet()
-        .toList();
+    final seenCanonical = <String>{};
+    final result = <String>[];
+    for (final part in raw.split(RegExp(r'[,/;&|\n]+'))) {
+      final trimmed = part.trim();
+      if (trimmed.isEmpty) continue;
+      final canonical = normalizePhoneDigits(trimmed);
+      final key = canonical.length >= 6 ? canonical : trimmed;
+      if (seenCanonical.add(key)) {
+        result.add(trimmed);
+      }
+    }
+    return result;
+  }
+
+  /// Normalizes a phone number to canonical digits so '+91 93924 49356',
+  /// '09392449356', '919392449356', and '9392449356' all match.
+  static String normalizePhoneDigits(String raw) {
+    var digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    digits = digits.replaceFirst(RegExp(r'^0+'), '');
+    if (digits.length > 10) {
+      digits = digits.substring(digits.length - 10);
+    }
+    return digits;
+  }
+
+  /// Returns true if two raw phone strings represent the same phone number.
+  static bool phonesMatch(String a, String b) {
+    final na = normalizePhoneDigits(a);
+    final nb = normalizePhoneDigits(b);
+    if (na.length < 6 || nb.length < 6) return false;
+    return na == nb;
   }
 
   /// Returns the primary (first) phone number
