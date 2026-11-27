@@ -6,6 +6,7 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/customer_screen.dart';
+import 'package:shop/screens/delivery_partners_screen.dart';
 import 'package:shop/screens/history_screen.dart';
 import 'package:shop/screens/order_details_screen.dart';
 import 'package:shop/screens/shop_settings_screen.dart';
@@ -233,6 +234,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                 ],
               ),
+
             ),
           IconButton(
             tooltip: s.t('shopSettings'),
@@ -995,19 +997,85 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               const SizedBox(height: 2),
-                              Text(
-                                'Items & rates',
-                                style: TextStyle(
-                                    color: Colors.grey.shade600, fontSize: 11),
-                              ),
-                            ],
+                                Text(
+                                  'Items & rates',
+                                  style: TextStyle(
+                                      color: Colors.grey.shade600, fontSize: 11),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const DeliveryPartnersScreen(),
+                        ),
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        _refreshData();
+                      });
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.local_shipping_outlined,
+                              color: Colors.teal.shade700,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Delivery Partners',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Per-box, line trips, advances & settlements',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ],
-              ),
+                ),
+
               const SizedBox(height: 12),
 
               // Business Reports & Analytics Quick Access Row
@@ -1108,6 +1176,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+
               const SizedBox(height: 24),
 
               // Recent Orders Header
@@ -1159,6 +1228,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+
               const SizedBox(height: 8),
 
               // Orders List
@@ -1705,6 +1775,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+
             ),
 
             Expanded(

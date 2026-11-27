@@ -13,7 +13,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 5;
+  static const int dbVersion = 6;
 
   Database? _database;
   Future<Database>? _initDbFuture;
@@ -46,6 +46,9 @@ class DatabaseHelper {
   Future<void> clearOrderHistory() async {
     final db = await database;
     await db.transaction((txn) async {
+      await txn.delete('delivery_transactions');
+      await txn.delete('delivery_locations');
+      await txn.delete('delivery_partners');
       await txn.delete('order_item_options');
       await txn.delete('order_items');
       await txn.delete('orders');
@@ -64,6 +67,9 @@ class DatabaseHelper {
   Future<void> resetAllShopData() async {
     final db = await database;
     await db.transaction((txn) async {
+      await txn.delete('delivery_transactions');
+      await txn.delete('delivery_locations');
+      await txn.delete('delivery_partners');
       await txn.delete('order_item_options');
       await txn.delete('order_items');
       await txn.delete('orders');
@@ -213,6 +219,56 @@ class DatabaseHelper {
         await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)');
       } catch (_) {}
     }
+    if (oldVersion < 6) {
+      await _createDeliveryTables(db);
+    }
+  }
+
+  Future<void> _createDeliveryTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS delivery_partners (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        vehicle_info TEXT,
+        notes TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS delivery_locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS delivery_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        partner_id INTEGER NOT NULL,
+        tx_type TEXT NOT NULL,
+        location TEXT,
+        total_boxes INTEGER NOT NULL DEFAULT 0,
+        rate_breakdown_json TEXT,
+        earned_amount REAL NOT NULL DEFAULT 0.0,
+        paid_amount REAL NOT NULL DEFAULT 0.0,
+        cut_amount REAL NOT NULL DEFAULT 0.0,
+        payment_mode TEXT NOT NULL DEFAULT 'none',
+        description TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(partner_id) REFERENCES delivery_partners(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_delivery_tx_partner_id ON delivery_transactions(partner_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_delivery_tx_created_at ON delivery_transactions(created_at)',
+    );
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -313,6 +369,8 @@ class DatabaseHelper {
         FOREIGN KEY(customer_id) REFERENCES customers(id)
       )
     ''');
+
+    await _createDeliveryTables(db);
 
     await db.execute(
       'CREATE INDEX idx_customers_name ON customers(name COLLATE NOCASE)',
