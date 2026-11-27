@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:shop/database/database_helper.dart';
 import 'package:shop/models/delivery_partner.dart';
+import 'package:shop/services/shop_sync_service.dart';
 
 class DeliveryRepository {
   DeliveryRepository({DatabaseHelper? dbHelper})
@@ -50,23 +53,33 @@ class DeliveryRepository {
     String? notes,
   }) async {
     final db = await _dbHelper.database;
-    return db.insert('delivery_partners', {
-      'name': name.trim(),
-      'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
-      'vehicle_info':
+    final cloudId = ShopSyncService.instance.generateCloudId('dp');
+    final now = DateTime.now();
+    final partner = DeliveryPartner(
+      cloudPartnerId: cloudId,
+      name: name.trim(),
+      phone: phone?.trim().isEmpty == true ? null : phone?.trim(),
+      vehicleInfo:
           vehicleInfo?.trim().isEmpty == true ? null : vehicleInfo?.trim(),
-      'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
-      'is_active': 1,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+      notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
+      createdAt: now,
+    );
+    final id = await db.insert('delivery_partners', partner.toMap());
+    unawaited(ShopSyncService.instance
+        .syncDeliveryPartner(partner.copyWith(id: id))
+        .catchError((_) {}));
+    return id;
   }
 
   Future<void> updatePartner(DeliveryPartner partner) async {
     if (partner.id == null) return;
     final db = await _dbHelper.database;
+    final cloudId = partner.cloudPartnerId ??
+        ShopSyncService.instance.generateCloudId('dp');
     await db.update(
       'delivery_partners',
       {
+        'cloud_partner_id': cloudId,
         'name': partner.name.trim(),
         'phone':
             partner.phone?.trim().isEmpty == true ? null : partner.phone?.trim(),
@@ -79,11 +92,29 @@ class DeliveryRepository {
       where: 'id = ?',
       whereArgs: [partner.id],
     );
+    unawaited(ShopSyncService.instance
+        .syncDeliveryPartner(partner.copyWith(cloudPartnerId: cloudId))
+        .catchError((_) {}));
   }
 
   Future<void> deletePartner(int id) async {
     final db = await _dbHelper.database;
+    final existing = await db.query(
+      'delivery_partners',
+      columns: ['cloud_partner_id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final cloudId = existing.isNotEmpty
+        ? existing.first['cloud_partner_id'] as String?
+        : null;
     await db.delete('delivery_partners', where: 'id = ?', whereArgs: [id]);
+    if (cloudId != null && cloudId.isNotEmpty) {
+      unawaited(ShopSyncService.instance
+          .deleteDeliveryPartnerFromCloud(cloudId)
+          .catchError((_) {}));
+    }
   }
 
   /// Returns all unique locations from existing customers AND saved delivery locations.
@@ -121,6 +152,8 @@ class DeliveryRepository {
       INSERT OR IGNORE INTO delivery_locations (name, created_at)
       VALUES (?, ?)
     ''', [trimmed, DateTime.now().toIso8601String()]);
+    unawaited(
+        ShopSyncService.instance.syncDeliveryLocation(trimmed).catchError((_) {}));
   }
 
   Future<List<DeliveryTransaction>> getTransactionsForPartner(
@@ -140,11 +173,74 @@ class DeliveryRepository {
     if (tx.location != null && tx.location!.trim().isNotEmpty) {
       await addLocation(tx.location!);
     }
-    return db.insert('delivery_transactions', tx.toMap());
+    final cloudTxId = tx.cloudTxId ?? ShopSyncService.instance.generateCloudId('dtx');
+    final map = tx.toMap();
+    map['cloud_tx_id'] = cloudTxId;
+    final id = await db.insert('delivery_transactions', map);
+
+    final partnerRows = await db.query(
+      'delivery_partners',
+      columns: ['cloud_partner_id', 'name'],
+      where: 'id = ?',
+      whereArgs: [tx.partnerId],
+      limit: 1,
+    );
+    if (partnerRows.isNotEmpty) {
+      var partnerCloudId =
+          partnerRows.first['cloud_partner_id'] as String? ?? '';
+      final partnerName = (partnerRows.first['name'] as String?) ?? 'Partner';
+      if (partnerCloudId.isEmpty) {
+        partnerCloudId = ShopSyncService.instance.generateCloudId('dp');
+        await db.update(
+          'delivery_partners',
+          {'cloud_partner_id': partnerCloudId},
+          where: 'id = ?',
+          whereArgs: [tx.partnerId],
+        );
+      }
+      final syncedTx = DeliveryTransaction(
+        id: id,
+        cloudTxId: cloudTxId,
+        partnerId: tx.partnerId,
+        txType: tx.txType,
+        location: tx.location,
+        totalBoxes: tx.totalBoxes,
+        rateTiers: tx.rateTiers,
+        earnedAmount: tx.earnedAmount,
+        paidAmount: tx.paidAmount,
+        cutAmount: tx.cutAmount,
+        paymentMode: tx.paymentMode,
+        description: tx.description,
+        createdAt: tx.createdAt,
+      );
+      unawaited(ShopSyncService.instance
+          .syncDeliveryTransaction(
+            syncedTx,
+            partnerCloudId: partnerCloudId,
+            partnerName: partnerName,
+          )
+          .catchError((_) {}));
+    }
+    return id;
   }
 
   Future<void> deleteTransaction(int id) async {
     final db = await _dbHelper.database;
+    final existing = await db.query(
+      'delivery_transactions',
+      columns: ['cloud_tx_id'],
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    final cloudTxId = existing.isNotEmpty
+        ? existing.first['cloud_tx_id'] as String?
+        : null;
     await db.delete('delivery_transactions', where: 'id = ?', whereArgs: [id]);
+    if (cloudTxId != null && cloudTxId.isNotEmpty) {
+      unawaited(ShopSyncService.instance
+          .deleteDeliveryTransactionFromCloud(cloudTxId)
+          .catchError((_) {}));
+    }
   }
 }

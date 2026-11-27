@@ -52,6 +52,7 @@ class BoxRateTier {
 class DeliveryPartner {
   const DeliveryPartner({
     this.id,
+    this.cloudPartnerId,
     required this.name,
     this.phone,
     this.vehicleInfo,
@@ -65,6 +66,7 @@ class DeliveryPartner {
   });
 
   final int? id;
+  final String? cloudPartnerId;
   final String name;
   final String? phone;
   final String? vehicleInfo;
@@ -88,6 +90,7 @@ class DeliveryPartner {
 
   DeliveryPartner copyWith({
     int? id,
+    String? cloudPartnerId,
     String? name,
     String? phone,
     String? vehicleInfo,
@@ -101,6 +104,7 @@ class DeliveryPartner {
   }) {
     return DeliveryPartner(
       id: id ?? this.id,
+      cloudPartnerId: cloudPartnerId ?? this.cloudPartnerId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
       vehicleInfo: vehicleInfo ?? this.vehicleInfo,
@@ -116,6 +120,7 @@ class DeliveryPartner {
 
   Map<String, Object?> toMap() => {
         'id': id,
+        'cloud_partner_id': cloudPartnerId,
         'name': name,
         'phone': phone,
         'vehicle_info': vehicleInfo,
@@ -127,6 +132,7 @@ class DeliveryPartner {
   factory DeliveryPartner.fromMap(Map<String, Object?> map) {
     return DeliveryPartner(
       id: (map['id'] as num?)?.toInt(),
+      cloudPartnerId: map['cloud_partner_id'] as String?,
       name: (map['name'] as String?)?.trim() ?? 'Delivery Partner',
       phone: map['phone'] as String?,
       vehicleInfo: map['vehicle_info'] as String?,
@@ -148,6 +154,7 @@ class DeliveryPartner {
 class DeliveryTransaction {
   const DeliveryTransaction({
     this.id,
+    this.cloudTxId,
     required this.partnerId,
     required this.txType,
     this.location,
@@ -162,6 +169,7 @@ class DeliveryTransaction {
   });
 
   final int? id;
+  final String? cloudTxId;
   final int partnerId;
   final DeliveryTxType txType;
   final String? location;
@@ -176,6 +184,7 @@ class DeliveryTransaction {
 
   Map<String, Object?> toMap() => {
         'id': id,
+        'cloud_tx_id': cloudTxId,
         'partner_id': partnerId,
         'tx_type': deliveryTxTypeToDb(txType),
         'location': location,
@@ -206,6 +215,7 @@ class DeliveryTransaction {
 
     return DeliveryTransaction(
       id: (map['id'] as num?)?.toInt(),
+      cloudTxId: map['cloud_tx_id'] as String?,
       partnerId: (map['partner_id'] as num?)?.toInt() ?? 0,
       txType: deliveryTxTypeFromDb(map['tx_type'] as String?),
       location: map['location'] as String?,

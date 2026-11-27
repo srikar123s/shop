@@ -82,6 +82,19 @@ service cloud.firestore {
       match /outbound_notifications/{notifId} {
         allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
+
+      // Delivery Partners, Locations, and Transactions
+      match /delivery_partners/{partnerId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
+
+      match /delivery_locations/{locationId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
+
+      match /delivery_transactions/{txId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
     }
   }
 }
