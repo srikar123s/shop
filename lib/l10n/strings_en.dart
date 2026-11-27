@@ -175,6 +175,21 @@ const Map<String, String> stringsEn = <String, String>{
   'deliveryPartnerLabel': 'Delivery Partner',
   'boxLabels': 'Box Labels',
   'add': 'Add',
+  'storageManagement': 'Storage Management',
+  'cloudDatabaseStorage': 'Cloud Database Storage',
+  'usedLabel': 'Used',
+  'availableLabel': 'Available',
+  'quotaLabel': 'Quota',
+  'storageHistory': 'Storage History',
+  'runStorageCheck': 'Run Storage Check',
+  'viewArchivedData': 'View Archived Data',
+  'restoreArchivedData': 'Restore Archived Data',
+  'viewCleanupHistory': 'View Cleanup History',
+  'downloadBackup': 'Download Backup',
+  'storageStatusNormal': 'Normal — plenty of space available',
+  'storageStatusWarning': 'Storage usage warning (75–89%)',
+  'storageStatusCritical': 'Critical (90–99%) — automatic cleanup initiated',
+  'storageStatusFull': 'Storage limit reached (100%) — urgent attention needed',
 };
 
 const Map<String, String> catalogEn = <String, String>{

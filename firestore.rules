@@ -95,6 +95,21 @@ service cloud.firestore {
       match /delivery_transactions/{txId} {
         allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
       }
+
+      // Storage Management: status, archives, audit logs, and manual check requests
+      match /system/{docId} {
+        allow read: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+        allow write: if (isApprovedShopDevice(shopCode) || isShopOwner(shopCode))
+          && docId == 'storage_check_request';
+      }
+
+      match /storage_archives/{archiveId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
+
+      match /storage_audit_logs/{logId} {
+        allow read, write: if isApprovedShopDevice(shopCode) || isShopOwner(shopCode);
+      }
     }
   }
 }

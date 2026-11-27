@@ -22,10 +22,12 @@ import 'package:shop/screens/app_documentation_screen.dart';
 import 'package:shop/screens/procurement_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
+import 'package:shop/screens/storage_management_screen.dart';
 import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
+import 'package:shop/services/storage_monitor_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -265,6 +267,9 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // Persistent Cloud Storage Warning Banner (>= 75% / >= 90%)
+              _buildStorageWarningBanner(),
+
               // In-App Price Caution Notification Banner
               _buildPriceCautionBanner(),
 
@@ -1440,6 +1445,73 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildStorageWarningBanner() {
+    return ListenableBuilder(
+      listenable: StorageMonitorService.instance,
+      builder: (context, _) {
+        final st = StorageMonitorService.instance.status;
+        if (st == null || !st.shouldShowDashboardWarning) {
+          return const SizedBox.shrink();
+        }
+        final isCritical = st.isCritical;
+        final bg = isCritical ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7);
+        final border =
+            isCritical ? const Color(0xFFFCA5A5) : const Color(0xFFFCD34D);
+        final fg = isCritical ? const Color(0xFF991B1B) : const Color(0xFF92400E);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.storage_rounded, color: fg, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isCritical
+                          ? 'Cloud Storage Critical (${st.utilizationPercent.toStringAsFixed(0)}%)'
+                          : 'Cloud Storage Warning (${st.utilizationPercent.toStringAsFixed(0)}%)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: fg,
+                      ),
+                    ),
+                    Text(
+                      '${st.remainingMb.toStringAsFixed(1)} MB remaining${isCritical ? ' • Auto-cleanup active' : ''}',
+                      style: TextStyle(fontSize: 11, color: fg),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const StorageManagementScreen(),
+                    ),
+                  );
+                },
+                child: Text(
+                  'Manage',
+                  style: TextStyle(fontWeight: FontWeight.w800, color: fg),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

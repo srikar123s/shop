@@ -14,7 +14,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 8;
+  static const int dbVersion = 9;
 
   Database? _database;
   Future<Database>? _initDbFuture;
@@ -385,6 +385,46 @@ class DatabaseHelper {
         await db.execute('ALTER TABLE orders ADD COLUMN box_count INTEGER NOT NULL DEFAULT 0');
       } catch (_) {}
     }
+    if (oldVersion < 9) {
+      await _createStorageManagementTables(db);
+    }
+  }
+
+  Future<void> _createStorageManagementTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS storage_archives (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        archive_id TEXT NOT NULL UNIQUE,
+        rule_applied TEXT NOT NULL,
+        date_range_start TEXT NOT NULL,
+        date_range_end TEXT NOT NULL,
+        record_count INTEGER NOT NULL DEFAULT 0,
+        archived_doc_ids_json TEXT NOT NULL,
+        checksum TEXT,
+        compressed_gzip_base64 TEXT NOT NULL,
+        verified INTEGER NOT NULL DEFAULT 0,
+        restored_at TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS storage_audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT NOT NULL,
+        job_id TEXT,
+        archive_id TEXT,
+        rule_applied TEXT,
+        status TEXT NOT NULL,
+        records_archived INTEGER NOT NULL DEFAULT 0,
+        records_deleted INTEGER NOT NULL DEFAULT 0,
+        bytes_before INTEGER NOT NULL DEFAULT 0,
+        bytes_after INTEGER NOT NULL DEFAULT 0,
+        reclaimed_bytes INTEGER NOT NULL DEFAULT 0,
+        message TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   Future<void> _createDeliveryTables(Database db) async {
@@ -538,6 +578,7 @@ class DatabaseHelper {
     ''');
 
     await _createDeliveryTables(db);
+    await _createStorageManagementTables(db);
 
     await db.execute(
       'CREATE INDEX idx_customers_name ON customers(name COLLATE NOCASE)',

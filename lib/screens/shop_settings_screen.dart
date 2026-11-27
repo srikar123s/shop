@@ -9,10 +9,12 @@ import 'package:shop/screens/app_documentation_screen.dart';
 import 'package:shop/screens/quantity_shortcuts_screen.dart';
 import 'package:shop/screens/shop_sync_screen.dart';
 import 'package:shop/screens/simple_product_admin_screen.dart';
+import 'package:shop/screens/storage_management_screen.dart';
 import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
+import 'package:shop/services/storage_monitor_service.dart';
 
 class ShopSettingsScreen extends StatefulWidget {
   const ShopSettingsScreen({
@@ -1547,6 +1549,41 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => const ShopSyncScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.storage_rounded,
+                      color: Colors.teal.shade700),
+                ),
+                title: Text(
+                  s.t('storageManagement'),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  StorageMonitorService.instance.status != null
+                      ? '${StorageMonitorService.instance.status!.utilizationPercent.toStringAsFixed(1)}% used • ${StorageMonitorService.instance.status!.remainingMb.toStringAsFixed(1)} MB free'
+                      : 'Monitor cloud storage, auto-archiving & backups',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const StorageManagementScreen(),
                     ),
                   );
                 },

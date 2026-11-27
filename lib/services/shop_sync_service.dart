@@ -17,6 +17,7 @@ import 'package:shop/models/shop_profile.dart';
 import 'package:shop/services/app_notification_service.dart';
 import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
+import 'package:shop/services/storage_monitor_service.dart';
 import 'package:sqflite/sqflite.dart';
 
 enum SyncStatus {
@@ -1165,6 +1166,7 @@ class ShopSyncService extends ChangeNotifier {
     unawaited(FCMService.instance.subscribeToShopTopic(shopCode).catchError((e) {
       debugPrint('[ShopSyncService] Error subscribing to FCM shop topic: $e');
     }));
+    StorageMonitorService.instance.startListening(shopCode);
 
     // 1. Orders live stream
     _ordersSub = firestore
@@ -1872,6 +1874,7 @@ class ShopSyncService extends ChangeNotifier {
     _shopDocSub = null;
     _notifSub?.cancel();
     _notifSub = null;
+    StorageMonitorService.instance.stopListening();
   }
 
   @override

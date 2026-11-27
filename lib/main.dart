@@ -18,6 +18,7 @@ import 'package:shop/services/backup_service.dart';
 import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
+import 'package:shop/services/storage_monitor_service.dart';
 
 const bool kPureOfflineMode =
     bool.fromEnvironment('STANDALONE_LOCAL', defaultValue: false);
@@ -57,6 +58,7 @@ void main() async {
   try {
     await DatabaseHelper.instance.database;
     await ShopCustomizationService.instance.initialize();
+    await StorageMonitorService.instance.initialize();
     unawaited(AppNotificationService.instance.initialize().catchError((e) {
       debugPrint('Notification service init error: $e');
     }));

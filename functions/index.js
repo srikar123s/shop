@@ -1,6 +1,10 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const { MetricServiceClient } = require('@google-cloud/monitoring');
+const { evaluateAndManageShopStorage } = require('./storage_manager');
 admin.initializeApp();
+
+const monitoringClient = new MetricServiceClient();
 
 const HIGH_PRIORITY_CHANNEL_ID = 'shop_alerts_high_priority_v1';
 
@@ -244,6 +248,68 @@ exports.scheduledShopAlerts = functions.pubsub
           console.error(`[Cron] Failed sending to ${topic}:`, e);
         }
       }
+    }
+    return null;
+  });
+
+/**
+ * Scheduled Storage Monitor: Runs every 6 hours to check actual Firestore storage
+ * via GCP Cloud Monitoring / Firestore Admin stats and execute automatic cleanup >= 90%.
+ */
+exports.scheduledStorageMonitor = functions.pubsub
+  .schedule('every 6 hours')
+  .timeZone('Asia/Kolkata')
+  .onRun(async () => {
+    const shopsSnap = await admin.firestore().collection('shops').get();
+    for (const shopDoc of shopsSnap.docs) {
+      try {
+        await evaluateAndManageShopStorage({
+          admin,
+          shopCode: shopDoc.id,
+          monitoringClient,
+          jobId: `sched_${Date.now()}_${shopDoc.id}`,
+        });
+      } catch (err) {
+        console.error(`[StorageMonitor] Failed for shop ${shopDoc.id}:`, err);
+      }
+    }
+    return null;
+  });
+
+/**
+ * On-demand Storage Check Trigger: Activated when an approved device requests
+ * a storage check via shops/{shopCode}/system/storage_check_request.
+ */
+exports.onStorageCheckRequested = functions.firestore
+  .document('shops/{shopCode}/system/storage_check_request')
+  .onWrite(async (change, context) => {
+    const data = change.after.exists ? change.after.data() : null;
+    if (!data || data.status !== 'requested') return null;
+
+    const shopCode = context.params.shopCode;
+    try {
+      const result = await evaluateAndManageShopStorage({
+        admin,
+        shopCode,
+        monitoringClient,
+        jobId: `manual_${Date.now()}_${shopCode}`,
+      });
+      await change.after.ref.set(
+        {
+          status: result.skipped ? 'already_running' : 'completed',
+          completedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      await change.after.ref.set(
+        {
+          status: 'error',
+          error: String(err),
+          completedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
     }
     return null;
   });
