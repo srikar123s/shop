@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
@@ -45,6 +46,61 @@ class _CustomerKhataPassbookScreenState
   double _creditLimit = 0.0;
   String _filterType = 'all'; // 'all', 'debit', 'credit'
   bool _newestFirst = true;
+  bool _isCustomerLocked = false;
+  final LocalAuthentication _localAuth = LocalAuthentication();
+
+  Future<void> _enableCustomerLock() async {
+    try {
+      final supported = await _localAuth.isDeviceSupported();
+      if (!supported) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please enable a Phone Screen Lock (PIN, Pattern, or Fingerprint) in Android Settings first.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // Fallback: if platform check fails, still allow locking if device supports it
+    }
+    if (!mounted) return;
+    setState(() => _isCustomerLocked = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Customer View Locked. Tap Unlock and use your phone screen lock to exit.',
+        ),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _unlockCustomerView() async {
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Verify phone screen lock to unlock Khata',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
+      );
+      if (authenticated && mounted) {
+        setState(() => _isCustomerLocked = false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not verify screen lock: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -810,8 +866,21 @@ class _CustomerKhataPassbookScreenState
     final isAdvance = _totalDue < -0.01;
     final advanceAmt = -_totalDue;
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isCustomerLocked,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isCustomerLocked && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Locked! Tap Unlock at the top to go back.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: !_isCustomerLocked,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -831,51 +900,96 @@ class _CustomerKhataPassbookScreenState
           ],
         ),
         actions: [
-          if (widget.customerPhone != null &&
-              widget.customerPhone!.isNotEmpty) ...[
+          if (_isCustomerLocked)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.amberAccent,
+                ),
+                icon: const Icon(Icons.lock_rounded, size: 18),
+                label: const Text(
+                  'Unlock',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                onPressed: _unlockCustomerView,
+              ),
+            )
+          else ...[
             IconButton(
-              tooltip: 'Call Customer',
-              icon: const Icon(Icons.call_outlined),
-              onPressed: _callCustomer,
+              tooltip: 'Lock for Customer View',
+              icon: const Icon(Icons.lock_open_rounded),
+              onPressed: _enableCustomerLock,
+            ),
+            if (widget.customerPhone != null &&
+                widget.customerPhone!.isNotEmpty) ...[
+              IconButton(
+                tooltip: 'Call Customer',
+                icon: const Icon(Icons.call_outlined),
+                onPressed: _callCustomer,
+              ),
+              IconButton(
+                tooltip: 'WhatsApp Reminder',
+                icon: const Icon(Icons.chat_outlined),
+                onPressed: _showReminderOptions,
+              ),
+            ],
+            IconButton(
+              tooltip: 'Share PDF Statement',
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              onPressed: () async {
+                await InvoicePdfService.instance.shareCustomerKhataStatement(
+                  customerName: widget.customerName,
+                  customerPhone: widget.customerPhone,
+                  ledgerEntries: _ledgerEntries,
+                  totalDue: _totalDue,
+                  totalBilled: _totalBilled,
+                  totalPaid: _totalPaid,
+                );
+              },
             ),
             IconButton(
-              tooltip: 'WhatsApp Reminder',
-              icon: const Icon(Icons.chat_outlined),
-              onPressed: _showReminderOptions,
+              tooltip: 'Print Statement',
+              icon: const Icon(Icons.print_outlined),
+              onPressed: () async {
+                await InvoicePdfService.instance.printCustomerKhataStatement(
+                  customerName: widget.customerName,
+                  customerPhone: widget.customerPhone,
+                  ledgerEntries: _ledgerEntries,
+                  totalDue: _totalDue,
+                  totalBilled: _totalBilled,
+                  totalPaid: _totalPaid,
+                );
+              },
             ),
           ],
-          IconButton(
-            tooltip: 'Share PDF Statement',
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            onPressed: () async {
-              await InvoicePdfService.instance.shareCustomerKhataStatement(
-                customerName: widget.customerName,
-                customerPhone: widget.customerPhone,
-                ledgerEntries: _ledgerEntries,
-                totalDue: _totalDue,
-                totalBilled: _totalBilled,
-                totalPaid: _totalPaid,
-              );
-            },
-          ),
-          IconButton(
-            tooltip: 'Print Statement',
-            icon: const Icon(Icons.print_outlined),
-            onPressed: () async {
-              await InvoicePdfService.instance.printCustomerKhataStatement(
-                customerName: widget.customerName,
-                customerPhone: widget.customerPhone,
-                ledgerEntries: _ledgerEntries,
-                totalDue: _totalDue,
-                totalBilled: _totalBilled,
-                totalPaid: _totalPaid,
-              );
-            },
-          ),
         ],
       ),
       body: Column(
         children: [
+          if (_isCustomerLocked)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: const Color(0xFFFEF3C7),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_outline,
+                      size: 16, color: Color(0xFF92400E)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Customer View Locked • Showing only ${widget.customerName}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF92400E),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           // Hero Balance Card
           Container(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -937,7 +1051,7 @@ class _CustomerKhataPassbookScreenState
                           ),
                       ],
                     ),
-                    if (hasDue)
+                    if (hasDue && !_isCustomerLocked)
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.white,
@@ -1065,20 +1179,21 @@ class _CustomerKhataPassbookScreenState
                                 ),
                               ],
                             ),
-                            InkWell(
-                              onTap: _showEditCreditLimitDialog,
-                              child: const Padding(
-                                padding: EdgeInsets.all(2),
-                                child: Text(
-                                  'Edit Limit',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    decoration: TextDecoration.underline,
+                            if (!_isCustomerLocked)
+                              InkWell(
+                                onTap: _showEditCreditLimitDialog,
+                                child: const Padding(
+                                  padding: EdgeInsets.all(2),
+                                  child: Text(
+                                    'Edit Limit',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      decoration: TextDecoration.underline,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -1096,7 +1211,7 @@ class _CustomerKhataPassbookScreenState
                       ],
                     ),
                   ),
-                ] else ...[
+                ] else if (!_isCustomerLocked) ...[
                   const SizedBox(height: 8),
                   InkWell(
                     onTap: _showEditCreditLimitDialog,
@@ -1604,63 +1719,66 @@ class _CustomerKhataPassbookScreenState
       ),
 
       // Bottom Khatabook Action Bar: YOU GAVE vs YOU GOT
-      bottomSheet: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, -3),
+      bottomSheet: _isCustomerLocked
+          ? null
+          : Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, -3),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red.shade800,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text(
+                          'YOU GAVE ₹',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              letterSpacing: 0.5),
+                        ),
+                        onPressed: _showAddManualDebitDialog,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: const Icon(Icons.arrow_downward_rounded, size: 18),
+                        label: const Text(
+                          'YOU GOT ₹',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              letterSpacing: 0.5),
+                        ),
+                        onPressed: _showReceivePaymentDialog,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
-        child: SafeArea(
-          child: Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.red.shade800,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text(
-                    'YOU GAVE ₹',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        letterSpacing: 0.5),
-                  ),
-                  onPressed: _showAddManualDebitDialog,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F766E),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                  icon: const Icon(Icons.arrow_downward_rounded, size: 18),
-                  label: const Text(
-                    'YOU GOT ₹',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        letterSpacing: 0.5),
-                  ),
-                  onPressed: _showReceivePaymentDialog,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

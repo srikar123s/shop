@@ -10,11 +10,11 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val CHANNEL_NAME = "com.example.shop/background_notifications"
     }
