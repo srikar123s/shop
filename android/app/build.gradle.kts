@@ -20,7 +20,12 @@ val releaseKeyAlias = (keystoreProperties["keyAlias"] as String?)?.trim()
 val releaseKeyPassword = (keystoreProperties["keyPassword"] as String?)?.trim()
 val releaseStoreFilePath = (keystoreProperties["storeFile"] as String?)?.trim()
 val releaseStorePassword = (keystoreProperties["storePassword"] as String?)?.trim()
-val releaseStoreFile = releaseStoreFilePath?.takeIf { it.isNotEmpty() }?.let { rootProject.file(it) }
+val releaseStoreFile = releaseStoreFilePath
+    ?.takeIf { it.isNotEmpty() }
+    ?.let { path ->
+        val fromRoot = rootProject.file(path)
+        if (fromRoot.exists()) fromRoot else project.file(path)
+    }
 val hasValidReleaseKeystore = keystorePropertiesFile.exists()
         && !releaseKeyAlias.isNullOrEmpty()
         && !releaseKeyPassword.isNullOrEmpty()
