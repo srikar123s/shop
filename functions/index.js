@@ -1,4 +1,4 @@
-const functions = require('firebase-functions');
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const { MetricServiceClient } = require('@google-cloud/monitoring');
 const { evaluateAndManageShopStorage } = require('./storage_manager');
@@ -9,21 +9,44 @@ const monitoringClient = new MetricServiceClient();
 const HIGH_PRIORITY_CHANNEL_ID = 'shop_alerts_high_priority_v1';
 
 /**
- * Helper to get current date/time parts in Asia/Kolkata regardless of Cloud UTC clock.
+ * Helper to get current date/time parts in the configured shop timezone.
  */
-function getIstClock() {
+function getClockInZone(timeZone = 'Asia/Kolkata') {
+  const safeZone = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : 'Asia/Kolkata';
   const now = new Date();
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Kolkata',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  }).formatToParts(now);
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: safeZone,
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+    }).formatToParts(now);
+  } catch (_) {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+    }).formatToParts(now);
+  }
   const hourPart = parts.find((p) => p.type === 'hour');
   const minPart = parts.find((p) => p.type === 'minute');
   const hour = hourPart ? Number(hourPart.value) % 24 : 0;
   const minute = minPart ? Number(minPart.value) : 0;
   return { hour, minute };
+}
+
+/**
+ * Processes items in bounded parallel batches so multi-tenant cron jobs
+ * complete quickly without hitting Cloud Function timeouts or overwhelming connections.
+ */
+async function runInChunks(items, concurrency, worker) {
+  const safeConcurrency = Math.max(1, concurrency);
+  for (let i = 0; i < items.length; i += safeConcurrency) {
+    const chunk = items.slice(i, i + safeConcurrency);
+    await Promise.allSettled(chunk.map((item) => worker(item)));
+  }
 }
 
 /**
@@ -143,18 +166,14 @@ exports.onOrderCreated = functions.firestore
   });
 
 /**
- * Scheduled Cron Function: Runs every 30 minutes in IST (Asia/Kolkata).
- * Respects each shop's custom `notification_settings` synced in Firestore.
+ * Scheduled Cron Function: Runs every 30 minutes.
+ * Respects each shop's custom `timezone` and `notification_settings` synced in Firestore.
  */
 exports.scheduledShopAlerts = functions.pubsub
   .schedule('*/30 * * * *')
   .timeZone('Asia/Kolkata')
   .onRun(async () => {
-    const { hour, minute } = getIstClock();
-    const nowTotal = hour * 60 + minute;
-    console.log(`[Cron] IST check at ${hour}:${String(minute).padStart(2, '0')}`);
-
-    const matchesTime = (hhmm) => {
+    const matchesTime = (hhmm, nowTotal) => {
       if (!hhmm || typeof hhmm !== 'string') return false;
       const parts = hhmm.split(':');
       if (parts.length < 2) return false;
@@ -166,13 +185,17 @@ exports.scheduledShopAlerts = functions.pubsub
     };
 
     const shopsSnap = await admin.firestore().collection('shops').get();
-    for (const shopDoc of shopsSnap.docs) {
+    await runInChunks(shopsSnap.docs, 10, async (shopDoc) => {
       const rawShopCode = shopDoc.id || '';
       const cleanShopCode = rawShopCode.trim().toLowerCase().replace(/[^a-zA-Z0-9-_.~%]/g, '_');
       const shopData = shopDoc.data() || {};
       const shopName = shopData.shopName || 'Shop';
       const notifSettings = shopData.notification_settings || {};
-      if (notifSettings.enabled === false) continue;
+      if (notifSettings.enabled === false) return;
+
+      const shopTz = shopData.timezone || notifSettings.timezone || 'Asia/Kolkata';
+      const { hour, minute } = getClockInZone(shopTz);
+      const nowTotal = hour * 60 + minute;
 
       const topic = `shop_${cleanShopCode}_alerts`;
       const alertsToSend = [];
@@ -190,7 +213,7 @@ exports.scheduledShopAlerts = functions.pubsub
             hour <= 20 &&
             hour % 2 === 0 &&
             minute < 30) ||
-          (mode === 'scheduled' && pendingTimes.some(matchesTime));
+          (mode === 'scheduled' && pendingTimes.some((t) => matchesTime(t, nowTotal)));
 
         if (shouldSendPending) {
           alertsToSend.push({
@@ -205,7 +228,7 @@ exports.scheduledShopAlerts = functions.pubsub
         const procureTimes = Array.isArray(notifSettings.procure_times)
           ? notifSettings.procure_times
           : ['09:30', '17:30'];
-        if (procureTimes.some(matchesTime)) {
+        if (procureTimes.some((t) => matchesTime(t, nowTotal))) {
           alertsToSend.push({
             title: `📦 Procurement Reminder - ${shopName}`,
             body: 'Check short or out-of-stock items required for customer orders.',
@@ -216,7 +239,7 @@ exports.scheduledShopAlerts = functions.pubsub
 
       if (notifSettings.daily_report_enabled !== false) {
         const reportTime = notifSettings.daily_report_time || '21:00';
-        if (matchesTime(reportTime)) {
+        if (matchesTime(reportTime, nowTotal)) {
           alertsToSend.push({
             title: `🌙 Day-End Closing Report - ${shopName}`,
             body: "Check today's total sales, completed orders, and collected udhaar.",
@@ -248,20 +271,20 @@ exports.scheduledShopAlerts = functions.pubsub
           console.error(`[Cron] Failed sending to ${topic}:`, e);
         }
       }
-    }
+    });
     return null;
   });
 
 /**
- * Scheduled Storage Monitor: Runs every 6 hours to check actual Firestore storage
- * via GCP Cloud Monitoring / Firestore Admin stats and execute automatic cleanup >= 90%.
+ * Scheduled Storage Monitor: Runs every 6 hours to check per-shop Firestore storage
+ * and execute automatic cleanup >= 90% in bounded parallel batches.
  */
 exports.scheduledStorageMonitor = functions.pubsub
   .schedule('every 6 hours')
   .timeZone('Asia/Kolkata')
   .onRun(async () => {
     const shopsSnap = await admin.firestore().collection('shops').get();
-    for (const shopDoc of shopsSnap.docs) {
+    await runInChunks(shopsSnap.docs, 5, async (shopDoc) => {
       try {
         await evaluateAndManageShopStorage({
           admin,
@@ -272,13 +295,14 @@ exports.scheduledStorageMonitor = functions.pubsub
       } catch (err) {
         console.error(`[StorageMonitor] Failed for shop ${shopDoc.id}:`, err);
       }
-    }
+    });
     return null;
   });
 
 /**
- * On-demand Storage Check Trigger: Activated when an approved device requests
+ * On-demand Storage Check Trigger: Activated when the shop owner requests
  * a storage check via shops/{shopCode}/system/storage_check_request.
+ * Enforces a 5-minute cooldown between manual checks unless `force: true`.
  */
 exports.onStorageCheckRequested = functions.firestore
   .document('shops/{shopCode}/system/storage_check_request')
@@ -288,6 +312,26 @@ exports.onStorageCheckRequested = functions.firestore
 
     const shopCode = context.params.shopCode;
     try {
+      const statusSnap = await admin
+        .firestore()
+        .collection('shops')
+        .doc(shopCode)
+        .collection('system')
+        .doc('storage_status')
+        .get();
+      const lastCheckIso = statusSnap.exists ? statusSnap.data()?.lastCheckAt : null;
+      const lastCheckMs = lastCheckIso ? Date.parse(lastCheckIso) : 0;
+      if (!data.force && Number.isFinite(lastCheckMs) && Date.now() - lastCheckMs < 5 * 60 * 1000) {
+        await change.after.ref.set(
+          {
+            status: 'rate_limited',
+            completedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        return null;
+      }
+
       const result = await evaluateAndManageShopStorage({
         admin,
         shopCode,

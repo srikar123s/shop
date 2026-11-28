@@ -22,29 +22,41 @@ class ProductRepository {
     return false;
   }
 
-  Future<List<Product>> searchProducts(String query) async {
+  Future<List<Product>> searchProducts(
+    String query, {
+    int? limit,
+    int? offset,
+  }) async {
     final db = await _databaseHelper.database;
     final normalized = query.trim().toLowerCase();
     final result = await db.query(
       'products',
       where: normalized.isEmpty
-          ? 'is_active = 1'
-          : '''is_active = 1 AND
+          ? 'is_active = 1 AND deleted_at IS NULL'
+          : '''is_active = 1 AND deleted_at IS NULL AND
             (LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(configuration) LIKE ?)''',
       whereArgs: normalized.isEmpty
           ? null
           : <Object?>['%$normalized%', '%$normalized%', '%$normalized%'],
       orderBy: 'name COLLATE NOCASE ASC',
+      limit: limit,
+      offset: offset,
     );
     return result.map(Product.fromMap).toList();
   }
 
-  Future<List<Product>> getAllProducts({bool includeInactive = true}) async {
+  Future<List<Product>> getAllProducts({
+    bool includeInactive = true,
+    int? limit,
+    int? offset,
+  }) async {
     final db = await _databaseHelper.database;
     final result = await db.query(
       'products',
-      where: includeInactive ? null : 'is_active = 1',
+      where: includeInactive ? 'deleted_at IS NULL' : 'is_active = 1 AND deleted_at IS NULL',
       orderBy: 'name COLLATE NOCASE ASC',
+      limit: limit,
+      offset: offset,
     );
     return result.map(Product.fromMap).toList();
   }
@@ -85,9 +97,19 @@ class ProductRepository {
 
     // 1. If product ID is explicitly specified, update by ID
     if (product.id != null) {
-      final nowIso = DateTime.now().toIso8601String();
-      final mapData = product.toMap();
-      mapData['price_updated_at'] = nowIso;
+      final now = DateTime.now();
+      final existingRow = await getProductById(product.id!);
+      final effectiveCloudId = (product.cloudId != null && product.cloudId!.isNotEmpty)
+          ? product.cloudId!
+          : ((existingRow?.cloudId != null && existingRow!.cloudId!.isNotEmpty)
+              ? existingRow.cloudId!
+              : DatabaseHelper.generateUuidV4());
+      final productWithMeta = product.copyWith(
+        cloudId: effectiveCloudId,
+        priceUpdatedAt: now,
+        updatedAt: now,
+      );
+      final mapData = productWithMeta.toMap();
       final affected = await db.update(
         'products',
         mapData,
@@ -97,8 +119,7 @@ class ProductRepository {
       if (affected == 0) {
         await db.insert('products', mapData);
       }
-      final updatedProduct = product.copyWith(priceUpdatedAt: DateTime.tryParse(nowIso));
-      unawaited(ShopSyncService.instance.syncProduct(updatedProduct).catchError((e) {
+      unawaited(ShopSyncService.instance.syncProduct(productWithMeta).catchError((e) {
         debugPrint('Error syncing product: $e');
       }));
       return product.id!;
@@ -114,16 +135,26 @@ class ProductRepository {
     int? matchedId = exactMatch.isNotEmpty ? (exactMatch.first['id'] as int) : null;
 
     int savedId;
+    final nowIso = DateTime.now().toIso8601String();
     if (matchedId != null) {
+      final existingCloudId = exactMatch.first['cloud_id'] as String?;
+      final effectiveCloudId = (existingCloudId != null && existingCloudId.isNotEmpty)
+          ? existingCloudId
+          : ((product.cloudId != null && product.cloudId!.isNotEmpty)
+              ? product.cloudId!
+              : DatabaseHelper.generateUuidV4());
       final mapData = product.toMap();
       await db.update(
         'products',
         {
+          'cloud_id': effectiveCloudId,
           'name': trimmedName,
           'category': product.category,
           'is_active': product.isActive ? 1 : 0,
           'configuration': mapData['configuration'],
-          'price_updated_at': DateTime.now().toIso8601String(),
+          'price_updated_at': nowIso,
+          'updated_at': nowIso,
+          'deleted_at': null,
           'needs_review': product.needsReview ? 1 : 0,
         },
         where: 'id = ?',
@@ -132,11 +163,16 @@ class ProductRepository {
       savedId = matchedId;
     } else {
       // 3. Otherwise insert as a new product
+      final effectiveCloudId = (product.cloudId != null && product.cloudId!.isNotEmpty)
+          ? product.cloudId!
+          : DatabaseHelper.generateUuidV4();
       savedId = await db.insert('products', {
         ...product.toMap(),
+        'cloud_id': effectiveCloudId,
         'name': trimmedName,
-        'created_at': DateTime.now().toIso8601String(),
-        'price_updated_at': DateTime.now().toIso8601String(),
+        'created_at': nowIso,
+        'price_updated_at': nowIso,
+        'updated_at': nowIso,
       });
     }
 
@@ -151,6 +187,90 @@ class ProductRepository {
     }));
 
     return savedId;
+  }
+
+  /// Inserts or updates a batch of products inside a single SQLite transaction
+  /// and pushes them using Firestore batch commits (or sync_outbox if offline).
+  Future<int> upsertProductsBatch(List<Product> products) async {
+    if (products.isEmpty) return 0;
+    final db = await _databaseHelper.database;
+    final now = DateTime.now();
+    final nowIso = now.toIso8601String();
+    final savedProducts = <Product>[];
+
+    await db.transaction((txn) async {
+      for (final product in products) {
+        final trimmedName = product.name.trim();
+        if (trimmedName.isEmpty) continue;
+        final lowerName = trimmedName.toLowerCase();
+
+        final existing = await txn.query(
+          'products',
+          columns: ['id', 'cloud_id', 'created_at'],
+          where: 'LOWER(TRIM(name)) = ?',
+          whereArgs: [lowerName],
+          limit: 1,
+        );
+
+        final mapData = product.toMap();
+        if (existing.isNotEmpty) {
+          final id = (existing.first['id'] as num).toInt();
+          final existingCloudId = existing.first['cloud_id'] as String?;
+          final cloudId = (existingCloudId != null && existingCloudId.isNotEmpty)
+              ? existingCloudId
+              : ((product.cloudId != null && product.cloudId!.isNotEmpty)
+                  ? product.cloudId!
+                  : DatabaseHelper.generateUuidV4());
+          await txn.update(
+            'products',
+            {
+              'cloud_id': cloudId,
+              'name': trimmedName,
+              'category': product.category,
+              'is_active': product.isActive ? 1 : 0,
+              'configuration': mapData['configuration'],
+              'price_updated_at': nowIso,
+              'updated_at': nowIso,
+              'deleted_at': null,
+              'needs_review': product.needsReview ? 1 : 0,
+            },
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+          savedProducts.add(product.copyWith(
+            id: id,
+            cloudId: cloudId,
+            priceUpdatedAt: now,
+            updatedAt: now,
+            createdAt: DateTime.tryParse(existing.first['created_at']?.toString() ?? '') ?? now,
+          ));
+        } else {
+          final cloudId = (product.cloudId != null && product.cloudId!.isNotEmpty)
+              ? product.cloudId!
+              : DatabaseHelper.generateUuidV4();
+          final id = await txn.insert('products', {
+            ...mapData,
+            'cloud_id': cloudId,
+            'name': trimmedName,
+            'created_at': nowIso,
+            'price_updated_at': nowIso,
+            'updated_at': nowIso,
+          });
+          savedProducts.add(product.copyWith(
+            id: id,
+            cloudId: cloudId,
+            priceUpdatedAt: now,
+            updatedAt: now,
+            createdAt: now,
+          ));
+        }
+      }
+    });
+
+    unawaited(ShopSyncService.instance.syncProductsBatch(savedProducts).catchError((e) {
+      debugPrint('Error batch syncing products: $e');
+    }));
+    return savedProducts.length;
   }
 
   Future<int> getNeedsReviewCount() async {
@@ -168,7 +288,10 @@ class ProductRepository {
     final db = await _databaseHelper.database;
     await db.update(
       'products',
-      {'needs_review': 0},
+      {
+        'needs_review': 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -188,7 +311,7 @@ class ProductRepository {
     final cutoff = DateTime.now().subtract(Duration(days: thresholdDays)).toIso8601String();
     final res = await db.rawQuery('''
       SELECT COUNT(*) as count FROM products
-      WHERE is_active = 1
+      WHERE is_active = 1 AND deleted_at IS NULL
         AND (
           COALESCE(price_updated_at, created_at) < ?
           OR (price_updated_at IS NULL AND created_at IS NULL)
@@ -215,7 +338,7 @@ class ProductRepository {
     final nowIso = DateTime.now().toIso8601String();
     await db.update(
       'products',
-      {'price_updated_at': nowIso},
+      {'price_updated_at': nowIso, 'updated_at': nowIso},
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -234,7 +357,10 @@ class ProductRepository {
     final db = await _databaseHelper.database;
     await db.update(
       'products',
-      {'is_active': isActive ? 1 : 0},
+      {
+        'is_active': isActive ? 1 : 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -251,7 +377,16 @@ class ProductRepository {
 
   Future<void> deleteProduct(int id) async {
     final db = await _databaseHelper.database;
+    String? cloudId;
     await db.transaction((txn) async {
+      final rows = await txn.query(
+        'products',
+        columns: ['cloud_id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      cloudId = rows.isNotEmpty ? rows.first['cloud_id'] as String? : null;
       await txn.delete(
         'product_options',
         where: 'product_id = ?',
@@ -263,13 +398,27 @@ class ProductRepository {
         whereArgs: [id],
       );
     });
+    if (cloudId != null && cloudId!.isNotEmpty) {
+      unawaited(ShopSyncService.instance.deleteProductFromCloud(cloudId!).catchError((e) {
+        debugPrint('Error propagating product delete tombstone: $e');
+      }));
+    }
   }
 
   Future<void> deleteAllProducts() async {
     final db = await _databaseHelper.database;
+    final rows = await db.query('products', columns: ['cloud_id']);
     await db.transaction((txn) async {
       await txn.delete('product_options');
       await txn.delete('products');
     });
+    for (final r in rows) {
+      final cid = r['cloud_id'] as String?;
+      if (cid != null && cid.isNotEmpty) {
+        unawaited(ShopSyncService.instance.deleteProductFromCloud(cid).catchError((e) {
+          debugPrint('Error propagating product delete tombstone: $e');
+        }));
+      }
+    }
   }
 }

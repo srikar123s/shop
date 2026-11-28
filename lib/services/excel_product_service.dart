@@ -1,11 +1,9 @@
-import 'dart:convert';
 import 'dart:io';
-import 'package:archive/archive.dart';
 import 'package:csv/csv.dart';
-import 'package:excel/excel.dart' as xl;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/models/product.dart';
+import 'package:shop/services/excel_workbook_parser.dart';
 
 class ExcelProductService {
   static String normalizeUnit(String raw) {
@@ -57,150 +55,19 @@ class ExcelProductService {
     return raw.trim()[0].toUpperCase() + raw.trim().substring(1);
   }
 
-  /// Parses a file (.xlsx, .xls, or .csv) with fuzzy header detection and auto-grouping
+  /// Parses a file (.xlsx or .csv) with fuzzy header detection and auto-grouping.
+  /// Legacy binary `.xls` workbooks are explicitly rejected.
   static Future<List<Product>> parseProductsFromFile(File file) async {
-    final filePath = file.path.toLowerCase();
     final bytes = await file.readAsBytes();
-
-    List<List<String>> rows = [];
-    if (filePath.endsWith('.xlsx') || filePath.endsWith('.xls')) {
-      try {
-        rows = parseXlsxArchive(bytes);
-      } catch (_) {
-        rows = parseCsvBytes(bytes);
-      }
-    } else {
-      rows = parseCsvBytes(bytes);
-    }
-
+    final rows = ExcelWorkbookParser.parseFileBytes(bytes, file.path);
     return parseProductsFromRows(rows);
   }
 
-  static List<List<String>> parseCsvBytes(List<int> bytes) {
-    try {
-      final content = utf8.decode(bytes);
-      final rawRows = const CsvToListConverter(eol: '\n').convert(content);
-      return rawRows
-          .map((r) => r.map((c) => c?.toString().trim() ?? '').toList())
-          .where((r) => r.any((c) => c.isNotEmpty))
-          .toList();
-    } catch (_) {
-      final content = String.fromCharCodes(bytes);
-      final rawRows = const CsvToListConverter(eol: '\n').convert(content);
-      return rawRows
-          .map((r) => r.map((c) => c?.toString().trim() ?? '').toList())
-          .where((r) => r.any((c) => c.isNotEmpty))
-          .toList();
-    }
-  }
+  static List<List<String>> parseCsvBytes(List<int> bytes) =>
+      ExcelWorkbookParser.parseCsvBytes(bytes);
 
-  static List<List<String>> parseXlsxArchive(List<int> bytes) {
-    try {
-      final excel = xl.Excel.decodeBytes(bytes);
-      final List<List<String>> xlRows = [];
-      for (final table in excel.tables.keys) {
-        final sheet = excel.tables[table];
-        if (sheet == null) continue;
-        for (final row in sheet.rows) {
-          final rowStrings =
-              row.map((cell) => cell?.value?.toString().trim() ?? '').toList();
-          if (rowStrings.any((c) => c.isNotEmpty)) {
-            xlRows.add(rowStrings);
-          }
-        }
-        if (xlRows.isNotEmpty) break;
-      }
-      if (xlRows.isNotEmpty) return xlRows;
-    } catch (_) {}
-
-    final archive = ZipDecoder().decodeBytes(bytes);
-    final sharedStrings = <String>[];
-    final ssFile = archive.findFile('xl/sharedStrings.xml');
-    if (ssFile != null) {
-      final content = utf8.decode(ssFile.content as List<int>);
-      final tReg = RegExp(r'<t[^>]*>(.*?)</t>', dotAll: true);
-      final siReg = RegExp(r'<si>(.*?)</si>', dotAll: true);
-      for (final siMatch in siReg.allMatches(content)) {
-        final siContent = siMatch.group(1) ?? '';
-        final tMatches = tReg.allMatches(siContent);
-        final text = tMatches.map((m) => _unescapeXml(m.group(1) ?? '')).join();
-        sharedStrings.add(text);
-      }
-    }
-
-    ArchiveFile? sheetFile;
-    for (final file in archive.files) {
-      if (file.name.startsWith('xl/worksheets/sheet') &&
-          file.name.endsWith('.xml')) {
-        sheetFile = file;
-        break;
-      }
-    }
-    if (sheetFile == null) return [];
-
-    final sheetXml = utf8.decode(sheetFile.content as List<int>);
-    final rows = <List<String>>[];
-
-    final rowRegExp =
-        RegExp(r'<row[^>]*r="(\d+)"[^>]*>(.*?)</row>', dotAll: true);
-    final cellRegExp =
-        RegExp(r'<c[^>]*r="([A-Z]+)\d+"([^>]*)>(.*?)</c>', dotAll: true);
-    final valRegExp = RegExp(r'<v>(.*?)</v>', dotAll: true);
-    final inlineStrRegExp = RegExp(r'<t[^>]*>(.*?)</t>', dotAll: true);
-
-    for (final rowMatch in rowRegExp.allMatches(sheetXml)) {
-      final rowContent = rowMatch.group(2) ?? '';
-      final rowValuesMap = <String, String>{};
-
-      for (final cellMatch in cellRegExp.allMatches(rowContent)) {
-        final colRef = cellMatch.group(1)!;
-        final attrs = cellMatch.group(2) ?? '';
-        final cellInner = cellMatch.group(3) ?? '';
-
-        String cellValue = '';
-        if (attrs.contains('t="s"')) {
-          final vMatch = valRegExp.firstMatch(cellInner);
-          if (vMatch != null) {
-            final idx = int.tryParse(vMatch.group(1) ?? '');
-            if (idx != null && idx < sharedStrings.length) {
-              cellValue = sharedStrings[idx];
-            }
-          }
-        } else if (attrs.contains('t="inlineStr"')) {
-          final tMatches = inlineStrRegExp.allMatches(cellInner);
-          cellValue =
-              tMatches.map((m) => _unescapeXml(m.group(1) ?? '')).join();
-        } else {
-          final vMatch = valRegExp.firstMatch(cellInner);
-          if (vMatch != null) {
-            cellValue = _unescapeXml(vMatch.group(1) ?? '');
-          } else {
-            final tMatch = inlineStrRegExp.firstMatch(cellInner);
-            if (tMatch != null) {
-              cellValue = _unescapeXml(tMatch.group(1) ?? '');
-            }
-          }
-        }
-
-        rowValuesMap[colRef] = cellValue.trim();
-      }
-
-      if (rowValuesMap.isNotEmpty) {
-        int maxColIdx = 0;
-        for (final col in rowValuesMap.keys) {
-          final idx = _colRefToIndex(col);
-          if (idx > maxColIdx) maxColIdx = idx;
-        }
-        final rowList = List<String>.filled(maxColIdx + 1, '');
-        for (final entry in rowValuesMap.entries) {
-          rowList[_colRefToIndex(entry.key)] = entry.value;
-        }
-        rows.add(rowList);
-      }
-    }
-
-    return rows;
-  }
+  static List<List<String>> parseXlsxArchive(List<int> bytes) =>
+      ExcelWorkbookParser.parseXlsxArchive(bytes);
 
   /// Upgraded 100x parser supporting both standard multi-option tables
   /// and flat variant rows with auto-grouping and fuzzy column matching
@@ -413,9 +280,7 @@ class ExcelProductService {
             final normalizedKey = optionVals.join(' • ');
 
             variantPrices[normalizedKey] = priceVal;
-            variantPrices[normalizedKey.toLowerCase()] = priceVal;
             variantPrices[comboStr] = priceVal;
-            variantPrices[comboStr.toLowerCase()] = priceVal;
           }
         }
       }
@@ -432,10 +297,8 @@ class ExcelProductService {
         if (singleComboValues.isNotEmpty) {
           final comboKey = singleComboValues.join(' • ');
           variantPrices[comboKey] = basePrice;
-          variantPrices[comboKey.toLowerCase()] = basePrice;
           for (final val in singleComboValues) {
             variantPrices[val] = basePrice;
-            variantPrices[val.toLowerCase()] = basePrice;
           }
         }
       }
@@ -517,23 +380,6 @@ class ExcelProductService {
     }
 
     return productMap.values.toList();
-  }
-
-  static int _colRefToIndex(String col) {
-    int result = 0;
-    for (int i = 0; i < col.length; i++) {
-      result = result * 26 + (col.codeUnitAt(i) - 64);
-    }
-    return result - 1;
-  }
-
-  static String _unescapeXml(String text) {
-    return text
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
   }
 
   /// Shares a rich, professional sample CSV template

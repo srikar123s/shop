@@ -65,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _refreshData() {
     _pendingStatsFuture = widget.orderRepository.getPendingAndProcurementStats();
     _needsReviewFuture = widget.productRepository.getNeedsReviewCount();
-    _recentOrdersFuture = widget.orderRepository.searchOrderSummaries('');
+    _recentOrdersFuture = widget.orderRepository.searchOrderSummaries('', limit: 25);
     _priceCautionFuture = _fetchPriceCaution();
     _topSellingFuture = DatabaseHelper.instance.getTopSellingProducts(limit: 5);
   }
@@ -1083,104 +1083,111 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 12),
 
-              // Business Reports & Analytics Quick Access Row
-              Row(
-                children: [
-                  Expanded(
-                    child: Card(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => const EveningReportScreen(),
+              // Business Reports & Analytics Quick Access Row (hidden when bill totals restricted)
+              if (ShopSyncService.instance.canViewBillTotals)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const EveningReportScreen(),
+                              ),
+                            );
+                            if (mounted) {
+                              setState(_refreshData);
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade50,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.nightlight_round,
+                                      color: Color(0xFF0F766E), size: 22),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  s.t('eveningReportShort'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  "Today's closing & image",
+                                  style: TextStyle(
+                                      color: Colors.grey.shade600, fontSize: 10.5),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.shade50,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Icon(Icons.nightlight_round,
-                                    color: Color(0xFF0F766E), size: 22),
-                              ),
-                              const SizedBox(height: 10),
-                              const Text(
-                                'Evening Report',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13.5,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                "Today's closing & image",
-                                style: TextStyle(
-                                    color: Colors.grey.shade600, fontSize: 10.5),
-                              ),
-                            ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Card(
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => const LifetimeReportScreen(),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => const LifetimeReportScreen(),
+                              ),
+                            );
+                            if (mounted) {
+                              setState(_refreshData);
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.analytics_outlined,
+                                      color: Color(0xFF0284C7), size: 22),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  s.t('lifetimeReportShort'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'AOV, CA Excel & Dues',
+                                  style: TextStyle(
+                                      color: Colors.grey.shade600, fontSize: 10.5),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.shade50,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Icon(Icons.analytics_outlined,
-                                    color: Color(0xFF0284C7), size: 22),
-                              ),
-                              const SizedBox(height: 10),
-                              const Text(
-                                'Lifetime Report',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13.5,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'AOV, CA Excel & Dues',
-                                style: TextStyle(
-                                    color: Colors.grey.shade600, fontSize: 10.5),
-                              ),
-                            ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
 
               const SizedBox(height: 24),
 
@@ -1495,13 +1502,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () {
-                  Navigator.push(
+                onPressed: () async {
+                  await Navigator.push(
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => const StorageManagementScreen(),
                     ),
                   );
+                  if (mounted) {
+                    setState(_refreshData);
+                  }
                 },
                 child: Text(
                   'Manage',
@@ -1763,13 +1773,16 @@ class _HomeScreenState extends State<HomeScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          onPressed: () {
-                            Navigator.push(
+                          onPressed: () async {
+                            await Navigator.push(
                               context,
                               MaterialPageRoute<void>(
                                 builder: (_) => const TopSellingScreen(),
                               ),
                             );
+                            if (mounted) {
+                              setState(_refreshData);
+                            }
                           },
                         ),
                       ],
@@ -1917,9 +1930,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                       icon: const Icon(Icons.analytics_outlined, size: 16, color: Color(0xFF0F766E)),
                                       label: const Text('View Full Analytics', style: TextStyle(color: Color(0xFF0F766E), fontSize: 12)),
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                        Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TopSellingScreen()));
+                                      onPressed: () async {
+                                        final navigator = Navigator.of(context);
+                                        navigator.pop();
+                                        await navigator.push(MaterialPageRoute<void>(builder: (_) => const TopSellingScreen()));
+                                        if (mounted) setState(_refreshData);
                                       },
                                     ),
                                   ),
@@ -1943,124 +1958,101 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: const Text(
                         'Check item prices without starting order',
                         style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => PriceListScreen(
-                            productRepository: widget.productRepository,
-                          ),
-                        ),
-                      );
-                    },
+                    onTap: () => _navigateFromDrawer(
+                      PriceListScreen(
+                        productRepository: widget.productRepository,
+                      ),
+                    ),
                   ),
                   if (!isOffline) ...[
                     ListTile(
                       leading: const Icon(Icons.menu_book_rounded,
                           color: Color(0xFF0F766E)),
-                      title: const Text('Khata Book (Udhaar)',
-                          style: TextStyle(
+                      title: Text(s.t('khataBookMenu'),
+                          style: const TextStyle(
                               fontWeight: FontWeight.w600, fontSize: 14)),
                       subtitle: const Text(
                           'Customer balances & payment reminders',
                           style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute<void>(
-                            builder: (_) => KhataBookScreen(
-                              customerRepository: widget.customerRepository,
-                              orderRepository: widget.orderRepository,
-                              productRepository: widget.productRepository,
-                            ),
-                          ),
-                        );
-                      },
+                      onTap: () => _navigateFromDrawer(
+                        KhataBookScreen(
+                          customerRepository: widget.customerRepository,
+                          orderRepository: widget.orderRepository,
+                          productRepository: widget.productRepository,
+                        ),
+                      ),
                     ),
                   ],
-                  ListTile(
-                    leading: const Icon(Icons.nightlight_round,
-                        color: Color(0xFF0F766E)),
-                    title: const Text('Evening Closing Report',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text(
-                        'Day-end business summary & WhatsApp',
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => const EveningReportScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.analytics_outlined,
-                        color: Color(0xFF0F766E)),
-                    title: const Text('Lifetime Business Analytics',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14)),
-                    subtitle: const Text(
-                        'Total sales, top products, high-value clients & PDF',
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute<void>(
-                          builder: (_) => const LifetimeReportScreen(),
-                        ),
-                      );
-                    },
-                  ),
+                  if (ShopSyncService.instance.canViewBillTotals) ...[
+                    ListTile(
+                      leading: const Icon(Icons.nightlight_round,
+                          color: Color(0xFF0F766E)),
+                      title: Text(s.t('eveningClosingReport'),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14)),
+                      subtitle: const Text(
+                          'Day-end business summary & WhatsApp',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      onTap: () => _navigateFromDrawer(const EveningReportScreen()),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.analytics_outlined,
+                          color: Color(0xFF0F766E)),
+                      title: Text(s.t('lifetimeAnalytics'),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14)),
+                      subtitle: const Text(
+                          'Total sales, top products, high-value clients & PDF',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      onTap: () => _navigateFromDrawer(const LifetimeReportScreen()),
+                    ),
+                  ],
                   const Divider(),
-                  ListTile(
-                    leading: const Icon(Icons.inventory_2_outlined,
-                        color: Color(0xFF0F766E)),
-                    title: const Text('Manage Products Catalog', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SimpleProductAdminScreen(productRepository: widget.productRepository)));
-                    },
-                  ),
+                  if (ShopSyncService.instance.canManageProducts)
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined,
+                          color: Color(0xFF0F766E)),
+                      title: Text(s.t('manageProductsMenu'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      onTap: () => _navigateFromDrawer(
+                        SimpleProductAdminScreen(
+                          productRepository: widget.productRepository,
+                        ),
+                      ),
+                    ),
                   ListTile(
                     leading: const Icon(Icons.receipt_long_outlined, color: Color(0xFF0F766E)),
-                    title: const Text('Order History & Bills', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => HistoryScreen(customerRepository: widget.customerRepository, orderRepository: widget.orderRepository, productRepository: widget.productRepository, backupService: widget.backupService)));
-                    },
+                    title: Text(s.t('orderHistoryBills'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    onTap: () => _navigateFromDrawer(
+                      HistoryScreen(
+                        customerRepository: widget.customerRepository,
+                        orderRepository: widget.orderRepository,
+                        productRepository: widget.productRepository,
+                        backupService: widget.backupService,
+                      ),
+                    ),
                   ),
                   ListTile(
                     leading: const Icon(Icons.settings_outlined, color: Color(0xFF0F766E)),
-                    title: const Text('Shop Settings & Shortcuts', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShopSettingsScreen(productRepository: widget.productRepository, locale: widget.locale, onLocaleChanged: widget.onLocaleChanged)));
-                    },
+                    title: Text(s.t('shopSettingsShortcuts'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    onTap: () => _navigateFromDrawer(
+                      ShopSettingsScreen(
+                        productRepository: widget.productRepository,
+                        locale: widget.locale,
+                        onLocaleChanged: widget.onLocaleChanged,
+                      ),
+                    ),
                   ),
                   ListTile(
                     leading: const Icon(Icons.menu_book_rounded, color: Color(0xFF0F766E)),
-                    title: const Text('App Documentation & Manual', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    title: Text(s.t('appDocManual'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                     subtitle: const Text('Pin-to-pin guide for all app features', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AppDocumentationScreen()));
-                    },
+                    onTap: () => _navigateFromDrawer(const AppDocumentationScreen()),
                   ),
                   if (!isOffline) ...[
                     ListTile(
                       leading: const Icon(Icons.cloud_sync_outlined, color: Color(0xFF0F766E)),
-                      title: const Text('Shop Cloud Sync & Partner Devices', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ShopSyncScreen()));
-                      },
+                      title: Text(s.t('shopCloudSyncMenu'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                      onTap: () => _navigateFromDrawer(const ShopSyncScreen()),
                     ),
                   ],
                 ],
@@ -2070,5 +2062,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _navigateFromDrawer(Widget destination) async {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    await navigator.push(
+      MaterialPageRoute<void>(builder: (_) => destination),
+    );
+    if (mounted) {
+      setState(_refreshData);
+    }
   }
 }

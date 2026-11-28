@@ -29,6 +29,7 @@ class ProcurementScreen extends StatefulWidget {
 
 class _ProcurementScreenState extends State<ProcurementScreen> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   List<ProcurementItem> _items = [];
   bool _loading = true;
   String _selectedCategory = 'ALL';
@@ -39,8 +40,16 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
     _loadItems();
   }
 
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _loadItems();
+    });
+  }
+
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -71,6 +80,23 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
   String _formatQty(double qty) =>
       qty % 1 == 0 ? qty.toInt().toString() : qty.toString();
 
+  String _formatPendingByUnit(List<ProcurementItem> items) {
+    final byUnit = <String, double>{};
+    for (final i in items) {
+      final u = i.unit.trim().isNotEmpty ? i.unit.trim() : 'Unit';
+      byUnit[u] = (byUnit[u] ?? 0.0) + i.quantityPending;
+    }
+    final entries = byUnit.entries.toList();
+    if (entries.length == 1) {
+      return '${_formatQty(entries.first.value)} ${entries.first.key} pending delivery';
+    }
+    return entries
+        .take(3)
+        .map((e) => '${_formatQty(e.value)} ${e.key}')
+        .join(' + ') +
+        (entries.length > 3 ? ' + … pending' : ' pending delivery');
+  }
+
   String _getItemCategory(ProcurementItem item) {
     if (item.productSnapshot.isNotEmpty) {
       try {
@@ -98,7 +124,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
   }
 
   Future<void> _markItemProcured(ProcurementItem item) async {
-    HapticFeedback.mediumImpact();
+    await HapticFeedback.mediumImpact();
     await widget.orderRepository.markItemAsProcured(
       itemId: item.itemId,
       orderId: item.orderId,
@@ -111,7 +137,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
         duration: const Duration(seconds: 2),
       ),
     );
-    _loadItems();
+    await _loadItems();
   }
 
   Future<void> _confirmMarkAllProcured() async {
@@ -138,7 +164,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
     );
 
     if (confirm == true && mounted) {
-      HapticFeedback.heavyImpact();
+      await HapticFeedback.heavyImpact();
       await widget.orderRepository.markAllItemsAsProcured();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -147,13 +173,13 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
           backgroundColor: Color(0xFF0F766E),
         ),
       );
-      _loadItems();
+      await _loadItems();
     }
   }
 
   
   Future<void> _shareProcurementList() async {
-    HapticFeedback.lightImpact();
+    await HapticFeedback.lightImpact();
     if (_items.isEmpty) return;
     final shopName = ShopCustomizationService.instance.shopName;
     final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now());
@@ -202,10 +228,6 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalPendingUnits = _items.fold<double>(
-      0,
-      (sum, i) => sum + i.quantityPending,
-    );
     final displayedItems = _filteredItems;
 
     return Scaffold(
@@ -282,7 +304,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
                       Text(
                         _items.isEmpty
                             ? 'All orders are fully fulfilled! 🎉'
-                            : '${_formatQty(totalPendingUnits)} total units pending delivery',
+                            : _formatPendingByUnit(_items),
                         style: TextStyle(
                           color: Colors.teal.shade100,
                           fontSize: 13,
@@ -335,7 +357,7 @@ class _ProcurementScreenState extends State<ProcurementScreen> {
                   borderSide: BorderSide.none,
                 ),
               ),
-              onChanged: (_) => _loadItems(),
+              onChanged: _onSearchChanged,
             ),
           ),
 

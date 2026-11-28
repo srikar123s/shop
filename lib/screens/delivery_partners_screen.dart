@@ -86,98 +86,105 @@ class _DeliveryPartnersScreenState extends State<DeliveryPartnersScreen> {
     final notesCtrl = TextEditingController(text: existing?.notes ?? '');
     final formKey = GlobalKey<FormState>();
 
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          existing == null ? 'Add Delivery Partner' : 'Edit Delivery Partner',
-        ),
-        content: SingleChildScrollView(
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: nameCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Name *',
-                    hintText: 'e.g. Raju Auto',
-                    prefixIcon: Icon(Icons.person_outline),
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            existing == null ? 'Add Delivery Partner' : 'Edit Delivery Partner',
+          ),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Name *',
+                      hintText: 'e.g. Raju Auto',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Enter a name' : null,
                   ),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Enter a name' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    hintText: 'e.g. 9876543210',
-                    prefixIcon: Icon(Icons.phone_outlined),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Phone Number',
+                      hintText: 'e.g. 9876543210',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: vehicleCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Vehicle / Method',
-                    hintText: 'e.g. Auto AP09 1234',
-                    prefixIcon: Icon(Icons.local_shipping_outlined),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: vehicleCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Vehicle / Method',
+                      hintText: 'e.g. Auto AP09 1234',
+                      prefixIcon: Icon(Icons.local_shipping_outlined),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: notesCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Notes (optional)',
-                    prefixIcon: Icon(Icons.notes_outlined),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: notesCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes (optional)',
+                      prefixIcon: Icon(Icons.notes_outlined),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  Navigator.pop(ctx, true);
+                }
+              },
+              child: Text(existing == null ? 'Add' : 'Save'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (formKey.currentState?.validate() ?? false) {
-                Navigator.pop(ctx, true);
-              }
-            },
-            child: Text(existing == null ? 'Add' : 'Save'),
-          ),
-        ],
-      ),
-    );
+      );
 
-    if (saved == true) {
-      if (existing == null) {
-        await _repo.addPartner(
-          name: nameCtrl.text,
-          phone: phoneCtrl.text,
-          vehicleInfo: vehicleCtrl.text,
-          notes: notesCtrl.text,
-        );
-      } else {
-        await _repo.updatePartner(
-          existing.copyWith(
+      if (saved == true) {
+        if (existing == null) {
+          await _repo.addPartner(
             name: nameCtrl.text,
             phone: phoneCtrl.text,
             vehicleInfo: vehicleCtrl.text,
             notes: notesCtrl.text,
-          ),
-        );
+          );
+        } else {
+          await _repo.updatePartner(
+            existing.copyWith(
+              name: nameCtrl.text,
+              phone: phoneCtrl.text,
+              vehicleInfo: vehicleCtrl.text,
+              notes: notesCtrl.text,
+            ),
+          );
+        }
+        await _loadPartners();
       }
-      await _loadPartners();
+    } finally {
+      nameCtrl.dispose();
+      phoneCtrl.dispose();
+      vehicleCtrl.dispose();
+      notesCtrl.dispose();
     }
   }
 

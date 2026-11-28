@@ -1,8 +1,5 @@
-# Release keystore configuration template
-# Copy this file to 'key.properties' in this directory and populate with your production credentials.
-# Do NOT commit 'key.properties' to version control!
-
-storePassword=your-keystore-password
-keyPassword=your-key-password
-keyAlias=your-key-alias
-storeFile=C:\\path\\to\\upload-keystore.jks
+# Copy to android/key.properties (never commit android/key.properties or .jks files)
+storePassword=CHANGE_ME_STORE_PASSWORD
+keyPassword=CHANGE_ME_KEY_PASSWORD
+keyAlias=upload
+storeFile=../keystore/upload-keystore.jks

@@ -1,19 +1,27 @@
 class Customer {
   const Customer({
     this.id,
+    this.cloudId,
     required this.name,
     this.phone,
     this.address,
     this.creditLimit = 0.0,
+    this.isActive = true,
     required this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
   });
 
   final int? id;
+  final String? cloudId;
   final String name;
   final String? phone;
   final String? address;
   final double creditLimit;
+  final bool isActive;
   final DateTime createdAt;
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
 
   /// Returns individual phone numbers if customer has multiple (e.g. "9876543210, 9123456789" -> ["9876543210", "9123456789"])
   List<String> get phoneNumbers => extractNumbers(phone);
@@ -68,41 +76,66 @@ class Customer {
 
   Customer copyWith({
     int? id,
+    String? cloudId,
     String? name,
     String? phone,
     String? address,
     double? creditLimit,
+    bool? isActive,
     DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? deletedAt,
   }) {
     return Customer(
       id: id ?? this.id,
+      cloudId: cloudId ?? this.cloudId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
       address: address ?? this.address,
       creditLimit: creditLimit ?? this.creditLimit,
+      isActive: isActive ?? this.isActive,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
     );
   }
 
   Map<String, Object?> toMap() {
     return {
       'id': id,
+      if (cloudId != null) 'cloud_id': cloudId,
       'name': name,
       'phone': phone,
       'address': address,
       'credit_limit': creditLimit,
+      'is_active': isActive ? 1 : 0,
       'created_at': createdAt.toIso8601String(),
+      if (updatedAt != null) 'updated_at': updatedAt!.toIso8601String(),
+      if (deletedAt != null) 'deleted_at': deletedAt!.toIso8601String(),
     };
   }
 
   factory Customer.fromMap(Map<String, Object?> map) {
+    final rawIsActive = map['is_active'];
+    final active = rawIsActive == null ||
+        rawIsActive == 1 ||
+        rawIsActive == true ||
+        rawIsActive == '1';
     return Customer(
       id: map['id'] as int?,
+      cloudId: map['cloud_id'] as String?,
       name: (map['name'] as String?)?.trim() ?? 'Unknown Customer',
       phone: map['phone'] as String?,
       address: map['address'] as String?,
       creditLimit: (map['credit_limit'] as num?)?.toDouble() ?? 0.0,
+      isActive: active,
       createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt: map['updated_at'] != null
+          ? DateTime.tryParse(map['updated_at'].toString())
+          : null,
+      deletedAt: map['deleted_at'] != null
+          ? DateTime.tryParse(map['deleted_at'].toString())
+          : null,
     );
   }
 }

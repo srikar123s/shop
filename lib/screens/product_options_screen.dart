@@ -65,18 +65,19 @@ class _ProductOptionsScreenState extends State<ProductOptionsScreen> {
     final factor = currentFactor / (baseFactor <= 0 ? 1.0 : baseFactor);
 
     final comboKey = _selected.values.where((v) => v.isNotEmpty).join(' • ');
-    final variantPrices = widget.product.configuration.variantPrices;
 
-    if (comboKey.isNotEmpty &&
-        variantPrices.containsKey(comboKey) &&
-        variantPrices[comboKey]! > 0) {
-      return variantPrices[comboKey]! * factor;
+    final comboPrice = comboKey.isNotEmpty
+        ? widget.product.configuration.lookupVariantPrice(comboKey)
+        : null;
+    if (comboPrice != null && comboPrice > 0) {
+      return comboPrice * factor;
     }
 
     // Fallback to checking any option value key in variantPrices
     for (final val in _selected.values) {
-      if (variantPrices.containsKey(val) && variantPrices[val]! > 0) {
-        return variantPrices[val]! * factor;
+      final valPrice = widget.product.configuration.lookupVariantPrice(val);
+      if (valPrice != null && valPrice > 0) {
+        return valPrice * factor;
       }
     }
 

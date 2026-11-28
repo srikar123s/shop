@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/models/customer.dart';
 import 'package:shop/models/delivery_partner.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/models/product.dart';
@@ -11,6 +15,9 @@ import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/delivery_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
+import 'package:shop/services/archive_service.dart';
+import 'package:shop/services/draft_order_service.dart';
+import 'package:shop/services/excel_product_service.dart';
 import 'package:shop/services/shop_sync_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -653,6 +660,379 @@ void main() {
       );
       expect(id1, equals(id2));
       expect(id2, equals(id3));
+    });
+
+    test('SQLite v11 generates UUID cloud_id, manages sync_outbox backoff, and supports batch upsert', () async {
+      final cust = await customerRepo.createCustomer(
+        name: 'UUID Customer',
+        phone: '9112233445',
+      );
+      expect(cust.cloudId, isNotNull);
+      expect(cust.cloudId!.contains('-'), isTrue);
+
+      final count = await productRepo.upsertProductsBatch([
+        const Product(
+          name: 'Batch Item A',
+          category: 'Hardware',
+          isActive: true,
+          configuration: ProductConfiguration(steps: [], defaultUnit: 'Piece', basePrice: 120),
+        ),
+        const Product(
+          name: 'Batch Item B',
+          category: 'Hardware',
+          isActive: true,
+          configuration: ProductConfiguration(steps: [], defaultUnit: 'Box', basePrice: 450),
+        ),
+      ]);
+      expect(count, 2);
+
+      await ShopSyncService.instance.enqueueOutboxEntry(
+        entityType: 'customer',
+        localId: cust.id,
+        cloudId: cust.cloudId!,
+        error: 'Simulated offline error',
+      );
+      await ShopSyncService.instance.enqueueOutboxEntry(
+        entityType: 'customer',
+        localId: cust.id,
+        cloudId: cust.cloudId!,
+        error: 'Retry #1 error',
+      );
+
+      final db = await dbHelper.database;
+      final outboxRows = await db.query(
+        'sync_outbox',
+        where: 'cloud_id = ?',
+        whereArgs: [cust.cloudId],
+      );
+      expect(outboxRows.length, 1);
+      expect((outboxRows.first['retry_count'] as num).toInt(), 1);
+      expect(outboxRows.first['last_error'], 'Retry #1 error');
+    });
+
+    test('Typed reporting DTOs, customer-scoped drafts, variant lookup & Excel safety work cleanly', () async {
+      // 1. Typed DTO queries
+      final c = await customerRepo.createCustomer(name: 'Typed Client', phone: '9887766554');
+      final orderId = await orderRepo.createOrder(
+        DraftOrder(
+          customer: c,
+          items: [
+            DraftOrderItem(
+              productId: null,
+              itemName: 'Valve',
+              options: const {},
+              quantity: 2,
+              unit: 'Piece',
+              unitPrice: 250,
+            ),
+          ],
+        ),
+        estimateTotal: 500,
+      );
+      await dbHelper.recordOrderPayment(orderId: orderId, paidAmount: 200, paymentMode: 'upi');
+
+      final khataDtos = await dbHelper.getTypedCustomerKhataList();
+      expect(khataDtos.any((k) => k.customerId == c.id && k.balanceDue == 300.0), isTrue);
+      final ledgerDtos = await dbHelper.getTypedCustomerKhataLedger(c.id!);
+      expect(ledgerDtos.any((e) => e.isDebit && !e.isManualDebit), isTrue);
+      final closingDto = await dbHelper.getTypedEveningClosingReport(DateTime.now());
+      expect(closingDto.upiSales, 200.0);
+
+      // 2. Customer-scoped draft isolation
+      final draftService = DraftOrderService();
+      await draftService.saveDraft(
+        DraftOrder(
+          customer: c,
+          items: [
+            DraftOrderItem(
+              productId: null,
+              itemName: 'Item For C1',
+              options: const {},
+              quantity: 1,
+              unit: 'Piece',
+            ),
+          ],
+        ),
+        customerId: c.id,
+      );
+      final c2 = Customer(id: (c.id ?? 1) + 99, name: 'Other Customer', createdAt: DateTime.now());
+      expect(await draftService.getDraft(customerId: c2.id), isNull);
+      expect((await draftService.getDraft(customerId: c.id))?.items.first.itemName, 'Item For C1');
+
+      // 3. Case-insensitive variant price lookup
+      const config = ProductConfiguration(
+        steps: [],
+        variantPrices: {'Red • 1L': 320.0},
+      );
+      expect(config.lookupVariantPrice('red • 1l'), 320.0);
+
+      // 4. Rejects binary .xls and handles attribute order in .xlsx XML fallback
+      final badXls = File(p.join(tempDir.path, 'legacy.xls'));
+      await badXls.writeAsBytes([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+      await expectLater(
+        ExcelProductService.parseProductsFromFile(badXls),
+        throwsFormatException,
+      );
+
+      final archive = Archive();
+      final ssBytes = utf8.encode('<sst><si><t>Heavy Hinge</t></si><si><t>Product Name</t></si></sst>');
+      final sheetBytes = utf8.encode(
+        '<worksheet><sheetData>'
+        '<row r="1"><c t="s" r="A1"><v>1</v></c></row>'
+        '<row r="2"><c t="s" r="A2"><v>0</v></c></row>'
+        '</sheetData></worksheet>',
+      );
+      archive.addFile(ArchiveFile('xl/sharedStrings.xml', ssBytes.length, ssBytes));
+      archive.addFile(ArchiveFile('xl/worksheets/sheet1.xml', sheetBytes.length, sheetBytes));
+      final zipBytes = ZipEncoder().encode(archive)!;
+      final parsedRows = ExcelProductService.parseXlsxArchive(zipBytes);
+      expect(parsedRows.length, 2);
+      expect(parsedRows[1][0], 'Heavy Hinge');
+    });
+
+    test('ArchiveService downloads and caches GCS archives when base64 payload is empty', () async {
+      await customerRepo.createCustomer(name: 'GCS Restored Buyer', phone: '9000112233');
+      final db = await dbHelper.database;
+      final cols = await db.rawQuery('PRAGMA table_info(storage_archives)');
+      expect(cols.map((r) => r['name']).toSet(), contains('gcs_path'));
+
+      final archiveJson = jsonEncode({
+        'archiveId': 'arch_gcs_test',
+        'records': [
+          {
+            'collection': 'orders',
+            'docId': 'ord_gcs_001',
+            'data': {
+              'order_number': 77,
+              'customer_name_snapshot': 'GCS Restored Buyer',
+              'customer_phone': '9000112233',
+              'estimate_total': 1850.0,
+              'paid_amount': 1850.0,
+              'payment_mode': 'cash',
+              'payment_status': 'paid',
+              'status': 'COMPLETED',
+              'created_at': DateTime(2026, 2, 1).toIso8601String(),
+              'items': [
+                {
+                  'item_name': 'Brass Valve',
+                  'unit': 'Piece',
+                  'unit_price': 185.0,
+                  'quantity_ordered': 10.0,
+                }
+              ],
+            },
+          }
+        ],
+      });
+      final gzipBytes = Uint8List.fromList(GZipEncoder().encode(utf8.encode(archiveJson))!);
+
+      await db.insert('storage_archives', {
+        'archive_id': 'arch_gcs_test',
+        'rule_applied': 'age_180d',
+        'date_range_start': DateTime(2025, 1, 1).toIso8601String(),
+        'date_range_end': DateTime(2026, 1, 1).toIso8601String(),
+        'record_count': 1,
+        'archived_doc_ids_json': jsonEncode(['ord_gcs_001']),
+        'checksum': null,
+        'gcs_path': 'shops/TEST/archives/arch_gcs_test.json.gz',
+        'compressed_gzip_base64': '',
+        'verified': 1,
+        'restored_at': null,
+        'created_at': DateTime(2026, 2, 2).toIso8601String(),
+      });
+
+      final service = ArchiveService(
+        dbHelper: dbHelper,
+        gcsBytesFetcher: (path) async {
+          expect(path, 'shops/TEST/archives/arch_gcs_test.json.gz');
+          return gzipBytes;
+        },
+      );
+
+      final restoredCount = await service.restoreArchive('arch_gcs_test', syncToCloud: false);
+      expect(restoredCount, 1);
+
+      final orders = await db.query(
+        'orders',
+        where: 'cloud_order_id = ?',
+        whereArgs: ['ord_gcs_001'],
+      );
+      expect(orders.length, 1);
+      expect(orders.first['customer_name_snapshot'], 'GCS Restored Buyer');
+
+      final cachedArchive = await db.query(
+        'storage_archives',
+        where: 'archive_id = ?',
+        whereArgs: ['arch_gcs_test'],
+      );
+      expect(
+        (cachedArchive.first['compressed_gzip_base64'] as String).isNotEmpty,
+        isTrue,
+      );
+    });
+
+    test('resolveOrCreateOrderCustomer assigns UUIDv4 cloud_id and recovery getters default safely', () async {
+      final db = await dbHelper.database;
+      final cid = await ShopSyncService.resolveOrCreateOrderCustomer(
+        db,
+        custName: 'New Sync Buyer',
+        rawPhone: '9888777666',
+      );
+      final rows = await db.query('customers', where: 'id = ?', whereArgs: [cid]);
+      expect(rows.length, 1);
+      final cloudId = rows.first['cloud_id'] as String?;
+      expect(cloudId, isNotNull);
+      expect(
+        RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+            .hasMatch(cloudId!),
+        isTrue,
+      );
+      expect(rows.first['is_active'], 1);
+      expect(ShopSyncService.instance.isAnonymousSession, isTrue);
+      expect(ShopSyncService.instance.hasRecoveryAccountLinked, isFalse);
+      expect(ShopSyncService.instance.recoveryAccountLabel, isNull);
+    });
+
+    test('ArchiveService.decodeArchiveRecords resolves GCS-offloaded preview records cleanly', () async {
+      final db = await dbHelper.database;
+      final archiveJson = jsonEncode({
+        'records': [
+          {
+            'collection': 'orders',
+            'docId': 'ord_gcs_preview_1',
+            'data': {'customer_name_snapshot': 'Preview Buyer'},
+          }
+        ],
+      });
+      final gzipBytes = Uint8List.fromList(GZipEncoder().encode(utf8.encode(archiveJson))!);
+
+      await db.insert('storage_archives', {
+        'archive_id': 'arch_gcs_preview',
+        'rule_applied': 'age_180d',
+        'date_range_start': DateTime(2025, 1, 1).toIso8601String(),
+        'date_range_end': DateTime(2026, 1, 1).toIso8601String(),
+        'record_count': 1,
+        'archived_doc_ids_json': jsonEncode(['ord_gcs_preview_1']),
+        'gcs_path': 'shops/TEST/archives/arch_gcs_preview.json.gz',
+        'compressed_gzip_base64': '',
+        'verified': 1,
+        'created_at': DateTime(2026, 2, 2).toIso8601String(),
+      });
+
+      final service = ArchiveService(
+        dbHelper: dbHelper,
+        gcsBytesFetcher: (path) async => gzipBytes,
+      );
+      final arch = StorageArchiveRecord(
+        archiveId: 'arch_gcs_preview',
+        ruleApplied: 'age_180d',
+        dateRangeStart: DateTime(2025, 1, 1),
+        dateRangeEnd: DateTime(2026, 1, 1),
+        recordCount: 1,
+        archivedDocIds: const ['ord_gcs_preview_1'],
+        gcsPath: 'shops/TEST/archives/arch_gcs_preview.json.gz',
+        compressedGzipBase64: '',
+        verified: true,
+        createdAt: DateTime(2026, 2, 2),
+      );
+      final decoded = await service.decodeArchiveRecords(arch);
+      expect(decoded.length, 1);
+      expect(decoded.first['docId'], 'ord_gcs_preview_1');
+    });
+
+    test('getOrderDetails hydrates batched options and deleted orders/customers stay excluded', () async {
+      final db = await dbHelper.database;
+      final activeCust = await customerRepo.createCustomer(
+        name: 'Active Hardware',
+        phone: '9876500001',
+      );
+      final deletedCust = await customerRepo.createCustomer(
+        name: 'Deleted Hardware',
+        phone: '9876500002',
+      );
+
+      // Soft-delete second customer
+      await db.update(
+        'customers',
+        {
+          'is_active': 0,
+          'deleted_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [deletedCust.id],
+      );
+
+      // Soft-deleted phone must not match active lookups
+      final deletedMatch =
+          await dbHelper.findCustomerIdByNormalizedPhone(db, '9876500002');
+      expect(deletedMatch, isNull);
+
+      final resolvedNew = await ShopSyncService.resolveOrCreateOrderCustomer(
+        db,
+        custName: 'Deleted Hardware',
+        rawPhone: '9876500002',
+      );
+      expect(resolvedNew, isNot(deletedCust.id));
+
+      // Create multi-item order with options to test batched option loading
+      final orderId1 = await orderRepo.createOrder(
+        DraftOrder(
+          customer: activeCust,
+          items: [
+            DraftOrderItem(
+              itemName: 'Paint 1',
+              options: const {'brand': 'Asian', 'colour': 'White'},
+              quantity: 2,
+              unit: 'Litre',
+              unitPrice: 500.0,
+            ),
+            DraftOrderItem(
+              itemName: 'Brush',
+              options: const {'size': '2 inch'},
+              quantity: 3,
+              unit: 'Piece',
+              unitPrice: 50.0,
+            ),
+          ],
+        ),
+      );
+
+      final details = await orderRepo.getOrderDetails(orderId1);
+      expect(details, isNotNull);
+      expect(details!.items.length, 2);
+      expect(details.items[0].options.length, 2);
+      expect(details.items[1].options.single.optionValue, '2 inch');
+
+      // Soft-delete an order and confirm it is excluded from Khata, Procurement & Analytics
+      final deletedOrderId = await orderRepo.createOrder(
+        DraftOrder(
+          customer: activeCust,
+          items: [
+            DraftOrderItem(
+              itemName: 'Deleted Cement',
+              options: const {},
+              quantity: 4,
+              unit: 'Bag',
+              unitPrice: 400.0,
+            ),
+          ],
+        ),
+      );
+      await db.update(
+        'orders',
+        {'deleted_at': DateTime.now().toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [deletedOrderId],
+      );
+
+      final balance = await dbHelper.getCustomerKhataBalance(activeCust.id!);
+      expect(balance, closeTo(1150.0, 0.01));
+
+      final evening = await dbHelper.getEveningClosingReport(DateTime.now());
+      expect((evening['totalSales'] as num).toDouble(), closeTo(1150.0, 0.01));
+
+      final lifetime = await dbHelper.getLifetimeBusinessReport();
+      expect((lifetime['totalSales'] as num).toDouble(), closeTo(1150.0, 0.01));
     });
   });
 }

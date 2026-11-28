@@ -103,13 +103,15 @@ class OrderRepository {
         nextOrderNumber = txnLocalMax + 1;
       }
 
+      final nowIso = now.toIso8601String();
       final orderId = await txn.insert('orders', {
         'order_number': nextOrderNumber,
         'customer_id': draftOrder.customer.id,
         'customer_name_snapshot': draftOrder.customer.name,
         'customer_phone': phone,
         'taken_by': effectiveTakenBy,
-        'created_at': now.toIso8601String(),
+        'created_at': nowIso,
+        'updated_at': nowIso,
         'status': orderStatusLabel(OrderStatus.pending),
         'notes': notes,
         'estimate_total': estimateTotal ?? draftOrder.estimateTotal ?? calculatedGrandTotal,
@@ -242,6 +244,7 @@ class OrderRepository {
 
       final orderUpdateData = <String, Object?>{
         'status': newStatus,
+        'updated_at': DateTime.now().toIso8601String(),
       };
       if (combinedBreakdown != null) {
         final mergedBreakdown = combinedBreakdown.copyWith(
@@ -268,17 +271,32 @@ class OrderRepository {
     }));
   }
 
-  Future<List<OrderSummary>> searchOrderSummaries(String query) async {
+  Future<List<OrderSummary>> searchOrderSummaries(
+    String query, {
+    int? limit,
+    int? offset,
+  }) async {
     final db = await _databaseHelper.database;
     final normalized = query.trim();
+    final limitSql = limit != null ? 'LIMIT $limit' : '';
+    final offsetSql = (limit != null && offset != null) ? 'OFFSET $offset' : '';
     final orderRows = await db.rawQuery('''
       SELECT o.*, c.address as customer_address
       FROM orders o
       LEFT JOIN customers c ON o.customer_id = c.id
-      ${normalized.isEmpty ? '' : 'WHERE o.customer_name_snapshot LIKE ?'}
+      WHERE o.deleted_at IS NULL
+      ${normalized.isEmpty ? '' : 'AND (o.customer_name_snapshot LIKE ? OR CAST(COALESCE(o.order_number, o.id) AS TEXT) LIKE ?)'}
       ORDER BY o.created_at DESC
-    ''', normalized.isEmpty ? null : ['%$normalized%']);
+      $limitSql $offsetSql
+    ''', normalized.isEmpty ? null : ['%$normalized%', '%$normalized%']);
 
+    return _buildOrderSummariesFromRows(db, orderRows);
+  }
+
+  Future<List<OrderSummary>> _buildOrderSummariesFromRows(
+    DatabaseExecutor db,
+    List<Map<String, Object?>> orderRows,
+  ) async {
     final orderIds = orderRows.map((r) => r['id'] as int).toList();
     final itemsByOrderId = <int, List<Map<String, Object?>>>{};
     for (var i = 0; i < orderIds.length; i += 400) {
@@ -367,35 +385,55 @@ class OrderRepository {
     int customerId, {
     String? customerName,
     String? customerPhone,
+    int? limit,
+    int? offset,
   }) async {
-    final all = await searchOrderSummaries('');
+    final db = await _databaseHelper.database;
     final cleanPhone =
         customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
     final lowerName = customerName?.trim().toLowerCase();
 
-    return all.where((o) {
-      if (cleanPhone != null && cleanPhone.isNotEmpty) {
-        final orderPhone =
-            o.customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
-        if (orderPhone != null && orderPhone.isNotEmpty) {
-          return orderPhone == cleanPhone;
-        }
+    final clauses = <String>['o.customer_id = ?'];
+    final args = <Object?>[customerId];
+
+    if (cleanPhone != null && cleanPhone.isNotEmpty) {
+      clauses.add(
+        "REPLACE(REPLACE(REPLACE(COALESCE(o.customer_phone, ''), ' ', ''), '-', ''), '+', '') = ?",
+      );
+      args.add(cleanPhone.replaceAll('+', ''));
+    }
+    if (lowerName != null && lowerName.isNotEmpty) {
+      clauses.add('LOWER(TRIM(o.customer_name_snapshot)) = ?');
+      args.add(lowerName);
+    }
+
+    final limitSql = limit != null ? 'LIMIT $limit' : '';
+    final offsetSql = (limit != null && offset != null) ? 'OFFSET $offset' : '';
+    final candidateRows = await db.rawQuery('''
+      SELECT o.*, c.address as customer_address
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE o.deleted_at IS NULL AND (${clauses.join(' OR ')})
+      ORDER BY o.created_at DESC
+      $limitSql $offsetSql
+    ''', args);
+
+    final filteredRows = candidateRows.where((row) {
+      if ((row['customer_id'] as int) == customerId) return true;
+      final rowPhone =
+          (row['customer_phone'] as String?)?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
+      if (cleanPhone != null && cleanPhone.isNotEmpty && rowPhone != null && rowPhone.isNotEmpty) {
+        return rowPhone == cleanPhone;
       }
-      if (lowerName != null && lowerName.isNotEmpty) {
-        if (o.customerName.trim().toLowerCase() == lowerName) {
-          final orderPhone =
-              o.customerPhone?.replaceAll(RegExp(r'[^0-9+]'), '').trim();
-          if (cleanPhone == null ||
-              cleanPhone.isEmpty ||
-              orderPhone == null ||
-              orderPhone.isEmpty ||
-              orderPhone == cleanPhone) {
-            return true;
-          }
-        }
+      if (lowerName != null &&
+          lowerName.isNotEmpty &&
+          ((row['customer_name_snapshot'] as String?)?.trim().toLowerCase() == lowerName)) {
+        return cleanPhone == null || cleanPhone.isEmpty || rowPhone == null || rowPhone.isEmpty || rowPhone == cleanPhone;
       }
-      return o.customerId == customerId;
+      return false;
     }).toList();
+
+    return _buildOrderSummariesFromRows(db, filteredRows);
   }
 
   Future<void> closePendingOrdersForCustomer(int customerId, {bool adjustToGivenOnly = false}) async {
@@ -403,7 +441,7 @@ class OrderRepository {
     final pendingOrders = await db.query(
       'orders',
       columns: ['id'],
-      where: 'customer_id = ? AND status IN (?, ?)',
+      where: 'deleted_at IS NULL AND customer_id = ? AND status IN (?, ?)',
       whereArgs: [
         customerId,
         orderStatusLabel(OrderStatus.pending),
@@ -494,6 +532,7 @@ class OrderRepository {
           'status': orderStatusLabel(OrderStatus.completed),
           'estimate_total': newBreakdown.grandTotal,
           'notes': jsonEncode(newBreakdown.toMap()),
+          'updated_at': DateTime.now().toIso8601String(),
         },
         where: 'id = ?',
         whereArgs: [orderId],
@@ -619,6 +658,7 @@ class OrderRepository {
           'status': orderStatusLabel(OrderStatus.completed),
           'estimate_total': newBreakdown.grandTotal,
           'notes': jsonEncode(newBreakdown.toMap()),
+          'updated_at': DateTime.now().toIso8601String(),
         },
         where: 'id = ?',
         whereArgs: [orderId],
@@ -673,15 +713,37 @@ class OrderRepository {
       orderBy: 'id ASC',
     );
 
+    final itemIds = itemRows
+        .map((r) => (r['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+    final optionsByItemId = <int, List<Map<String, Object?>>>{};
+    for (var i = 0; i < itemIds.length; i += 400) {
+      final chunk = itemIds.sublist(
+        i,
+        i + 400 > itemIds.length ? itemIds.length : i + 400,
+      );
+      final placeholders = List.filled(chunk.length, '?').join(',');
+      final optRows = await db.rawQuery(
+        'SELECT id, order_item_id, option_name, option_value '
+        'FROM order_item_options '
+        'WHERE order_item_id IN ($placeholders) '
+        'ORDER BY id ASC',
+        chunk,
+      );
+      for (final opt in optRows) {
+        final itemIdKey = (opt['order_item_id'] as num?)?.toInt();
+        if (itemIdKey != null) {
+          optionsByItemId.putIfAbsent(itemIdKey, () => []).add(opt);
+        }
+      }
+    }
+
     final items = <OrderItemEntity>[];
     for (final itemRow in itemRows) {
       final itemId = itemRow['id'] as int;
-      final optionRows = await db.query(
-        'order_item_options',
-        where: 'order_item_id = ?',
-        whereArgs: [itemId],
-        orderBy: 'id ASC',
-      );
+      final optionRows =
+          optionsByItemId[itemId] ?? const <Map<String, Object?>>[];
 
       final seenOptionKeys = <String>{};
       final distinctOptions = <OrderItemOptionEntity>[];
@@ -780,22 +842,6 @@ class OrderRepository {
           estimateTotal: healedBreakdown.grandTotal,
           notes: jsonEncode(healedBreakdown.toMap()),
         );
-
-        unawaited(db.update(
-          'orders',
-          {
-            'estimate_total': healedBreakdown.grandTotal,
-            'notes': jsonEncode(healedBreakdown.toMap()),
-          },
-          where: 'id = ?',
-          whereArgs: [orderId],
-        ).then((_) {
-          ShopSyncService.instance.syncOrder(orderId).catchError((e) {
-            debugPrint('Error syncing healed order: $e');
-          });
-        }).catchError((e) {
-          debugPrint('Error updating healed order: $e');
-        }));
       }
     }
 
@@ -849,6 +895,7 @@ class OrderRepository {
       final calculatedStatus = _calculateOrderStatus(allStatuses);
       final updateData = <String, Object?>{
         'status': orderStatusLabel(calculatedStatus),
+        'updated_at': DateTime.now().toIso8601String(),
       };
 
       final orderRows = await txn.query('orders',
@@ -931,7 +978,8 @@ class OrderRepository {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN customers c ON o.customer_id = c.id
-      WHERE LOWER(oi.procurement_status) = 'toprocure'
+      WHERE o.deleted_at IS NULL
+        AND LOWER(oi.procurement_status) = 'toprocure'
         AND (oi.quantity_ordered - oi.quantity_given) > 0
       ORDER BY o.created_at ASC
     ''');
@@ -1023,7 +1071,8 @@ class OrderRepository {
     final openOrders = await db.rawQuery('''
       SELECT o.id, o.created_at
       FROM orders o
-      WHERE UPPER(o.status) NOT IN ('COMPLETED', 'CLOSED')
+      WHERE o.deleted_at IS NULL
+        AND UPPER(o.status) NOT IN ('COMPLETED', 'CLOSED')
         AND EXISTS (
           SELECT 1 FROM order_items oi 
           WHERE oi.order_id = o.id 
@@ -1047,7 +1096,8 @@ class OrderRepository {
       SELECT COUNT(oi.id) as count
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE LOWER(oi.procurement_status) = 'toprocure'
+      WHERE o.deleted_at IS NULL
+        AND LOWER(oi.procurement_status) = 'toprocure'
         AND (oi.quantity_ordered - oi.quantity_given) > 0
     ''');
     int toProcureCount = 0;
@@ -1144,6 +1194,7 @@ class OrderRepository {
     final newOrderStatus = _calculateOrderStatus(itemStatuses);
     final orderUpdates = <String, Object?>{
       'status': orderStatusLabel(newOrderStatus),
+      'updated_at': DateTime.now().toIso8601String(),
     };
 
     if (orderRows.isNotEmpty) {

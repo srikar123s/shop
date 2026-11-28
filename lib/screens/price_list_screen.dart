@@ -65,13 +65,18 @@ class _PriceListScreenState extends State<PriceListScreen> {
 
   List<Map<String, dynamic>> _extractVariantPrices(Product p) {
     final variants = <Map<String, dynamic>>[];
+    final seenLabelsLower = <String>{};
     try {
       final config = p.configuration;
       if (config.variantPrices.isNotEmpty) {
         config.variantPrices.forEach((key, price) {
-          final parts = key.split('__');
-          final label = parts.join(' • ');
-          variants.add({'label': label, 'price': price});
+          if (price <= 0) return;
+          final parts = key.split(RegExp(r'__|\s*•\s*'));
+          final label = parts.map((e) => e.trim()).where((e) => e.isNotEmpty).join(' • ');
+          if (label.isEmpty) return;
+          if (seenLabelsLower.add(label.toLowerCase())) {
+            variants.add({'label': label, 'price': price});
+          }
         });
       } else if (config.basePrice > 0) {
         variants.add({'label': 'Standard', 'price': config.basePrice});

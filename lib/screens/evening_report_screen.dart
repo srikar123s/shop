@@ -80,7 +80,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
     if (!mounted) return;
     if (picked != null) {
       setState(() => _selectedDate = picked);
-      _loadReport();
+      await _loadReport();
     }
   }
 
@@ -169,7 +169,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
   }
 
   Future<void> _showCollectionsDialog() async {
-    showDialog(
+    await showDialog(
       context: context,
       barrierDismissible: true,
       builder: (ctx) {
@@ -409,13 +409,16 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
     final totalCollected =
         (_report?['totalCollectedToday'] as num?)?.toDouble() ?? (cashSales + upiSales);
 
+    final s = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Evening Closing Report',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          s.t('eveningClosingReport'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
-            tooltip: 'Lifetime Business Analytics',
+            tooltip: s.t('lifetimeAnalytics'),
             icon: const Icon(Icons.query_stats_rounded),
             onPressed: () {
               Navigator.push(
@@ -427,12 +430,12 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
             },
           ),
           IconButton(
-            tooltip: 'Select Date',
+            tooltip: s.t('selectDate'),
             icon: const Icon(Icons.calendar_month_outlined),
             onPressed: _pickDate,
           ),
           IconButton(
-            tooltip: 'Share on WhatsApp as Image',
+            tooltip: s.t('shareOnWhatsappImage'),
             icon: _isSharing
                 ? const SizedBox(
                     width: 18,
@@ -447,7 +450,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _report == null
-              ? const Center(child: Text('No data found for this date'))
+              ? Center(child: Text(s.t('noDataForDate')))
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
@@ -536,9 +539,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        const Text(
-                                          'TOTAL SALES BILLED',
-                                          style: TextStyle(
+                                        Text(
+                                          s.t('todaysTotalSales'),
+                                          style: const TextStyle(
                                             color: Color(0xFFCCFBF1),
                                             fontSize: 10,
                                             fontWeight: FontWeight.w800,
@@ -559,7 +562,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
-                                          '${_report!['totalOrders']} orders created',
+                                          '${_report!['totalOrders']} ${s.t('ordersCreated')}',
                                           style: const TextStyle(
                                             color: Colors.white70,
                                             fontSize: 10.5,
@@ -593,9 +596,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        const Text(
-                                          'TOTAL DUE COLLECTED',
-                                          style: TextStyle(
+                                        Text(
+                                          s.t('totalDueCollected'),
+                                          style: const TextStyle(
                                             color: Color(0xFFDBEAFE),
                                             fontSize: 10,
                                             fontWeight: FontWeight.w800,
@@ -633,9 +636,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                             const SizedBox(height: 16),
 
                             // Cash vs UPI vs Udhaar Collection Breakdown
-                            const Text(
-                              'COLLECTION & PAYMENT BREAKDOWN',
-                              style: TextStyle(
+                            Text(
+                              s.t('collectionPaymentBreakdown'),
+                              style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.grey,
@@ -654,21 +657,21 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                 children: [
                                   _buildReportRow(
                                     Icons.payments_outlined,
-                                    'Cash Collected',
+                                    s.t('cashCollected'),
                                     currency.format(_report!['cashSales']),
                                     Colors.green.shade700,
                                   ),
                                   const Divider(height: 1),
                                   _buildReportRow(
                                     Icons.qr_code_2_rounded,
-                                    'UPI / Online Received',
+                                    s.t('upiOnlineReceived'),
                                     currency.format(_report!['upiSales']),
                                     Colors.blue.shade700,
                                   ),
                                   const Divider(height: 1),
                                   _buildReportRow(
                                     Icons.book_outlined,
-                                    'New Udhaar (Credit Given)',
+                                    s.t('newUdhaarCreditGiven'),
                                     currency.format(_report!['creditSales']),
                                     Colors.red.shade700,
                                   ),
@@ -676,7 +679,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                     const Divider(height: 1),
                                     _buildReportRow(
                                       Icons.restore_outlined,
-                                      'Old Udhaar Payments Recovered',
+                                      s.t('oldUdhaarRecovered'),
                                       currency.format(_report!['directPayments']),
                                       Colors.teal.shade800,
                                     ),
@@ -687,9 +690,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                             const SizedBox(height: 16),
 
                             // Order Fulfillment & Top Item
-                            const Text(
-                              'FULFILLMENT & TOP PRODUCT',
-                              style: TextStyle(
+                            Text(
+                              s.t('fulfillmentTopProduct'),
+                              style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.grey,
@@ -708,15 +711,15 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                 children: [
                                   _buildReportRow(
                                     Icons.check_circle_outline,
-                                    'Completed Orders',
-                                    '${_report!['completedOrders']} orders',
+                                    s.t('completedOrdersLabel'),
+                                    '${_report!['completedOrders']} ${s.t('ordersUnit')}',
                                     Colors.teal,
                                   ),
                                   const Divider(height: 1),
                                   _buildReportRow(
                                     Icons.pending_actions,
-                                    'Pending Delivery Orders',
-                                    '${_report!['pendingOrders']} orders',
+                                    s.t('pendingDeliveryOrders'),
+                                    '${_report!['pendingOrders']} ${s.t('ordersUnit')}',
                                     Colors.orange.shade800,
                                   ),
                                   if (_report!['topItemName'] != 'None' &&
@@ -724,7 +727,7 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                                     const Divider(height: 1),
                                     _buildReportRow(
                                       Icons.local_fire_department_rounded,
-                                      'Top Selling Product',
+                                      s.t('topSellingProduct'),
                                       '${_report!['topItemName']} (${_report!['topItemQty']} ${_report!['topItemUnit']})',
                                       Colors.amber.shade900,
                                     ),
@@ -790,9 +793,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                       ),
                       onPressed: _showCollectionsDialog,
                       icon: const Icon(Icons.people_alt_outlined, color: Colors.white),
-                      label: const Text(
-                        'VIEW TODAY\'S COLLECTIONS LIST',
-                        style: TextStyle(
+                      label: Text(
+                        s.t('viewTodaysCollections'),
+                        style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                           fontSize: 13,
@@ -820,7 +823,9 @@ class _EveningReportScreenState extends State<EveningReportScreen> {
                             )
                           : const Icon(Icons.share, color: Colors.white),
                       label: Text(
-                        _isSharing ? 'PREPARING IMAGE...' : 'SHARE REPORT AS IMAGE ON WHATSAPP',
+                        _isSharing
+                            ? s.t('preparingImage')
+                            : s.t('shareReportWhatsappImage'),
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,

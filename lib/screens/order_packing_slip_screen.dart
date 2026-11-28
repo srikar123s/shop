@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/order.dart';
 import 'package:shop/repositories/delivery_repository.dart';
@@ -42,6 +45,36 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
         _packedItemIndices.add(i);
       }
     }
+    _restorePackingProgress();
+  }
+
+  String? get _packingPrefKey {
+    final oid = widget.details.order.id;
+    return oid == null ? null : 'packing_progress_order_$oid';
+  }
+
+  Future<void> _restorePackingProgress() async {
+    final key = _packingPrefKey;
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(key);
+    if (raw == null || raw.isEmpty || !mounted) return;
+    try {
+      final saved = (jsonDecode(raw) as List<dynamic>)
+          .map((e) => (e as num).toInt())
+          .where((idx) => idx >= 0 && idx < widget.details.items.length)
+          .toSet();
+      setState(() {
+        _packedItemIndices.addAll(saved);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _persistPackingProgress() async {
+    final key = _packingPrefKey;
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, jsonEncode(_packedItemIndices.toList()..sort()));
   }
 
   Future<void> _updateBoxCount(int next) async {
@@ -147,6 +180,7 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
         _packedItemIndices.add(index);
       }
     });
+    unawaited(_persistPackingProgress());
   }
 
   void _toggleAll() {
@@ -157,6 +191,7 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
         _packedItemIndices.addAll(List.generate(widget.details.items.length, (i) => i));
       }
     });
+    unawaited(_persistPackingProgress());
   }
 
   @override
@@ -535,8 +570,11 @@ class _OrderPackingSlipScreenState extends State<OrderPackingSlipScreen> {
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            onPressed: () {
-              Navigator.pop(context, _packedItemIndices);
+            onPressed: () async {
+              await _persistPackingProgress();
+              if (context.mounted) {
+                Navigator.pop(context, _packedItemIndices);
+              }
             },
             icon: const Icon(Icons.check_circle_outline),
             label: Text(

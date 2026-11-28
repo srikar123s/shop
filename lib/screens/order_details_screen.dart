@@ -262,6 +262,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   Future<void> _closeOrder() async {
     if (_details == null || !mounted) return;
+    if (!ShopSyncService.instance.canCloseOrders) return;
     if (!_ensureAllItemsPriced(actionName: 'close order')) return;
     final order = _details!.order;
     final unfulfilled = _details!.items
@@ -622,6 +623,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   await InvoicePdfService.instance.sharePdf(
                     _details!,
                     isDeliveryChallan: true,
+                    customerBillNumber: _customerBillNumber,
                   );
                 },
               ),
@@ -1689,7 +1691,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       color: Colors.teal,
                     ),
                   ),
-                  if (order.billBreakdown != null) ...[
+                  if (order.billBreakdown != null &&
+                      ShopSyncService.instance.canViewBillTotals) ...[
                     const SizedBox(height: 10),
                     const Divider(height: 1),
                     const SizedBox(height: 8),
@@ -1770,7 +1773,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       children: [
                         Text(s.t('grandTotal'),
                             style: const TextStyle(fontWeight: FontWeight.w700)),
-                        Text('₹ ${order.estimateTotal.toStringAsFixed(2)}',
+                        Text(
+                            ShopSyncService.instance.canViewBillTotals
+                                ? '₹ ${order.estimateTotal.toStringAsFixed(2)}'
+                                : '₹ ••••',
                             style: const TextStyle(
                                 fontWeight: FontWeight.w900,
                                 color: Colors.teal,
@@ -1778,7 +1784,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                       ],
                     ),
 
-                  if (_customerAdvanceBalance > 0.01 && order.estimateTotal > 0) ...[
+                  if (ShopSyncService.instance.canViewBillTotals &&
+                      _customerAdvanceBalance > 0.01 &&
+                      order.estimateTotal > 0) ...[
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.all(10),
@@ -1848,7 +1856,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   ],
                   ],
                   const SizedBox(height: 6),
-                  if (order.status != OrderStatus.completed &&
+                  if (ShopSyncService.instance.canChangePrice &&
+                      ShopSyncService.instance.canViewBillTotals &&
+                      order.status != OrderStatus.completed &&
                       order.status != OrderStatus.closed)
                     Align(
                       alignment: Alignment.centerRight,
@@ -1858,8 +1868,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           foregroundColor: const Color(0xFF0F766E),
                         ),
                         icon: const Icon(Icons.tune, size: 16),
-                        label: const Text('Edit Bill (Charges & Discount)',
-                            style: TextStyle(
+                        label: Text(s.t('editBillChargesDiscount'),
+                            style: const TextStyle(
                                 fontSize: 12, fontWeight: FontWeight.bold)),
                         onPressed: () => _showEditBillDialog(order),
                       ),
@@ -1963,7 +1973,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             ],
                           ),
                           Text(
-                            'Paid: ₹${order.paidAmount.toStringAsFixed(2)}',
+                            ShopSyncService.instance.canViewBillTotals
+                                ? 'Paid: ₹${order.paidAmount.toStringAsFixed(2)}'
+                                : 'Paid: ₹ ••••',
                             style: const TextStyle(
                                 fontWeight: FontWeight.w700, fontSize: 13),
                           ),
@@ -1982,7 +1994,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                   fontWeight: FontWeight.w600),
                             ),
                             Text(
-                              '₹ ${order.dueAmount.toStringAsFixed(2)}',
+                              ShopSyncService.instance.canViewBillTotals
+                                  ? '₹ ${order.dueAmount.toStringAsFixed(2)}'
+                                  : '₹ ••••',
                               style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
@@ -2001,8 +2015,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                               ),
                               icon: const Icon(Icons.qr_code_2, size: 16),
-                              label: const Text('UPI QR',
-                                  style: TextStyle(fontSize: 12)),
+                              label: Text(s.t('upiQr'),
+                                  style: const TextStyle(fontSize: 12)),
                               onPressed: _showUpiQrDialog,
                             ),
                           ),
@@ -2015,7 +2029,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               ),
                               icon: const Icon(Icons.payments_outlined, size: 16),
                               label: Text(
-                                  isRetail ? 'Record Payment' : 'Pay / Khata',
+                                  isRetail ? s.t('recordPayment') : s.t('payKhata'),
                                   style: const TextStyle(fontSize: 12)),
                               onPressed: _showRecordPaymentDialog,
                             ),
@@ -2033,9 +2047,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
               children: [
                 Row(
                   children: [
-                    const Text(
-                      'ITEMS TO FULFILL',
-                      style: TextStyle(
+                    Text(
+                      s.t('itemsToFulfill'),
+                      style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 13,
                           color: Colors.grey,
@@ -2197,7 +2211,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  'Item Total: ₹${(item.unitPrice * item.quantityGiven).toStringAsFixed(2)}',
+                                  ShopSyncService.instance.canViewBillTotals
+                                      ? 'Item Total: ₹${(item.unitPrice * item.quantityGiven).toStringAsFixed(2)}'
+                                      : 'Item Total: ₹ ••••',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -2343,7 +2359,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 Expanded(
                   flex: 3,
                   child: LargeActionButton(
-                    label: _saving ? s.t('saving') : 'SAVE CHANGES',
+                    label: _saving ? s.t('saving') : s.t('saveChanges'),
                     onTap: _saving ? null : _save,
                   ),
                 ),
@@ -2361,9 +2377,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.check_circle_outline, size: 20),
-                        label: const Text(
-                          'CLOSE ORDER',
-                          style: TextStyle(
+                        label: Text(
+                          s.t('closeOrder'),
+                          style: const TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                         onPressed: _saving ? null : _closeOrder,

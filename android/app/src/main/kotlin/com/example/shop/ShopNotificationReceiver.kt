@@ -4,8 +4,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import java.util.concurrent.Executors
 
 class ShopNotificationReceiver : BroadcastReceiver() {
+    companion object {
+        private val backgroundExecutor = Executors.newSingleThreadExecutor()
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val triggerType = intent.getStringExtra(ShopAlarmScheduler.EXTRA_TYPE) ?: "pending"
         val hour = intent.getIntExtra(ShopAlarmScheduler.EXTRA_HOUR, -1)
@@ -19,24 +24,34 @@ class ShopNotificationReceiver : BroadcastReceiver() {
             "Alarm fired: type=$triggerType, hour=$hour, minute=$minute, repeatDaily=$repeatDaily",
         )
 
-        ShopNotificationConfig.evaluateAndNotify(
-            context = context,
-            triggerType = triggerType,
-            slotHour = hour,
-            slotMinute = minute,
-            slotTag = if (slotTag.isNullOrBlank()) null else slotTag,
-        )
+        val pendingResult = goAsync()
+        val appContext = context.applicationContext
+        backgroundExecutor.execute {
+            try {
+                ShopNotificationConfig.evaluateAndNotify(
+                    context = appContext,
+                    triggerType = triggerType,
+                    slotHour = hour,
+                    slotMinute = minute,
+                    slotTag = if (slotTag.isNullOrBlank()) null else slotTag,
+                )
 
-        if (repeatDaily && requestCode >= 0 && hour >= 0 && minute >= 0) {
-            ShopAlarmScheduler.scheduleDailySlot(
-                context = context,
-                requestCode = requestCode,
-                triggerType = triggerType,
-                hour = hour,
-                minute = minute,
-                slotTag = if (slotTag.isNullOrBlank()) null else slotTag,
-                forceNextDay = true,
-            )
+                if (repeatDaily && requestCode >= 0 && hour >= 0 && minute >= 0) {
+                    ShopAlarmScheduler.scheduleDailySlot(
+                        context = appContext,
+                        requestCode = requestCode,
+                        triggerType = triggerType,
+                        hour = hour,
+                        minute = minute,
+                        slotTag = if (slotTag.isNullOrBlank()) null else slotTag,
+                        forceNextDay = true,
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("ShopNotificationRcv", "Error processing alarm in background: $e")
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 }

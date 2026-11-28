@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/product.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/services/excel_product_service.dart';
@@ -40,11 +42,14 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     'Packet',
     'Feet'
   ];
+  static const int _pageSize = 60;
   final TextEditingController _search = TextEditingController();
+  Timer? _searchDebounce;
   List<Product> _products = <Product>[];
   bool _loading = true;
   bool _onlyNeedsReview = false;
   bool _onlyStalePrices = false;
+  int _visibleCount = _pageSize;
 
   @override
   void initState() {
@@ -53,8 +58,20 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
     _load();
   }
 
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _visibleCount = _pageSize;
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -203,7 +220,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
   }
 
   Future<void> _showImportOptions() async {
-    showModalBottomSheet<void>(
+    await showModalBottomSheet<void>(
       context: context,
       builder: (context) {
         return SafeArea(
@@ -452,12 +469,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
 
       if (confirm == true && selectedIndices.isNotEmpty) {
         setState(() => _loading = true);
-        int count = 0;
-        for (final idx in selectedIndices) {
-          final product = products[idx];
-          await widget.productRepository.upsertProduct(product);
-          count++;
-        }
+        final selectedProducts = [for (final idx in selectedIndices) products[idx]];
+        final count = await widget.productRepository.upsertProductsBatch(selectedProducts);
         await _load();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -751,6 +764,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
 
     final conversionControllers = <String, TextEditingController>{};
     final quickFillControllers = <String, TextEditingController>{};
+    final attributeControllers = <String, TextEditingController>{};
     final variantControllers = <String, TextEditingController>{};
 
     final bool? saved;
@@ -1232,12 +1246,15 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                                       Expanded(
                                         flex: 2,
                                         child: TextField(
-                                          controller: TextEditingController(
-                                            text: curVal > 0
-                                                ? (curVal % 1 == 0
-                                                    ? curVal.toInt().toString()
-                                                    : curVal.toString())
-                                                : '',
+                                          controller: attributeControllers.putIfAbsent(
+                                            val,
+                                            () => TextEditingController(
+                                              text: curVal > 0
+                                                  ? (curVal % 1 == 0
+                                                      ? curVal.toInt().toString()
+                                                      : curVal.toString())
+                                                  : '',
+                                            ),
                                           ),
                                           keyboardType: const TextInputType
                                               .numberWithOptions(
@@ -1584,19 +1601,15 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           final validSteps =
                               steps.where((s) => s.values.isNotEmpty).toList();
 
-                          // Ensure all attribute-level prices are mirrored into combinations and attribute keys
+                          // Ensure all attribute-level prices map to combinations without duplicating lowercase keys
                           if (pricingMode == 'by_attribute') {
                             for (final entry in attributePrices.entries) {
                               if (entry.value > 0) {
                                 variantPrices[entry.key] = entry.value;
-                                variantPrices[entry.key.toLowerCase()] =
-                                    entry.value;
                                 for (final combo in combinations) {
                                   final tokens = combo.split(" • ").map((t) => t.trim().toLowerCase()).toSet();
-                                   if (tokens.contains(entry.key.trim().toLowerCase()) && !variantPrices.containsKey(combo)) {
+                                  if (tokens.contains(entry.key.trim().toLowerCase()) && !variantPrices.containsKey(combo)) {
                                     variantPrices[combo] = entry.value;
-                                    variantPrices[combo.toLowerCase()] =
-                                        entry.value;
                                   }
                                 }
                               }
@@ -1652,8 +1665,11 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       for (final c in variantControllers.values) {
         c.dispose();
       }
+      for (final c in attributeControllers.values) {
+        c.dispose();
+      }
     }
-    if (saved == true) _load();
+    if (saved == true) await _load();
   }
 
   Future<void> _showQuickPriceDialog(Product product) async {
@@ -1753,13 +1769,14 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
       return filter.isEmpty || product.name.toLowerCase().contains(filter);
     }).toList();
 
+    final s = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manage products'),
+        title: Text(s.t('manageProductsTitle')),
         actions: [
           IconButton(
             icon: const Icon(Icons.file_upload_outlined),
-            tooltip: 'Import Excel / CSV',
+            tooltip: s.t('importExcelCsv'),
             onPressed: _showImportOptions,
           ),
         ],
@@ -1774,14 +1791,14 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
             backgroundColor: Colors.teal.shade700,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.file_upload_outlined),
-            label: const Text('IMPORT EXCEL'),
+            label: Text(s.t('importExcel')),
           ),
           const SizedBox(height: 10),
           FloatingActionButton.extended(
             heroTag: 'add_product_fab',
             onPressed: () => _editProduct(),
             icon: const Icon(Icons.add),
-            label: const Text('ADD PRODUCT'),
+            label: Text(s.t('addProduct')),
           ),
         ],
       ),
@@ -1790,9 +1807,9 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: SearchBar(
                 controller: _search,
-                hintText: 'Search products',
+                hintText: s.t('searchProductsHint'),
                 leading: const Icon(Icons.search),
-                onChanged: (_) => setState(() {}))),
+                onChanged: _onSearchChanged)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: SingleChildScrollView(
@@ -1800,7 +1817,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
             child: Row(
               children: [
                 FilterChip(
-                  label: Text('All (${_products.length})'),
+                  label: Text('${s.t('allLabel')} (${_products.length})'),
                   selected: !_onlyNeedsReview && !_onlyStalePrices,
                   onSelected: (_) => setState(() {
                     _onlyNeedsReview = false;
@@ -1814,7 +1831,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           size: 14, color: Color(0xFFB45309))
                       : null,
                   label: Text(
-                    'Needs Review ($reviewCount)',
+                    '${s.t('filterNeedsReview')} ($reviewCount)',
                     style: TextStyle(
                       color: reviewCount > 0 && _onlyNeedsReview
                           ? const Color(0xFFB45309)
@@ -1837,7 +1854,7 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           size: 14, color: Color(0xFFB45309))
                       : null,
                   label: Text(
-                    'Old Rates >${widget.staleThresholdDays}d ($staleCount)',
+                    '${s.t('filterOldRates')} >${widget.staleThresholdDays}d ($staleCount)',
                     style: TextStyle(
                       color: staleCount > 0 && _onlyStalePrices
                           ? const Color(0xFFB45309)
@@ -1862,9 +1879,28 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 140),
-                    itemCount: products.length,
+                    itemCount: products.length > _visibleCount
+                        ? _visibleCount + 1
+                        : products.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
+                      if (products.length > _visibleCount &&
+                          index == _visibleCount) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: OutlinedButton.icon(
+                              onPressed: () => setState(() {
+                                _visibleCount += _pageSize;
+                              }),
+                              icon: const Icon(Icons.expand_more),
+                              label: Text(
+                                'Show More Products ($_visibleCount / ${products.length})',
+                              ),
+                            ),
+                          ),
+                        );
+                      }
                       final product = products[index];
                       final lastDate = product.priceUpdatedAt ?? product.createdAt;
                       final isStale = lastDate == null || lastDate.isBefore(cutoff);
@@ -1934,8 +1970,8 @@ class _SimpleProductAdminScreenState extends State<SimpleProductAdminScreen> {
                           children: [
                             Text(
                               product.configuration.steps.isEmpty
-                                  ? 'Quantity only • '
-                                  : ' • ',
+                                  ? 'Quantity only • ${product.category.isNotEmpty ? '${product.category} • ' : ''}${product.configuration.defaultUnit ?? 'Piece'}'
+                                  : '${product.configuration.steps.map((s) => s.label).where((l) => l.isNotEmpty).join(', ')} • ${product.configuration.defaultUnit ?? 'Piece'}',
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(

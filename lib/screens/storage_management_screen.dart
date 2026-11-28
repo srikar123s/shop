@@ -304,9 +304,7 @@ class _StorageManagementScreenState extends State<StorageManagementScreen> {
 
   Future<void> _previewArchiveRecords(StorageArchiveRecord arch) async {
     try {
-      final records = _archiveService.decodeAndVerifyPayload(
-        compressedGzipBase64: arch.compressedGzipBase64,
-      );
+      final records = await _archiveService.decodeArchiveRecords(arch);
       if (!mounted) return;
       await showDialog<void>(
         context: context,

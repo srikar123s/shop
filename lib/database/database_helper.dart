@@ -5,9 +5,13 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shop/models/customer.dart';
+import 'package:shop/models/report_summary.dart';
 import 'package:shop/models/top_product_stat.dart';
 import 'package:shop/services/shop_sync_service.dart';
 import 'package:sqflite/sqflite.dart';
+
+part 'database_khata_dao.dart';
+part 'database_analytics_dao.dart';
 
 class DatabaseHelper {
   DatabaseHelper._();
@@ -15,7 +19,19 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
 
   static const String dbName = 'hardware_shop.db';
-  static const int dbVersion = 10;
+  static const int dbVersion = 12;
+
+  static final math.Random _secureRandom = math.Random.secure();
+
+  /// Generates a collision-resistant RFC-4122 UUIDv4 string without extra dependencies.
+  static String generateUuidV4() {
+    final bytes = List<int>.generate(16, (_) => _secureRandom.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
+  }
 
   @visibleForTesting
   static String? testDbPathOverride;
@@ -71,6 +87,7 @@ class DatabaseHelper {
       'customers',
       columns: ['id', 'phone'],
       where:
+          "COALESCE(is_active, 1) = 1 AND deleted_at IS NULL AND "
           "REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', '') LIKE ?",
       whereArgs: ['%$tail%'],
       limit: 50,
@@ -92,8 +109,10 @@ class DatabaseHelper {
   Future<void> deduplicateCustomersByPhone(Database db) async {
     final customers = await db.query(
       'customers',
-      columns: ['id', 'name', 'phone', 'address', 'credit_limit'],
-      where: "phone IS NOT NULL AND TRIM(phone) != ''",
+      columns: ['id', 'cloud_id', 'name', 'phone', 'address', 'credit_limit'],
+      where:
+          "COALESCE(is_active, 1) = 1 AND deleted_at IS NULL AND "
+          "phone IS NOT NULL AND TRIM(phone) != ''",
       orderBy: 'id ASC',
     );
     if (customers.length < 2) return;
@@ -176,6 +195,23 @@ class DatabaseHelper {
             mergedCredit = dupCredit;
           }
 
+          final dupCloudId = (dup['cloud_id'] as String?)?.trim();
+          if (dupCloudId != null && dupCloudId.isNotEmpty) {
+            try {
+              await txn.rawInsert('''
+                INSERT OR REPLACE INTO sync_outbox
+                (entity_type, local_id, cloud_id, retry_count, next_retry_at, last_error, created_at)
+                VALUES (?, ?, ?, 0, ?, NULL, ?)
+              ''', [
+                'customer_delete',
+                dupId,
+                dupCloudId,
+                DateTime.now().toIso8601String(),
+                DateTime.now().toIso8601String(),
+              ]);
+            } catch (_) {}
+          }
+
           await txn.delete(
             'customers',
             where: 'id = ?',
@@ -188,6 +224,7 @@ class DatabaseHelper {
           {
             'address': mergedAddress,
             'credit_limit': mergedCredit,
+            'updated_at': DateTime.now().toIso8601String(),
           },
           where: 'id = ?',
           whereArgs: [primaryId],
@@ -230,6 +267,9 @@ class DatabaseHelper {
       await txn.delete('product_options');
       await txn.delete('products');
       await txn.delete('customers');
+      try {
+        await txn.delete('sync_outbox');
+      } catch (_) {}
     });
     await _seedInitialProducts(db);
   }
@@ -244,41 +284,6 @@ class DatabaseHelper {
       },
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
-      onOpen: (db) async {
-        try {
-          // Deduplicate order_item_options
-          await db.execute('''
-            DELETE FROM order_item_options
-            WHERE id NOT IN (
-              SELECT MIN(id)
-              FROM order_item_options
-              GROUP BY order_item_id, LOWER(option_name), LOWER(option_value)
-            )
-          ''');
-        } catch (_) {}
-        try {
-          // Clean up orphan options
-          await db.execute('''
-            DELETE FROM order_item_options
-            WHERE order_item_id NOT IN (SELECT id FROM order_items)
-          ''');
-        } catch (_) {}
-        try {
-          await db.execute('ALTER TABLE orders ADD COLUMN order_number INTEGER');
-        } catch (_) {}
-        try {
-          await db.execute('UPDATE orders SET order_number = id WHERE order_number IS NULL');
-        } catch (_) {}
-        try {
-          await db.execute('CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)');
-        } catch (_) {}
-        try {
-          await deduplicateCustomersByPhone(db);
-        } catch (e) {
-          debugPrint('Customer deduplication skipped: $e');
-        }
-        await _seedInitialProducts(db);
-      },
     );
   }
 
@@ -407,8 +412,127 @@ class DatabaseHelper {
           'ALTER TABLE customers ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1',
         );
       } catch (_) {}
-      await _createPerformanceIndexes(db);
     }
+    if (oldVersion < 11) {
+      const ddlStatements = [
+        'ALTER TABLE customers ADD COLUMN cloud_id TEXT',
+        'ALTER TABLE customers ADD COLUMN updated_at TEXT',
+        'ALTER TABLE customers ADD COLUMN deleted_at TEXT',
+        'ALTER TABLE products ADD COLUMN cloud_id TEXT',
+        'ALTER TABLE products ADD COLUMN updated_at TEXT',
+        'ALTER TABLE products ADD COLUMN deleted_at TEXT',
+        'ALTER TABLE orders ADD COLUMN updated_at TEXT',
+        'ALTER TABLE orders ADD COLUMN deleted_at TEXT',
+        'ALTER TABLE customer_payments ADD COLUMN updated_at TEXT',
+        'ALTER TABLE customer_payments ADD COLUMN deleted_at TEXT',
+        'ALTER TABLE delivery_partners ADD COLUMN updated_at TEXT',
+        'ALTER TABLE delivery_partners ADD COLUMN deleted_at TEXT',
+        'ALTER TABLE delivery_transactions ADD COLUMN updated_at TEXT',
+        'ALTER TABLE delivery_transactions ADD COLUMN deleted_at TEXT',
+      ];
+      for (final sql in ddlStatements) {
+        try {
+          await db.execute(sql);
+        } catch (_) {}
+      }
+
+      await _createSyncOutboxTable(db);
+
+      try {
+        await db.execute('''
+          DELETE FROM order_item_options
+          WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM order_item_options
+            GROUP BY order_item_id, LOWER(option_name), LOWER(option_value)
+          )
+        ''');
+        await db.execute('''
+          DELETE FROM order_item_options
+          WHERE order_item_id NOT IN (SELECT id FROM order_items)
+        ''');
+      } catch (_) {}
+
+      try {
+        await deduplicateCustomersByPhone(db);
+      } catch (e) {
+        debugPrint('v11 migration customer dedup skipped: $e');
+      }
+
+      final nowIso = DateTime.now().toIso8601String();
+      try {
+        final custs = await db.query('customers', columns: ['id', 'cloud_id', 'updated_at', 'created_at']);
+        for (final c in custs) {
+          final updates = <String, Object?>{};
+          if ((c['cloud_id'] as String?)?.isNotEmpty != true) {
+            updates['cloud_id'] = generateUuidV4();
+          }
+          if ((c['updated_at'] as String?)?.isNotEmpty != true) {
+            updates['updated_at'] = (c['created_at'] as String?) ?? nowIso;
+          }
+          if (updates.isNotEmpty) {
+            await db.update('customers', updates, where: 'id = ?', whereArgs: [c['id']]);
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final prods = await db.query('products', columns: ['id', 'cloud_id', 'updated_at', 'price_updated_at', 'created_at']);
+        for (final p in prods) {
+          final updates = <String, Object?>{};
+          if ((p['cloud_id'] as String?)?.isNotEmpty != true) {
+            updates['cloud_id'] = generateUuidV4();
+          }
+          if ((p['updated_at'] as String?)?.isNotEmpty != true) {
+            updates['updated_at'] =
+                (p['price_updated_at'] as String?) ?? (p['created_at'] as String?) ?? nowIso;
+          }
+          if (updates.isNotEmpty) {
+            await db.update('products', updates, where: 'id = ?', whereArgs: [p['id']]);
+          }
+        }
+      } catch (_) {}
+
+      try {
+        await db.execute(
+          'UPDATE orders SET updated_at = COALESCE(updated_at, created_at, ?)',
+          [nowIso],
+        );
+        await db.execute(
+          'UPDATE customer_payments SET updated_at = COALESCE(updated_at, created_at, ?)',
+          [nowIso],
+        );
+      } catch (_) {}
+    }
+    if (oldVersion < 12) {
+      try {
+        await db.execute('ALTER TABLE storage_archives ADD COLUMN gcs_path TEXT');
+      } catch (_) {}
+    }
+    await _createPerformanceIndexes(db);
+  }
+
+  Future<void> _createSyncOutboxTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        local_id INTEGER,
+        cloud_id TEXT NOT NULL,
+        payload_json TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT NOT NULL,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_outbox_entity_cloud ON sync_outbox(entity_type, cloud_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_outbox_due ON sync_outbox(next_retry_at, retry_count)',
+    );
   }
 
   Future<void> _createPerformanceIndexes(Database db) async {
@@ -424,6 +548,21 @@ class DatabaseHelper {
       );
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id)',
+      );
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_cloud_id ON customers(cloud_id)',
+      );
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_products_cloud_id ON products(cloud_id)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_customers_updated_at ON customers(updated_at)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_products_updated_at ON products(updated_at)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)',
       );
     } catch (e) {
       debugPrint('Error creating performance indexes: $e');
@@ -441,6 +580,7 @@ class DatabaseHelper {
         record_count INTEGER NOT NULL DEFAULT 0,
         archived_doc_ids_json TEXT NOT NULL,
         checksum TEXT,
+        gcs_path TEXT,
         compressed_gzip_base64 TEXT NOT NULL,
         verified INTEGER NOT NULL DEFAULT 0,
         restored_at TEXT,
@@ -477,7 +617,9 @@ class DatabaseHelper {
         vehicle_info TEXT,
         notes TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT
       )
     ''');
 
@@ -504,6 +646,8 @@ class DatabaseHelper {
         payment_mode TEXT NOT NULL DEFAULT 'none',
         description TEXT,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT,
         FOREIGN KEY(partner_id) REFERENCES delivery_partners(id) ON DELETE CASCADE
       )
     ''');
@@ -520,25 +664,31 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cloud_id TEXT UNIQUE,
         name TEXT NOT NULL,
         phone TEXT,
         address TEXT,
         credit_limit REAL NOT NULL DEFAULT 0.0,
         is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT
       )
     ''');
 
     await db.execute('''
       CREATE TABLE products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cloud_id TEXT UNIQUE,
         name TEXT NOT NULL,
         category TEXT NOT NULL,
         is_active INTEGER NOT NULL DEFAULT 1,
         needs_review INTEGER NOT NULL DEFAULT 0,
         configuration TEXT NOT NULL,
         price_updated_at TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT
       )
     ''');
 
@@ -563,6 +713,8 @@ class DatabaseHelper {
         customer_phone TEXT,
         taken_by TEXT,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT,
         status TEXT NOT NULL,
         notes TEXT,
         estimate_total REAL NOT NULL DEFAULT 0,
@@ -614,12 +766,15 @@ class DatabaseHelper {
         payment_mode TEXT NOT NULL,
         notes TEXT,
         created_at TEXT NOT NULL,
+        updated_at TEXT,
+        deleted_at TEXT,
         FOREIGN KEY(customer_id) REFERENCES customers(id)
       )
     ''');
 
     await _createDeliveryTables(db);
     await _createStorageManagementTables(db);
+    await _createSyncOutboxTable(db);
 
     await db.execute(
       'CREATE INDEX idx_customers_name ON customers(name COLLATE NOCASE)',
@@ -642,7 +797,11 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX idx_customer_payments_customer_id ON customer_payments(customer_id)',
     );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number)',
+    );
     await _createPerformanceIndexes(db);
+    await _seedInitialProducts(db);
   }
 
   Future<void> _seedInitialProducts(Database db) async {
@@ -820,7 +979,9 @@ class DatabaseHelper {
     for (final product in sampleProducts) {
       await db.insert('products', {
         ...product,
+        'cloud_id': generateUuidV4(),
         'price_updated_at': now,
+        'updated_at': now,
         'needs_review': 0,
       });
     }
@@ -926,644 +1087,6 @@ class DatabaseHelper {
     return statList;
   }
 
-  Future<void> recordOrderPayment({
-    required int orderId,
-    required double paidAmount,
-    required String paymentMode,
-  }) async {
-    final db = await database;
-    int? newPaymentId;
-    await db.transaction((txn) async {
-      final order =
-          await txn.query('orders', where: 'id = ?', whereArgs: [orderId]);
-      if (order.isEmpty) return;
-      final total = (order.first['estimate_total'] as num?)?.toDouble() ?? 0.0;
-      final prevPaid = (order.first['paid_amount'] as num?)?.toDouble() ?? 0.0;
-      final status = paidAmount >= total
-          ? 'paid'
-          : (paidAmount > 0 ? 'partial' : 'unpaid');
-
-      await txn.update(
-        'orders',
-        {
-          'paid_amount': paidAmount,
-          'payment_mode': paymentMode,
-          'payment_status': status,
-        },
-        where: 'id = ?',
-        whereArgs: [orderId],
-      );
-
-      final added = paidAmount - prevPaid;
-      final customerId = order.first['customer_id'] as int?;
-      final displayNum = (order.first['order_number'] as num?)?.toInt() ?? orderId;
-      if (added > 0.001 && customerId != null) {
-        final now = DateTime.now().toIso8601String();
-        newPaymentId = await txn.insert('customer_payments', {
-          'customer_id': customerId,
-          'amount': added,
-          'payment_mode': paymentMode.toLowerCase(),
-          'notes': 'Payment for Order #ORD-${displayNum.toString().padLeft(4, "0")}',
-          'created_at': now,
-        });
-      } else if (added < -0.001 && customerId != null) {
-        // Compensating adjustment for payment reduction / refund
-        final now = DateTime.now().toIso8601String();
-        newPaymentId = await txn.insert('customer_payments', {
-          'customer_id': customerId,
-          'amount': added,
-          'payment_mode': paymentMode.toLowerCase(),
-          'notes': 'Refund/Adjustment for Order #ORD-${displayNum.toString().padLeft(4, "0")}',
-          'created_at': now,
-        });
-      }
-    });
-
-    if (newPaymentId != null) {
-      unawaited(ShopSyncService.instance.syncPayment(newPaymentId!).catchError((e) {
-        debugPrint('Error syncing payment in recordOrderPayment: $e');
-      }));
-    }
-    unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
-      debugPrint('Error syncing order in recordOrderPayment: $e');
-    }));
-  }
-
-  Future<void> recordCustomerKhataPayment({
-    required int customerId,
-    required double amount,
-    required String paymentMode,
-    String? notes,
-  }) async {
-    final db = await database;
-    int? createdPaymentId;
-    final syncedOrderIds = <int>{};
-    await db.transaction((txn) async {
-      final now = DateTime.now().toIso8601String();
-      createdPaymentId = await txn.insert('customer_payments', {
-        'customer_id': customerId,
-        'amount': amount,
-        'payment_mode': paymentMode,
-        'notes': notes,
-        'created_at': now,
-      });
-
-      // Apply payment to oldest pending/partial orders first
-      final unpaidOrders = await txn.query(
-        'orders',
-        where: "customer_id = ? AND estimate_total > paid_amount AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')",
-        whereArgs: [customerId],
-        orderBy: 'created_at ASC',
-      );
-
-      double remainingToApply = amount;
-      for (final row in unpaidOrders) {
-        if (remainingToApply <= 0) break;
-        final orderId = row['id'] as int;
-        final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
-        final alreadyPaid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
-        final due = total - alreadyPaid;
-
-        if (due > 0) {
-          final payingForThis =
-              remainingToApply >= due ? due : remainingToApply;
-          final newPaid = alreadyPaid + payingForThis;
-          final newStatus = newPaid >= total ? 'paid' : 'partial';
-
-          final existingMode =
-              (row['payment_mode'] as String?)?.trim().toLowerCase() ?? '';
-          final newModeLower = paymentMode.trim().toLowerCase();
-          final resolvedMode = (alreadyPaid > 0.001 &&
-                  existingMode.isNotEmpty &&
-                  existingMode != 'unpaid' &&
-                  existingMode != 'khata' &&
-                  existingMode != newModeLower)
-              ? 'split'
-              : paymentMode;
-
-          await txn.update(
-            'orders',
-            {
-              'paid_amount': newPaid,
-              'payment_status': newStatus,
-              'payment_mode': resolvedMode,
-            },
-            where: 'id = ?',
-            whereArgs: [orderId],
-          );
-          remainingToApply -= payingForThis;
-          syncedOrderIds.add(orderId);
-        }
-      }
-    });
-
-    for (final orderId in syncedOrderIds) {
-      unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((e) {
-        debugPrint('Error syncing order in recordCustomerKhataPayment: $e');
-      }));
-    }
-    if (createdPaymentId != null) {
-      unawaited(ShopSyncService.instance.syncPayment(createdPaymentId!).catchError((e) {
-        debugPrint('Error syncing payment in recordCustomerKhataPayment: $e');
-      }));
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getCustomerKhataList() async {
-    final db = await database;
-    final query = '''
-      SELECT 
-        c.id as customer_id,
-        c.name as customer_name,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as customer_location,
-        COALESCE(c.credit_limit, 0.0) as credit_limit,
-        COALESCE(b.total_billed, 0.0) as total_billed,
-        COALESCE(p.total_paid, 0.0) as total_paid,
-        COALESCE(b.order_count, 0) as order_count,
-        b.last_order_date,
-        p.last_payment_date,
-        p.last_payment_mode,
-        b.oldest_unpaid_date
-      FROM customers c
-      LEFT JOIN (
-        SELECT 
-          customer_id,
-          SUM(estimate_total) as total_billed,
-          COUNT(id) as order_count,
-          MAX(created_at) as last_order_date,
-          MIN(CASE WHEN estimate_total > (paid_amount + 0.01) AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed')) THEN created_at ELSE NULL END) as oldest_unpaid_date
-        FROM orders
-        WHERE (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
-        GROUP BY customer_id
-      ) b ON c.id = b.customer_id
-      LEFT JOIN (
-        SELECT 
-          p1.customer_id,
-          SUM(p1.amount) as total_paid,
-          MAX(p1.created_at) as last_payment_date,
-          (SELECT payment_mode FROM customer_payments p2 WHERE p2.customer_id = p1.customer_id ORDER BY p2.created_at DESC LIMIT 1) as last_payment_mode
-        FROM customer_payments p1
-        GROUP BY p1.customer_id
-      ) p ON c.id = p.customer_id
-      WHERE (
-          ABS(COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01 
-          OR COALESCE(b.total_billed, 0.0) > 0 
-          OR COALESCE(p.total_paid, 0.0) > 0
-          OR c.credit_limit > 0
-        )
-        AND (
-          c.is_active = 1
-          OR ABS(COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) > 0.01
-        )
-      ORDER BY (COALESCE(b.total_billed, 0.0) - COALESCE(p.total_paid, 0.0)) DESC, c.name ASC
-    ''';
-    final rows = await db.rawQuery(query);
-    final now = DateTime.now();
-
-    return rows.map((r) {
-      final map = Map<String, dynamic>.from(r);
-      final billed = (map['total_billed'] as num?)?.toDouble() ?? 0.0;
-      final paid = (map['total_paid'] as num?)?.toDouble() ?? 0.0;
-      final diff = billed - paid;
-      final due = (diff.abs() > 0.01) ? diff : 0.0;
-      map['balance_due'] = due;
-
-      final oldestDateStr = map['oldest_unpaid_date'] as String?;
-      int daysOverdue = 0;
-      if (oldestDateStr != null && oldestDateStr.isNotEmpty) {
-        final dt = DateTime.tryParse(oldestDateStr);
-        if (dt != null) {
-          daysOverdue = now.difference(dt).inDays;
-          if (daysOverdue < 0) daysOverdue = 0;
-        }
-      }
-      map['days_overdue'] = daysOverdue;
-
-      final limit = (map['credit_limit'] as num?)?.toDouble() ?? 0.0;
-      map['credit_limit'] = limit;
-      map['is_over_limit'] = limit > 0 && due > limit;
-      map['available_credit'] = limit > 0 ? (limit - due) : 0.0;
-      return map;
-    }).toList();
-  }
-
-  /// Returns customer's net Khata balance (billed - paid).
-  /// > 0: customer owes money to shop (due).
-  /// < 0: customer has advance credit deposited with shop (-balance).
-  Future<double> getCustomerKhataBalance(int customerId) async {
-    final db = await database;
-    final res = await db.rawQuery('''
-      SELECT 
-        COALESCE((
-          SELECT SUM(o.estimate_total) 
-          FROM orders o 
-          WHERE o.customer_id = ? 
-            AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
-        ), 0.0) - 
-        COALESCE((
-          SELECT SUM(p.amount) 
-          FROM customer_payments p 
-          WHERE p.customer_id = ?
-        ), 0.0) AS net_balance
-    ''', [customerId, customerId]);
-    if (res.isNotEmpty) {
-      return (res.first['net_balance'] as num?)?.toDouble() ?? 0.0;
-    }
-    return 0.0;
-  }
-
-  /// Updates a customer's maximum credit limit (Khata limit)
-  Future<void> updateCustomerCreditLimit(int customerId, double creditLimit) async {
-    if (creditLimit < 0) {
-      throw ArgumentError.value(
-        creditLimit,
-        'creditLimit',
-        'Credit limit cannot be negative',
-      );
-    }
-    final db = await database;
-    await db.update(
-      'customers',
-      {'credit_limit': creditLimit},
-      where: 'id = ?',
-      whereArgs: [customerId],
-    );
-  }
-
-  /// Checks credit limit vs current balance for an order
-  Future<Map<String, dynamic>> getCustomerCreditStatus(int customerId) async {
-    final db = await database;
-    final res = await db.rawQuery('''
-      SELECT 
-        c.id,
-        c.name,
-        COALESCE(c.credit_limit, 0.0) as credit_limit,
-        (
-          COALESCE((
-            SELECT SUM(o.estimate_total) 
-            FROM orders o 
-            WHERE o.customer_id = c.id 
-              AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
-          ), 0.0) - 
-          COALESCE((
-            SELECT SUM(p.amount) 
-            FROM customer_payments p 
-            WHERE p.customer_id = c.id
-          ), 0.0)
-        ) as balance_due
-      FROM customers c
-      WHERE c.id = ?
-    ''', [customerId]);
-
-    if (res.isEmpty) {
-      return {
-        'credit_limit': 0.0,
-        'balance_due': 0.0,
-        'is_over_limit': false,
-        'available_credit': 0.0,
-      };
-    }
-    final row = res.first;
-    final limit = (row['credit_limit'] as num?)?.toDouble() ?? 0.0;
-    final due = (row['balance_due'] as num?)?.toDouble() ?? 0.0;
-    final finalDue = due > 0.01 ? due : 0.0;
-    final advanceCredit = due < -0.01 ? (-due) : 0.0;
-    final isOver = limit > 0 && finalDue > limit;
-    final available = limit > 0 ? (limit - finalDue) : 0.0;
-    return {
-      'credit_limit': limit,
-      'balance_due': finalDue,
-      'advance_credit': advanceCredit,
-      'is_over_limit': isOver,
-      'available_credit': available,
-    };
-  }
-
-  /// Retrieves a chronological combined ledger of all debit (bills/orders)
-  /// and credit (payments) for a customer with computed running balances.
-  Future<List<Map<String, dynamic>>> getCustomerKhataLedger(int customerId) async {
-    final db = await database;
-
-    // 1. Fetch only closed orders / manual khata debits for customer
-    final orderRows = await db.rawQuery('''
-      SELECT 
-        o.id,
-        o.order_number,
-        o.estimate_total,
-        o.paid_amount,
-        o.created_at,
-        o.payment_mode,
-        o.payment_status,
-        o.status,
-        o.notes,
-        (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
-      FROM orders o
-      WHERE o.customer_id = ? 
-        AND (LOWER(o.status) IN ('completed', 'closed', 'pending', 'partially completed') OR o.notes LIKE '%khata_debit%')
-      ORDER BY o.created_at ASC
-    ''', [customerId]);
-
-    // 2. Fetch all direct payments
-    final paymentRows = await db.query(
-      'customer_payments',
-      where: 'customer_id = ?',
-      whereArgs: [customerId],
-      orderBy: 'created_at ASC',
-    );
-
-    // 3. Combine into chronological ledger entries
-    final entries = <Map<String, dynamic>>[];
-
-    for (final o in orderRows) {
-      final total = (o['estimate_total'] as num?)?.toDouble() ?? 0.0;
-      final paidAmt = (o['paid_amount'] as num?)?.toDouble() ?? 0.0;
-      final itemCount = (o['item_count'] as num?)?.toInt() ?? 0;
-      final notes = (o['notes'] as String?) ?? '';
-      final mode = (o['payment_mode'] as String?) ?? 'Khata';
-
-      String subtitle;
-      if (notes.isNotEmpty && notes.contains('khata_debit')) {
-        String desc = 'Manual Udhaar Entry';
-        try {
-          final decoded = jsonDecode(notes);
-          if (decoded is Map && decoded['description'] != null) {
-            desc = decoded['description'] as String;
-          }
-        } catch (_) {}
-        subtitle = 'Manual Udhaar • $desc';
-      } else if (paidAmt > 0) {
-        final bal = (total - paidAmt) > 0 ? (total - paidAmt) : 0.0;
-        subtitle = '$itemCount item(s) • Paid: ₹${paidAmt.toStringAsFixed(0)} ($mode) • Udhaar: ₹${bal.toStringAsFixed(2)}';
-      } else {
-        subtitle = '$itemCount item(s) • 100% Udhaar (Unpaid)';
-      }
-
-      entries.add({
-        'type': 'debit', // You Gave (Bill)
-        'id': o['id'],
-        'order_id': o['id'],
-        'order_number': (o['order_number'] as num?)?.toInt() ?? o['id'],
-        'title': 'Bill #${(o['order_number'] as num?)?.toInt() ?? o['id']}',
-        'subtitle': subtitle,
-        'date': DateTime.tryParse(o['created_at'] as String? ?? '') ?? DateTime.now(),
-        'amount': total,
-        'debit': total,
-        'credit': 0.0,
-        'payment_mode': mode,
-        'paid_amount': paidAmt,
-        'status': o['status'],
-        'notes': notes,
-      });
-    }
-
-    for (final p in paymentRows) {
-      final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
-      final rawMode = (p['payment_mode'] as String?) ?? 'Cash';
-      final mode = rawMode.toUpperCase();
-      final notes = (p['notes'] as String?) ?? '';
-      final sub = notes.isNotEmpty ? notes : 'Direct Khata Payment';
-
-      entries.add({
-        'type': 'credit', // You Got (Payment)
-        'id': p['id'],
-        'title': 'Payment Received',
-        'subtitle': 'Collected via $mode • $sub',
-        'date': DateTime.tryParse(p['created_at'] as String? ?? '') ?? DateTime.now(),
-        'amount': amt,
-        'debit': 0.0,
-        'credit': amt,
-        'payment_mode': rawMode,
-        'notes': notes,
-      });
-    }
-
-    // Sort chronologically ascending
-    entries.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
-
-    // Compute running balance & assign sequential customer bill numbers (Bill #1, Bill #2, Bill #3...)
-    double running = 0.0;
-    int billSequence = 0;
-    for (final entry in entries) {
-      if (entry['type'] == 'debit') {
-        billSequence++;
-        entry['bill_number'] = billSequence;
-        entry['title'] = 'Bill #$billSequence';
-      }
-      running += ((entry['debit'] as num?)?.toDouble() ?? 0.0) -
-                 ((entry['credit'] as num?)?.toDouble() ?? 0.0);
-      entry['running_balance'] = running;
-    }
-
-    return entries;
-  }
-
-  /// Returns the sequential bill number for a specific customer order.
-  /// Customer's first order is Bill 1, second order is Bill 2, etc.
-  Future<int?> getCustomerBillSequence(int orderId) async {
-    final db = await database;
-    final target = await db.query(
-      'orders',
-      columns: ['customer_id'],
-      where: 'id = ?',
-      whereArgs: [orderId],
-      limit: 1,
-    );
-    if (target.isEmpty) return null;
-    final customerId = target.first['customer_id'] as int?;
-    if (customerId == null) return null;
-
-    final customerOrders = await db.rawQuery('''
-      SELECT id FROM orders
-      WHERE customer_id = ?
-        AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
-      ORDER BY created_at ASC, id ASC
-    ''', [customerId]);
-
-    final idx = customerOrders.indexWhere((r) => r['id'] == orderId);
-    if (idx < 0) return null;
-    return idx + 1;
-  }
-
-  /// Records a manual Udhaar / Debit entry (e.g. Previous balance, opening balance, or cash lent)
-  Future<int> recordManualKhataDebit({
-    required int customerId,
-    required double amount,
-    required String description,
-    String? takenBy,
-  }) async {
-    final db = await database;
-    final now = DateTime.now().toIso8601String();
-    final customer = await db.query(
-      'customers',
-      where: 'id = ?',
-      whereArgs: [customerId],
-      limit: 1,
-    );
-    final customerName = customer.isNotEmpty
-        ? (customer.first['name'] as String? ?? 'Customer')
-        : 'Customer';
-    final customerPhone =
-        customer.isNotEmpty ? customer.first['phone'] as String? : null;
-    final effectiveTakenBy =
-        takenBy ?? ShopSyncService.instance.currentUserOrDeviceName;
-
-    final breakdownMap = {
-      'subtotal': amount,
-      'grandTotal': amount,
-      'applyGst': false,
-      'gstRate': 0.0,
-      'gstAmount': 0.0,
-      'otherCharges': <Map<String, dynamic>>[],
-      'otherChargesTotal': 0.0,
-      'applyDiscount': false,
-      'discountType': 'flat',
-      'discountValue': 0.0,
-      'discountAmount': 0.0,
-      'note': description,
-      'customerPhone': customerPhone,
-      'takenBy': effectiveTakenBy,
-      'type': 'khata_debit',
-      'description': description,
-    };
-
-    final newOrderId = await db.insert('orders', {
-      'customer_id': customerId,
-      'customer_name_snapshot': customerName,
-      'customer_phone': customerPhone,
-      'status': 'COMPLETED',
-      'created_at': now,
-      'notes': jsonEncode(breakdownMap),
-      'taken_by': effectiveTakenBy,
-      'estimate_total': amount,
-      'paid_amount': 0.0,
-      'payment_mode': 'Khata',
-      'payment_status': 'unpaid',
-    });
-    unawaited(ShopSyncService.instance.syncOrder(newOrderId).catchError((e) {
-      debugPrint('Error syncing order in recordManualKhataDebit: $e');
-    }));
-    return newOrderId;
-  }
-
-  /// Calculates aggregated Khata metrics for the business dashboard.
-  /// Pass [preloadedList] if getCustomerKhataList() was already called to avoid duplicate query.
-  Future<Map<String, dynamic>> getKhataSummaryMetrics([List<Map<String, dynamic>>? preloadedList]) async {
-    final list = preloadedList ?? await getCustomerKhataList();
-    double totalDue = 0;
-    double totalAdvance = 0;
-    double totalBilled = 0;
-    double totalPaid = 0;
-    double overdue30Days = 0;
-    int dueCustomersCount = 0;
-    int settledCustomersCount = 0;
-    int overLimitCustomersCount = 0;
-
-    for (final item in list) {
-      final due = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
-      final billed = (item['total_billed'] as num?)?.toDouble() ?? 0.0;
-      final paid = (item['total_paid'] as num?)?.toDouble() ?? 0.0;
-      final days = (item['days_overdue'] as num?)?.toInt() ?? 0;
-      final isOver = item['is_over_limit'] as bool? ?? false;
-
-      totalBilled += billed;
-      totalPaid += paid;
-
-      if (isOver) {
-        overLimitCustomersCount++;
-      }
-
-      if (due > 0.01) {
-        totalDue += due;
-        dueCustomersCount++;
-        if (days >= 30) {
-          overdue30Days += due;
-        }
-      } else if (due < -0.01) {
-        totalAdvance += -due;
-      } else {
-        settledCustomersCount++;
-      }
-    }
-
-    // Today's collections
-    final db = await database;
-    final now = DateTime.now();
-    final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
-    final nextDay = DateTime(now.year, now.month, now.day + 1).toIso8601String();
-
-    final paymentsToday = await db.query(
-      'customer_payments',
-      where: 'created_at >= ? AND created_at < ?',
-      whereArgs: [startOfDay, nextDay],
-    );
-
-    double collectedToday = 0;
-    for (final p in paymentsToday) {
-      collectedToday += (p['amount'] as num?)?.toDouble() ?? 0.0;
-    }
-
-    return {
-      'totalMarketDue': totalDue,
-      'totalAdvance': totalAdvance,
-      'totalBilled': totalBilled,
-      'totalPaid': totalPaid,
-      'overdue30Days': overdue30Days,
-      'dueCustomersCount': dueCustomersCount,
-      'settledCustomersCount': settledCustomersCount,
-      'overLimitCustomersCount': overLimitCustomersCount,
-      'collectedToday': collectedToday,
-      'totalCustomers': list.length,
-    };
-  }
-
-  Future<Map<int, double>> _getCustomerBalancesBatch(
-    DatabaseExecutor db,
-    Iterable<int> customerIds,
-  ) async {
-    final uniqueIds = customerIds.toSet().toList();
-    if (uniqueIds.isEmpty) return const <int, double>{};
-    final result = <int, double>{for (final id in uniqueIds) id: 0.0};
-
-    for (var i = 0; i < uniqueIds.length; i += 400) {
-      final chunk = uniqueIds.sublist(
-        i,
-        i + 400 > uniqueIds.length ? uniqueIds.length : i + 400,
-      );
-      final placeholders = List.filled(chunk.length, '?').join(',');
-
-      final billedRows = await db.rawQuery('''
-        SELECT customer_id, COALESCE(SUM(estimate_total), 0.0) AS total_billed
-        FROM orders
-        WHERE customer_id IN ($placeholders)
-          AND (LOWER(status) IN ('completed', 'closed', 'pending', 'partially completed') OR notes LIKE '%khata_debit%')
-        GROUP BY customer_id
-      ''', chunk);
-      for (final r in billedRows) {
-        final cid = (r['customer_id'] as num?)?.toInt();
-        if (cid != null) {
-          result[cid] =
-              (result[cid] ?? 0.0) + ((r['total_billed'] as num?)?.toDouble() ?? 0.0);
-        }
-      }
-
-      final paidRows = await db.rawQuery('''
-        SELECT customer_id, COALESCE(SUM(amount), 0.0) AS total_paid
-        FROM customer_payments
-        WHERE customer_id IN ($placeholders)
-        GROUP BY customer_id
-      ''', chunk);
-      for (final r in paidRows) {
-        final cid = (r['customer_id'] as num?)?.toInt();
-        if (cid != null) {
-          result[cid] =
-              (result[cid] ?? 0.0) - ((r['total_paid'] as num?)?.toDouble() ?? 0.0);
-        }
-      }
-    }
-    return result;
-  }
-
   /// Pure FIFO Days-Sales-Outstanding calculator from chronological order & payment rows.
   @visibleForTesting
   static double? computeAverageDsoFromRows(
@@ -1628,891 +1151,4 @@ class DatabaseHelper {
     return weightedDayRupees / totalAllocated;
   }
 
-  Future<Map<String, dynamic>> getEveningClosingReport(DateTime date) async {
-    try {
-      final db = await database;
-      final startOfDay =
-          DateTime(date.year, date.month, date.day).toIso8601String();
-      final nextDay =
-          DateTime(date.year, date.month, date.day + 1).toIso8601String();
-
-      final orderRows = await db.query(
-        'orders',
-        where: 'created_at >= ? AND created_at < ?',
-        whereArgs: [startOfDay, nextDay],
-      );
-
-      double totalSales = 0;
-      double creditSales = 0;
-      int completedCount = 0;
-      int pendingCount = 0;
-      final todayOrderIds = <int>{};
-      final todayOrderNumbers = <int>{};
-
-      for (final row in orderRows) {
-        final oid = (row['id'] as num?)?.toInt();
-        final oNum = (row['order_number'] as num?)?.toInt();
-        if (oid != null) todayOrderIds.add(oid);
-        if (oNum != null) todayOrderNumbers.add(oNum);
-
-        final total = (row['estimate_total'] as num?)?.toDouble() ?? 0.0;
-        final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
-        final status = (row['status'] as String?)?.trim().toUpperCase() ?? '';
-
-        totalSales += total;
-        if (status == 'COMPLETED' || status == 'CLOSED') {
-          completedCount++;
-        } else {
-          pendingCount++;
-        }
-
-        final due = total - paid;
-        if (due > 0) {
-          creditSales += due;
-        }
-      }
-
-      // Derive all collections strictly from customer_payments to preserve per-payment modes
-      // (cash / upi / cheque / bank_transfer) and eliminate same-day Khata double-counting.
-      final paymentRows = await db.query(
-        'customer_payments',
-        where: 'created_at >= ? AND created_at < ?',
-        whereArgs: [startOfDay, nextDay],
-      );
-
-      double cashSales = 0;
-      double upiSales = 0;
-      double otherSales = 0;
-      double directPayments = 0;
-      final matchedOrderRefsToday = <int>{};
-      final paidCustomerIdsToday = <int>{};
-
-      for (final p in paymentRows) {
-        final cid = (p['customer_id'] as num?)?.toInt();
-        if (cid != null) paidCustomerIdsToday.add(cid);
-        final amt = (p['amount'] as num?)?.toDouble() ?? 0.0;
-        final mode = (p['payment_mode'] as String?)?.trim().toLowerCase() ?? '';
-        final notes = (p['notes'] as String?) ?? '';
-
-        if (mode == 'cash') {
-          cashSales += amt;
-        } else if (mode == 'upi') {
-          upiSales += amt;
-        } else {
-          otherSales += amt;
-        }
-
-        bool isTodayOrderPayment = false;
-        final match = RegExp(r'Order #ORD-(\d+)').firstMatch(notes);
-        if (match != null) {
-          final matchedOrderNum = int.tryParse(match.group(1) ?? '');
-          if (matchedOrderNum != null &&
-              (todayOrderIds.contains(matchedOrderNum) ||
-                  todayOrderNumbers.contains(matchedOrderNum))) {
-            isTodayOrderPayment = true;
-            matchedOrderRefsToday.add(matchedOrderNum);
-          }
-        }
-
-        if (!isTodayOrderPayment) {
-          directPayments += amt;
-        }
-      }
-
-      // Fallback only for legacy rows that set orders.paid_amount directly without any customer_payments entry
-      for (final row in orderRows) {
-        final oid = (row['id'] as num?)?.toInt();
-        final oNum = (row['order_number'] as num?)?.toInt();
-        final cid = (row['customer_id'] as num?)?.toInt();
-        final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0.0;
-        if (paid <= 0.001) continue;
-        final hasMatchedPayment = (oid != null && matchedOrderRefsToday.contains(oid)) ||
-            (oNum != null && matchedOrderRefsToday.contains(oNum)) ||
-            (cid != null && paidCustomerIdsToday.contains(cid));
-        if (!hasMatchedPayment) {
-          final mode = (row['payment_mode'] as String?)?.trim().toLowerCase() ?? 'unpaid';
-          if (mode == 'cash') {
-            cashSales += paid;
-          } else if (mode == 'upi') {
-            upiSales += paid;
-          } else if (mode != 'unpaid' && mode != 'khata' && mode.isNotEmpty) {
-            otherSales += paid;
-          }
-        }
-      }
-
-      TopProductStat? topItem;
-      try {
-        final topRows = await db.rawQuery('''
-          SELECT oi.item_name, SUM(oi.quantity_ordered) as total_qty, oi.unit
-          FROM order_items oi
-          INNER JOIN orders o ON oi.order_id = o.id
-          WHERE o.created_at >= ? AND o.created_at < ?
-          GROUP BY oi.item_name, oi.unit
-          ORDER BY total_qty DESC
-          LIMIT 1
-        ''', [startOfDay, nextDay]);
-        if (topRows.isNotEmpty) {
-          topItem = TopProductStat(
-            itemName: topRows.first['item_name'] as String? ?? 'None',
-            totalQuantity: (topRows.first['total_qty'] as num?)?.toDouble() ?? 0.0,
-            totalRevenue: 0.0,
-            unit: topRows.first['unit'] as String? ?? '',
-            orderCount: 1,
-          );
-        }
-      } catch (e) {
-        debugPrint('Top product calculation error in evening report: $e');
-      }
-
-      final totalCollectedToday = cashSales + upiSales + otherSales;
-
-      return {
-        'date': date,
-        'totalOrders': orderRows.length,
-        'completedOrders': completedCount,
-        'pendingOrders': pendingCount,
-        'totalSales': totalSales,
-        'cashSales': cashSales,
-        'upiSales': upiSales,
-        'otherSales': otherSales,
-        'creditSales': creditSales,
-        'directPayments': directPayments,
-        'totalCollectedToday': totalCollectedToday,
-        'topItemName': topItem?.itemName ?? 'None',
-        'topItemQty': topItem?.totalQuantity ?? 0,
-        'topItemUnit': topItem?.unit ?? '',
-      };
-    } catch (e) {
-      debugPrint('Error getting evening closing report: $e');
-      return {
-        'date': date,
-        'totalOrders': 0,
-        'completedOrders': 0,
-        'pendingOrders': 0,
-        'totalSales': 0.0,
-        'cashSales': 0.0,
-        'upiSales': 0.0,
-        'otherSales': 0.0,
-        'creditSales': 0.0,
-        'directPayments': 0.0,
-        'totalCollectedToday': 0.0,
-        'topItemName': 'None',
-        'topItemQty': 0,
-        'topItemUnit': '',
-      };
-    }
-  }
-
-  /// Retrieves list of all collections (payments) recorded on a specific date with customer details.
-  Future<List<Map<String, dynamic>>> getCollectionsForDate(DateTime date) async {
-    final db = await database;
-    final startOfDay = DateTime(date.year, date.month, date.day).toIso8601String();
-    final nextDay = DateTime(date.year, date.month, date.day + 1).toIso8601String();
-
-    final rows = await db.rawQuery('''
-      SELECT 
-        cp.id,
-        cp.customer_id,
-        cp.amount,
-        cp.payment_mode,
-        cp.notes,
-        cp.created_at,
-        c.name as customer_name,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as customer_location
-      FROM customer_payments cp
-      JOIN customers c ON cp.customer_id = c.id
-      WHERE cp.created_at >= ? AND cp.created_at < ?
-      ORDER BY cp.created_at DESC
-    ''', [startOfDay, nextDay]);
-
-    final balancesByCustomer = await _getCustomerBalancesBatch(
-      db,
-      rows.map((r) => r['customer_id'] as int),
-    );
-    final list = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      final map = Map<String, dynamic>.from(row);
-      final cid = row['customer_id'] as int;
-      map['remaining_due'] = balancesByCustomer[cid] ?? 0.0;
-      list.add(map);
-    }
-    return list;
-  }
-
-  /// Calculates comprehensive Lifetime Business Analytics across all time or custom range/location.
-  Future<Map<String, dynamic>> getLifetimeBusinessReport({
-    String? locationFilter,
-    String? staffFilter,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    final db = await database;
-
-    final orderWhereParts = <String>[];
-    final orderWhereArgs = <Object?>[];
-
-    if (startDate != null) {
-      orderWhereParts.add('o.created_at >= ?');
-      orderWhereArgs.add(startDate.toIso8601String());
-    }
-    if (endDate != null) {
-      orderWhereParts.add('o.created_at <= ?');
-      orderWhereArgs.add(endDate.toIso8601String());
-    }
-
-    final bool isLocFiltered = locationFilter != null &&
-        locationFilter.trim().isNotEmpty &&
-        locationFilter.trim() != 'All Locations';
-    final String? cleanLoc = isLocFiltered ? locationFilter.trim() : null;
-
-    final bool isStaffFiltered = staffFilter != null &&
-        staffFilter.trim().isNotEmpty &&
-        staffFilter.trim() != 'All Staff' &&
-        staffFilter.trim() != 'All Partners' &&
-        staffFilter.trim() != 'All Partner Devices / Counters';
-    final String? cleanStaff = isStaffFiltered ? staffFilter.trim() : null;
-
-    if (cleanLoc != null) {
-      orderWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
-      orderWhereArgs.add(cleanLoc);
-    }
-    if (cleanStaff != null) {
-      orderWhereParts.add('TRIM(o.taken_by) = ? COLLATE NOCASE');
-      orderWhereArgs.add(cleanStaff);
-    }
-
-    final orderWhereClause = orderWhereParts.isNotEmpty
-        ? 'WHERE ${orderWhereParts.join(' AND ')}'
-        : '';
-
-    // 1. Orders aggregates
-    final orderAggQuery = '''
-      SELECT 
-        COUNT(o.id) as total_orders,
-        COALESCE(SUM(o.estimate_total), 0.0) as total_sales,
-        COALESCE(SUM(o.paid_amount), 0.0) as total_order_paid,
-        SUM(CASE WHEN UPPER(o.status) IN ('COMPLETED', 'CLOSED') THEN 1 ELSE 0 END) as completed_orders,
-        SUM(CASE WHEN UPPER(o.status) NOT IN ('COMPLETED', 'CLOSED') THEN 1 ELSE 0 END) as pending_orders
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-    ''';
-    final orderAggRows = await db.rawQuery(orderAggQuery, orderWhereArgs);
-    final orderAgg = orderAggRows.isNotEmpty ? orderAggRows.first : {};
-    final totalOrders = (orderAgg['total_orders'] as num?)?.toInt() ?? 0;
-    final totalSales = (orderAgg['total_sales'] as num?)?.toDouble() ?? 0.0;
-    final completedOrders = (orderAgg['completed_orders'] as num?)?.toInt() ?? 0;
-    final pendingOrders = (orderAgg['pending_orders'] as num?)?.toInt() ?? 0;
-
-    // 2. Collections (customer_payments)
-    final payWhereParts = <String>[];
-    final payWhereArgs = <Object?>[];
-    if (startDate != null) {
-      payWhereParts.add('cp.created_at >= ?');
-      payWhereArgs.add(startDate.toIso8601String());
-    }
-    if (endDate != null) {
-      payWhereParts.add('cp.created_at <= ?');
-      payWhereArgs.add(endDate.toIso8601String());
-    }
-    if (cleanLoc != null) {
-      payWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
-      payWhereArgs.add(cleanLoc);
-    }
-    if (cleanStaff != null) {
-      payWhereParts.add(
-        'cp.customer_id IN (SELECT DISTINCT o.customer_id FROM orders o WHERE TRIM(o.taken_by) = ? COLLATE NOCASE)',
-      );
-      payWhereArgs.add(cleanStaff);
-    }
-
-    final payWhereClause = payWhereParts.isNotEmpty
-        ? 'WHERE ${payWhereParts.join(' AND ')}'
-        : '';
-
-    final payAggQuery = '''
-      SELECT COALESCE(SUM(cp.amount), 0.0) as total_collected
-      FROM customer_payments cp
-      LEFT JOIN customers c ON cp.customer_id = c.id
-      $payWhereClause
-    ''';
-    final payAggRows = await db.rawQuery(payAggQuery, payWhereArgs);
-    final totalCollected = payAggRows.isNotEmpty
-        ? (payAggRows.first['total_collected'] as num?)?.toDouble() ?? 0.0
-        : 0.0;
-
-    // 3. Outstanding Market Due & Advance Pool (Filtered by location & staff if specified)
-    final rawKhataList = await getCustomerKhataList();
-    Set<int>? staffCustomerIds;
-    if (cleanStaff != null) {
-      final staffCustRows = await db.rawQuery(
-        'SELECT DISTINCT customer_id FROM orders WHERE TRIM(taken_by) = ? COLLATE NOCASE',
-        [cleanStaff],
-      );
-      staffCustomerIds = staffCustRows
-          .map((r) => (r['customer_id'] as num?)?.toInt())
-          .whereType<int>()
-          .toSet();
-    }
-    final targetLocLower = cleanLoc?.toLowerCase();
-    final khataList = (cleanLoc != null || staffCustomerIds != null)
-        ? rawKhataList.where((item) {
-            if (targetLocLower != null) {
-              final loc = (item['customer_location'] as String?)?.trim().toLowerCase();
-              if (loc != targetLocLower) return false;
-            }
-            if (staffCustomerIds != null) {
-              final cid = (item['customer_id'] as num?)?.toInt();
-              if (cid == null || !staffCustomerIds.contains(cid)) return false;
-            }
-            return true;
-          }).toList()
-        : rawKhataList;
-
-    final khataSummary = await getKhataSummaryMetrics(khataList);
-    final totalMarketDue = (khataSummary['totalMarketDue'] as num?)?.toDouble() ?? 0.0;
-    final overdue30 = (khataSummary['overdue30Days'] as num?)?.toDouble() ?? 0.0;
-
-    final highestDueCustomers = khataList
-        .where((item) => ((item['balance_due'] as num?)?.toDouble() ?? 0.0) > 0.01)
-        .toList()
-      ..sort((a, b) => ((b['balance_due'] as num?)?.toDouble() ?? 0.0)
-          .compareTo((a['balance_due'] as num?)?.toDouble() ?? 0.0));
-
-    final advanceCustomers = khataList
-        .where((item) => ((item['balance_due'] as num?)?.toDouble() ?? 0.0) < -0.01)
-        .toList();
-    final advancePoolTotal = advanceCustomers.fold<double>(
-        0.0, (sum, item) => sum + (-((item['balance_due'] as num).toDouble())));
-    final advanceAccountsCount = advanceCustomers.length;
-
-    // 4. Financial & Basket Intelligence (AOV, Basket Size, Discounts, GST, Cash vs UPI)
-    final basketQuery = '''
-      SELECT 
-        COALESCE(SUM(oi.quantity_ordered), 0.0) as total_items_sold,
-        COUNT(oi.id) as total_lines_sold
-      FROM order_items oi
-      INNER JOIN orders o ON oi.order_id = o.id
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-    ''';
-    final basketRows = await db.rawQuery(basketQuery, orderWhereArgs);
-    final totalItemsSold = (basketRows.first['total_items_sold'] as num?)?.toDouble() ?? 0.0;
-    final totalLinesSold = (basketRows.first['total_lines_sold'] as num?)?.toInt() ?? 0;
-    final averageOrderValue = totalOrders > 0 ? (totalSales / totalOrders) : 0.0;
-    final avgBasketSize = totalOrders > 0 ? (totalItemsSold / totalOrders) : 0.0;
-    final avgLinesPerOrder = totalOrders > 0 ? (totalLinesSold / totalOrders) : 0.0;
-
-    // Discounts & Taxes from orders.notes JSON
-    final orderNotesRows = await db.rawQuery('''
-      SELECT o.notes 
-      FROM orders o 
-      LEFT JOIN customers c ON o.customer_id = c.id 
-      $orderWhereClause
-    ''', orderWhereArgs);
-    double totalDiscountsGiven = 0.0;
-    double totalGstBilled = 0.0;
-    for (final r in orderNotesRows) {
-      final raw = r['notes'] as String?;
-      if (raw != null && raw.isNotEmpty) {
-        try {
-          final m = jsonDecode(raw) as Map<String, dynamic>;
-          if (m['applyDiscount'] == true) {
-            totalDiscountsGiven += (m['discountAmount'] as num?)?.toDouble() ?? 0.0;
-          }
-          if (m['applyGst'] == true) {
-            totalGstBilled += (m['gstAmount'] as num?)?.toDouble() ?? 0.0;
-          }
-        } catch (_) {}
-      }
-    }
-
-    // Cash vs UPI Breakdown
-    final payModeQuery = '''
-      SELECT 
-        COALESCE(SUM(CASE WHEN LOWER(cp.payment_mode) = 'cash' THEN cp.amount ELSE 0.0 END), 0.0) as cash_collected,
-        COALESCE(SUM(CASE WHEN LOWER(cp.payment_mode) = 'upi' THEN cp.amount ELSE 0.0 END), 0.0) as upi_collected
-      FROM customer_payments cp
-      LEFT JOIN customers c ON cp.customer_id = c.id
-      $payWhereClause
-    ''';
-    final payModeRows = await db.rawQuery(payModeQuery, payWhereArgs);
-    final cashCollected = (payModeRows.first['cash_collected'] as num?)?.toDouble() ?? 0.0;
-    final upiCollected = (payModeRows.first['upi_collected'] as num?)?.toDouble() ?? 0.0;
-    final cashPercentage = totalCollected > 0 ? (cashCollected / totalCollected) * 100 : 0.0;
-    final upiPercentage = totalCollected > 0 ? (upiCollected / totalCollected) * 100 : 0.0;
-
-    // 5. Store Financial Health Score (0 - 100 & Grade A+, A, B, C, D)
-    final recoveryRate = (totalSales + totalMarketDue) > 0 
-        ? ((totalCollected / (totalSales + totalMarketDue)) * 100).clamp(0.0, 100.0) 
-        : 100.0;
-    final overdueRatio = totalMarketDue > 0 ? ((overdue30 / totalMarketDue) * 100).clamp(0.0, 100.0) : 0.0;
-    final completionRate = totalOrders > 0 ? ((completedOrders / totalOrders) * 100).clamp(0.0, 100.0) : 100.0;
-    final rawHealth = (recoveryRate * 0.40) + ((100.0 - overdueRatio) * 0.35) + (completionRate * 0.25);
-    final healthScore = rawHealth.round().clamp(0, 100);
-    String healthGrade;
-    String healthSummary;
-    if (healthScore >= 88) {
-      healthGrade = 'Grade A+';
-      healthSummary = 'Outstanding Cashflow & Low Overdue Risk';
-    } else if (healthScore >= 75) {
-      healthGrade = 'Grade A';
-      healthSummary = 'Healthy Cashflow & Consistent Settlements';
-    } else if (healthScore >= 60) {
-      healthGrade = 'Grade B';
-      healthSummary = 'Moderate Health • Monitor Aging Udhaar';
-    } else if (healthScore >= 45) {
-      healthGrade = 'Grade C';
-      healthSummary = 'High Credit Risk • Follow Up on Outstanding Dues';
-    } else {
-      healthGrade = 'Grade D';
-      healthSummary = 'Critical Overdue • Urgent Payment Recovery Needed';
-    }
-
-    // 6. Customer Repeat Rate & Loyalty
-    final custOrdersQuery = '''
-      SELECT 
-        o.customer_id, 
-        COUNT(o.id) as cust_order_count 
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY o.customer_id
-    ''';
-    final custOrderRows = await db.rawQuery(custOrdersQuery, orderWhereArgs);
-    final uniqueCustomerCount = custOrderRows.length;
-    final repeatCustomerCount = custOrderRows.where((r) => ((r['cust_order_count'] as num?)?.toInt() ?? 0) > 1).length;
-    final oneTimeCustomerCount = uniqueCustomerCount - repeatCustomerCount;
-    final repeatRatePercentage = uniqueCustomerCount > 0 ? (repeatCustomerCount / uniqueCustomerCount) * 100 : 0.0;
-
-    // 7. Dormant / Lost Customers (Inactive 30+ days, sorted by past spend, using local device clock)
-    final dormantWhereParts = <String>[];
-    final dormantWhereArgs = <Object?>[];
-    if (cleanLoc != null) {
-      dormantWhereParts.add('TRIM(c.address) = ? COLLATE NOCASE');
-      dormantWhereArgs.add(cleanLoc);
-    }
-    if (cleanStaff != null) {
-      dormantWhereParts.add('TRIM(o.taken_by) = ? COLLATE NOCASE');
-      dormantWhereArgs.add(cleanStaff);
-    }
-    final dormantWhereClause = dormantWhereParts.isNotEmpty
-        ? 'WHERE ${dormantWhereParts.join(' AND ')}'
-        : '';
-    final nowLocalIso = DateTime.now().toIso8601String();
-    final dormantQuery = '''
-      SELECT 
-        c.id as customer_id,
-        c.name as customer_name,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as customer_location,
-        MAX(o.created_at) as last_order_date,
-        SUM(o.estimate_total) as past_total_bought,
-        COUNT(o.id) as past_order_count,
-        CAST((julianday(?) - julianday(MAX(o.created_at))) as INTEGER) as days_since_last_order
-      FROM orders o
-      JOIN customers c ON o.customer_id = c.id
-      $dormantWhereClause
-      GROUP BY c.id
-      HAVING (julianday(?) - julianday(MAX(o.created_at))) >= 30
-      ORDER BY past_total_bought DESC
-      LIMIT 20
-    ''';
-    final dormantCustomers = await db.rawQuery(
-      dormantQuery,
-      [nowLocalIso, ...dormantWhereArgs, nowLocalIso],
-    );
-
-    // 8. Average Udhaar Clearance Cycle (FIFO DSO per customer, avoiding M×N join explosion)
-    final dsoOrderRows = await db.rawQuery('''
-      SELECT o.id, o.customer_id, o.created_at, o.estimate_total
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      ORDER BY o.customer_id ASC, o.created_at ASC, o.id ASC
-    ''', orderWhereArgs);
-    final dsoCustomerIds = dsoOrderRows
-        .map((r) => (r['customer_id'] as num?)?.toInt())
-        .whereType<int>()
-        .toSet()
-        .toList();
-    final dsoPayRows = <Map<String, Object?>>[];
-    for (var i = 0; i < dsoCustomerIds.length; i += 400) {
-      final chunk = dsoCustomerIds.sublist(
-        i,
-        i + 400 > dsoCustomerIds.length ? dsoCustomerIds.length : i + 400,
-      );
-      final placeholders = List.filled(chunk.length, '?').join(',');
-      final rows = await db.rawQuery('''
-        SELECT cp.customer_id, cp.created_at, cp.amount
-        FROM customer_payments cp
-        WHERE cp.customer_id IN ($placeholders)
-        ORDER BY cp.created_at ASC, cp.id ASC
-      ''', chunk);
-      dsoPayRows.addAll(rows);
-    }
-    final rawDso = computeAverageDsoFromRows(dsoOrderRows, dsoPayRows);
-    final avgDsoDays = rawDso != null
-        ? rawDso.round()
-        : (totalMarketDue > 0 && totalSales > 0 ? ((totalMarketDue / totalSales) * 30).round() : 14);
-
-    // 9. Top Selling Products
-    final topProductsQuery = '''
-      SELECT 
-        oi.item_name,
-        oi.unit,
-        SUM(oi.quantity_ordered) as total_qty,
-        SUM(oi.quantity_ordered * oi.unit_price) as total_rev
-      FROM order_items oi
-      INNER JOIN orders o ON oi.order_id = o.id
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY oi.item_name, oi.unit
-      ORDER BY total_rev DESC, total_qty DESC
-      LIMIT 10
-    ''';
-    final topProdRows = await db.rawQuery(topProductsQuery, orderWhereArgs);
-
-    // 10. Least Selling Products / Slow moving (filtered consistently by date, location & staff)
-    final leastProductsQuery = '''
-      SELECT 
-        p.name as item_name,
-        p.category,
-        COALESCE(s.total_qty, 0.0) as total_qty
-      FROM products p
-      LEFT JOIN (
-        SELECT 
-          oi.product_id,
-          SUM(oi.quantity_ordered) as total_qty
-        FROM order_items oi
-        INNER JOIN orders o ON oi.order_id = o.id
-        LEFT JOIN customers c ON o.customer_id = c.id
-        $orderWhereClause
-        GROUP BY oi.product_id
-      ) s ON s.product_id = p.id
-      WHERE p.is_active = 1
-      ORDER BY total_qty ASC, p.name ASC
-      LIMIT 10
-    ''';
-    final leastProdRows = await db.rawQuery(leastProductsQuery, orderWhereArgs);
-
-    // 11. Dead Stock Alert (0 sales in catalog for current filter)
-    final deadStockWhereSubquery = orderWhereClause.isEmpty
-        ? 'WHERE oi.product_id IS NOT NULL'
-        : '$orderWhereClause AND oi.product_id IS NOT NULL';
-
-    final deadStockQuery = '''
-      SELECT 
-        p.id,
-        p.name as item_name,
-        p.category,
-        p.created_at
-      FROM products p
-      WHERE p.is_active = 1
-        AND p.id NOT IN (
-          SELECT DISTINCT oi.product_id 
-          FROM order_items oi
-          INNER JOIN orders o ON oi.order_id = o.id
-          LEFT JOIN customers c ON o.customer_id = c.id
-          $deadStockWhereSubquery
-        )
-      ORDER BY p.name ASC
-      LIMIT 20
-    ''';
-    final deadStockProducts = await db.rawQuery(deadStockQuery, orderWhereArgs);
-
-    // 12. Category Sales Breakdown
-    final categoryQuery = '''
-      SELECT 
-        COALESCE(NULLIF(TRIM(p.category), ''), 'General Hardware') as category,
-        COALESCE(SUM(oi.quantity_ordered * oi.unit_price), 0.0) as category_sales,
-        COUNT(oi.id) as item_count
-      FROM order_items oi
-      INNER JOIN orders o ON oi.order_id = o.id
-      LEFT JOIN products p ON oi.product_id = p.id
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY category
-      ORDER BY category_sales DESC
-    ''';
-    final categorySales = await db.rawQuery(categoryQuery, orderWhereArgs);
-
-    // 13. Most Frequent Shortages / Stockouts during fulfillment
-    final shortageWhere = orderWhereClause.isEmpty 
-        ? 'WHERE oi.quantity_ordered > oi.quantity_given' 
-        : '$orderWhereClause AND oi.quantity_ordered > oi.quantity_given';
-    final shortageQuery = '''
-      SELECT 
-        oi.item_name,
-        oi.unit,
-        COUNT(oi.id) as shortage_events,
-        SUM(oi.quantity_ordered - oi.quantity_given) as total_short_qty
-      FROM order_items oi
-      INNER JOIN orders o ON oi.order_id = o.id
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $shortageWhere
-      GROUP BY oi.item_name, oi.unit
-      ORDER BY shortage_events DESC, total_short_qty DESC
-      LIMIT 10
-    ''';
-    final topStockouts = await db.rawQuery(shortageQuery, orderWhereArgs);
-
-    // 14. Top Valued Customers: Buyers & Payers
-    final topBuyersQuery = '''
-      SELECT 
-        c.id,
-        c.name,
-        c.name as customer_name,
-        c.phone,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as location,
-        COALESCE(c.address, '') as customer_location,
-        SUM(o.estimate_total) as total_bought,
-        COUNT(o.id) as order_count
-      FROM orders o
-      JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY c.id
-      ORDER BY total_bought DESC
-      LIMIT 10
-    ''';
-    final topBuyers = await db.rawQuery(topBuyersQuery, orderWhereArgs);
-
-    final topPayersQuery = '''
-      SELECT 
-        c.id,
-        c.name,
-        c.name as customer_name,
-        c.phone,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as location,
-        COALESCE(c.address, '') as customer_location,
-        SUM(cp.amount) as total_paid,
-        COUNT(cp.id) as payment_count
-      FROM customer_payments cp
-      JOIN customers c ON cp.customer_id = c.id
-      $payWhereClause
-      GROUP BY c.id
-      ORDER BY total_paid DESC
-      LIMIT 10
-    ''';
-    final topPayers = await db.rawQuery(topPayersQuery, payWhereArgs);
-
-    // 15. Peak Days (Day of Week analysis: Sunday to Saturday)
-    final peakDaysQuery = '''
-      SELECT 
-        strftime('%w', o.created_at) as day_of_week,
-        COUNT(o.id) as order_count,
-        COALESCE(SUM(o.estimate_total), 0.0) as sales_volume
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY day_of_week
-      ORDER BY day_of_week ASC
-    ''';
-    final peakRows = await db.rawQuery(peakDaysQuery, orderWhereArgs);
-    final dayOfWeekStats = <int, Map<String, dynamic>>{};
-    for (int i = 0; i < 7; i++) {
-      dayOfWeekStats[i] = {'count': 0, 'sales': 0.0};
-    }
-    for (final r in peakRows) {
-      final day = int.tryParse(r['day_of_week']?.toString() ?? '') ?? 0;
-      dayOfWeekStats[day] = {
-        'count': (r['order_count'] as num?)?.toInt() ?? 0,
-        'sales': (r['sales_volume'] as num?)?.toDouble() ?? 0.0,
-      };
-    }
-
-    // 16. Rush Hours (Busiest Hours of the Day Heatmap)
-    final hourlyQuery = '''
-      SELECT 
-        strftime('%H', o.created_at) as hour_of_day,
-        COUNT(o.id) as order_count,
-        COALESCE(SUM(o.estimate_total), 0.0) as sales
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY hour_of_day
-      ORDER BY hour_of_day ASC
-    ''';
-    final hourlyStats = await db.rawQuery(hourlyQuery, orderWhereArgs);
-
-    // 17. Month-on-Month Growth Trend (Last 12 Months)
-    final monthlySalesQuery = '''
-      SELECT 
-        strftime('%Y-%m', o.created_at) as month_key,
-        COUNT(o.id) as order_count,
-        COALESCE(SUM(o.estimate_total), 0.0) as sales
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY month_key
-      ORDER BY month_key DESC
-      LIMIT 12
-    ''';
-    final monthlySalesRows = await db.rawQuery(monthlySalesQuery, orderWhereArgs);
-
-    final monthlyPayQuery = '''
-      SELECT 
-        strftime('%Y-%m', cp.created_at) as month_key,
-        COALESCE(SUM(cp.amount), 0.0) as collections
-      FROM customer_payments cp
-      LEFT JOIN customers c ON cp.customer_id = c.id
-      $payWhereClause
-      GROUP BY month_key
-      ORDER BY month_key DESC
-      LIMIT 12
-    ''';
-    final monthlyPayRows = await db.rawQuery(monthlyPayQuery, payWhereArgs);
-    final payByMonth = {for (final r in monthlyPayRows) r['month_key'] as String: (r['collections'] as num?)?.toDouble() ?? 0.0};
-
-    final monthlyTrend = <Map<String, dynamic>>[];
-    for (final sRow in monthlySalesRows.reversed) {
-      final mKey = sRow['month_key'] as String;
-      monthlyTrend.add({
-        'month_key': mKey,
-        'orders': (sRow['order_count'] as num?)?.toInt() ?? 0,
-        'sales': (sRow['sales'] as num?)?.toDouble() ?? 0.0,
-        'collections': payByMonth[mKey] ?? 0.0,
-      });
-    }
-
-    // 18. Staff & Device Performance Leaderboard
-    final staffLeaderboardQuery = '''
-      SELECT 
-        COALESCE(NULLIF(TRIM(o.taken_by), ''), 'Store') as staff_name,
-        COUNT(o.id) as orders_taken,
-        COALESCE(SUM(o.estimate_total), 0.0) as total_sales,
-        COALESCE(SUM(o.paid_amount), 0.0) as direct_collected
-      FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
-      $orderWhereClause
-      GROUP BY staff_name
-      ORDER BY total_sales DESC
-    ''';
-    final staffLeaderboard = await db.rawQuery(staffLeaderboardQuery, orderWhereArgs);
-
-    // 19. Collections List
-    final collectionsQuery = '''
-      SELECT 
-        cp.id,
-        cp.customer_id,
-        cp.amount,
-        cp.payment_mode,
-        cp.notes,
-        cp.created_at,
-        c.name as customer_name,
-        c.phone as customer_phone,
-        COALESCE(c.address, '') as customer_location
-      FROM customer_payments cp
-      JOIN customers c ON cp.customer_id = c.id
-      $payWhereClause
-      ORDER BY cp.created_at DESC
-      LIMIT 100
-    ''';
-    final collectionRows = await db.rawQuery(collectionsQuery, payWhereArgs);
-    final batchBalances = await _getCustomerBalancesBatch(
-      db,
-      collectionRows.map((r) => r['customer_id'] as int),
-    );
-    final collectionsWithDue = <Map<String, dynamic>>[];
-    for (final row in collectionRows) {
-      final map = Map<String, dynamic>.from(row);
-      final cid = row['customer_id'] as int;
-      map['remaining_due'] = batchBalances[cid] ?? 0.0;
-      collectionsWithDue.add(map);
-    }
-
-    // 20. Distinct Locations & Staff
-    final locRows = await db.rawQuery('''
-      SELECT DISTINCT TRIM(address) as location 
-      FROM customers 
-      WHERE address IS NOT NULL AND TRIM(address) != ''
-      GROUP BY TRIM(address) COLLATE NOCASE
-      ORDER BY location ASC
-    ''');
-    final allLocations = locRows
-        .map((r) => r['location'] as String)
-        .where((l) => l.isNotEmpty)
-        .toList();
-
-    final staffRows = await db.rawQuery('''
-      SELECT DISTINCT TRIM(taken_by) as staff 
-      FROM orders 
-      WHERE taken_by IS NOT NULL AND TRIM(taken_by) != '' AND TRIM(taken_by) != 'Store'
-      GROUP BY TRIM(taken_by) COLLATE NOCASE
-      ORDER BY staff ASC
-    ''');
-    final allStaff = staffRows
-        .map((r) => r['staff'] as String)
-        .where((s) => s.isNotEmpty)
-        .toList();
-
-    return {
-      // Core Metrics
-      'totalSales': totalSales,
-      'totalCollected': totalCollected,
-      'totalCollections': totalCollected,
-      'totalMarketDue': totalMarketDue,
-      'totalOrders': totalOrders,
-      'completedOrders': completedOrders,
-      'pendingOrders': pendingOrders,
-
-      // Financial & Basket Size
-      'averageOrderValue': averageOrderValue,
-      'totalItemsSold': totalItemsSold,
-      'totalLinesSold': totalLinesSold,
-      'avgBasketSize': avgBasketSize,
-      'avgLinesPerOrder': avgLinesPerOrder,
-      'totalDiscountsGiven': totalDiscountsGiven,
-      'totalGstBilled': totalGstBilled,
-      'cashCollected': cashCollected,
-      'upiCollected': upiCollected,
-      'cashPercentage': cashPercentage,
-      'upiPercentage': upiPercentage,
-      'advancePoolTotal': advancePoolTotal,
-      'advanceAccountsCount': advanceAccountsCount,
-
-      // Store Financial Health
-      'healthGrade': healthGrade,
-      'healthScore': healthScore,
-      'healthSummary': healthSummary,
-      'avgDsoDays': avgDsoDays,
-
-      // Customer Retention & Intelligence
-      'uniqueCustomerCount': uniqueCustomerCount,
-      'repeatCustomerCount': repeatCustomerCount,
-      'oneTimeCustomerCount': oneTimeCustomerCount,
-      'repeatRatePercentage': repeatRatePercentage,
-      'dormantCustomers': dormantCustomers,
-      'topBuyers': topBuyers,
-      'topPayers': topPayers,
-      'highestDueCustomers': highestDueCustomers.take(15).toList(),
-      'highestDues': highestDueCustomers.take(15).toList(),
-
-      // Product & Inventory Intelligence
-      'topProducts': topProdRows,
-      'topSellingProducts': topProdRows,
-      'leastProducts': leastProdRows,
-      'leastSellingProducts': leastProdRows,
-      'deadStockProducts': deadStockProducts,
-      'categorySales': categorySales,
-      'topStockouts': topStockouts,
-
-      // Time & Trend Visuals
-      'peakDays': peakRows,
-      'dayOfWeekStats': dayOfWeekStats,
-      'hourlyStats': hourlyStats,
-      'monthlyTrend': monthlyTrend,
-
-      // Staff & Meta
-      'staffLeaderboard': staffLeaderboard,
-      'collections': collectionsWithDue,
-      'collectionsList': collectionsWithDue,
-      'allLocations': allLocations,
-      'allStaff': allStaff,
-    };
-  }
 }

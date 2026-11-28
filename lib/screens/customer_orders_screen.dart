@@ -931,7 +931,7 @@ class _CustomerOrdersScreenState extends State<CustomerOrdersScreen> {
                                                         order.orderId);
                                                 if (details != null && context.mounted) {
                                                   if (!_ensureAllItemsPriced(details, actionName: 'share receipt')) return;
-                                                  ShareService.shareOrderDetails(details);
+                                                  await ShareService.shareOrderDetails(details);
                                                 }
                                               },
                                             ),

@@ -5,14 +5,20 @@ import 'package:shop/models/order.dart';
 class DraftOrderService {
   static const String _draftKey = 'current_order_draft';
 
-  Future<void> saveDraft(DraftOrder draft) async {
+  String _keyFor(int? customerId) =>
+      customerId == null ? _draftKey : '${_draftKey}_$customerId';
+
+  Future<void> saveDraft(DraftOrder draft, {int? customerId}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_draftKey, jsonEncode(draft.toMap()));
+    await prefs.setString(
+      _keyFor(customerId ?? draft.customer.id),
+      jsonEncode(draft.toMap()),
+    );
   }
 
-  Future<DraftOrder?> getDraft() async {
+  Future<DraftOrder?> getDraft({int? customerId}) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString(_draftKey);
+    final jsonStr = prefs.getString(_keyFor(customerId));
     if (jsonStr == null || jsonStr.isEmpty) return null;
     try {
       final map = jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -22,8 +28,8 @@ class DraftOrderService {
     }
   }
 
-  Future<void> clearDraft() async {
+  Future<void> clearDraft({int? customerId}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_draftKey);
+    await prefs.remove(_keyFor(customerId));
   }
 }

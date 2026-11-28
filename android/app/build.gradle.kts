@@ -111,6 +111,36 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "edition"
+    productFlavors {
+        create("wholesale") {
+            dimension = "edition"
+            applicationId = if (project.hasProperty("appId")) {
+                project.property("appId") as String
+            } else {
+                "com.example.shop"
+            }
+            manifestPlaceholders["appName"] = if (project.hasProperty("appName")) {
+                project.property("appName") as String
+            } else {
+                "Shop Wholesale"
+            }
+        }
+        create("retail") {
+            dimension = "edition"
+            applicationId = if (project.hasProperty("appId")) {
+                project.property("appId") as String
+            } else {
+                "com.example.shop.local"
+            }
+            manifestPlaceholders["appName"] = if (project.hasProperty("appName")) {
+                project.property("appName") as String
+            } else {
+                "Shop Retail"
+            }
+        }
+    }
+
     signingConfigs {
         if (hasValidReleaseKeystore) {
             create("release") {
@@ -124,6 +154,13 @@ android {
 
     buildTypes {
         release {
+            val requireProdId = (project.hasProperty("requireProductionAppId") &&
+                project.property("requireProductionAppId") == "true")
+            if (requireProdId && customAppId.startsWith("com.example.")) {
+                throw GradleException(
+                    "Production release blocked: replace default '$customAppId' with your reverse-domain Play Store applicationId via -PappId=com.yourcompany.shop and matching google-services.json."
+                )
+            }
             if (hasValidReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }

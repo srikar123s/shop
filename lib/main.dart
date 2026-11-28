@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -14,6 +15,7 @@ import 'package:shop/repositories/order_repository.dart';
 import 'package:shop/repositories/product_repository.dart';
 import 'package:shop/screens/home_screen.dart';
 import 'package:shop/services/app_notification_service.dart';
+import 'package:shop/services/app_telemetry_service.dart';
 import 'package:shop/services/backup_service.dart';
 import 'package:shop/services/fcm_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
@@ -29,6 +31,27 @@ void main() async {
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('Flutter Error: ${details.exceptionAsString()}');
+    unawaited(
+      AppTelemetryService.instance.recordError(
+        details.exception,
+        details.stack,
+        source: 'flutter_framework',
+        fatal: true,
+      ),
+    );
+  };
+
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Uncaught platform error: $error');
+    unawaited(
+      AppTelemetryService.instance.recordError(
+        error,
+        stack,
+        source: 'platform_dispatcher',
+        fatal: true,
+      ),
+    );
+    return true;
   };
 
   // Initialize Firebase first when running in Cloud Sync mode so no plugin ever hits [core/no-app].

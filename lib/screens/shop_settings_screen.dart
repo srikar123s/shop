@@ -494,7 +494,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
 
           // Invoice, UPI & Digital Stamp
           Text(
-            'INVOICE, UPI & DIGITAL STAMP',
+            s.t('invoiceUpiStampSection'),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -509,9 +509,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                 ListTile(
                   leading: const Icon(Icons.phone_outlined,
                       color: Color(0xFF0F766E)),
-                  title: const Text('Shop Phone Number',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: Text(s.t('shopPhoneNumber'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: Text(
                     _customService.shopPhone.isNotEmpty
                         ? _customService.shopPhone
@@ -539,9 +539,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                 ListTile(
                   leading: const Icon(Icons.location_on_outlined,
                       color: Color(0xFF0F766E)),
-                  title: const Text('Shop Address',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: Text(s.t('shopAddress'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: Text(
                     _customService.shopAddress.isNotEmpty
                         ? _customService.shopAddress
@@ -568,9 +568,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                 ListTile(
                   leading:
                       const Icon(Icons.qr_code_2, color: Color(0xFF0F766E)),
-                  title: const Text('UPI ID (GPay / PhonePe / Paytm)',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: Text(s.t('upiIdLabel'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: Text(
                     _customService.upiId.isNotEmpty
                         ? _customService.upiId
@@ -599,9 +599,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                 ListTile(
                   leading: const Icon(Icons.verified_outlined,
                       color: Color(0xFF0F766E)),
-                  title: const Text('GSTIN (Tax ID - Optional)',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: Text(s.t('gstinLabel'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: Text(
                     _customService.gstin.isNotEmpty
                         ? _customService.gstin
@@ -628,9 +628,9 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                 ListTile(
                   leading: const Icon(Icons.approval_outlined,
                       color: Color(0xFF0F766E)),
-                  title: const Text('Digital Stamp & Signatory',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  title: Text(s.t('digitalStampTitle'),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
                   subtitle: Text(
                     _customService.digitalStamp.isNotEmpty
                         ? _customService.digitalStamp
@@ -657,7 +657,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
 
           // Quantity Step Shortcuts (+ chips)
           Text(
-            'ORDERING SHORTCUTS',
+            s.t('orderingShortcutsSection'),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -1553,8 +1553,8 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                   child: Icon(Icons.cloud_sync_rounded,
                       color: Colors.indigo.shade700),
                 ),
-                title: const Text('Shop Sync & Partner Devices',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                title: Text(s.t('shopSyncPartnerDevices'),
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(
                   ShopSyncService.instance.hasShop
                       ? 'Connected to ${ShopSyncService.instance.currentShop?.shopName} (${ShopSyncService.instance.currentShop?.shopCode})'
@@ -1723,7 +1723,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
 
           // Documentation & User Manual
           Text(
-            'HELP & MANUAL',
+            s.t('helpManualSection'),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -1768,7 +1768,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
 
           // App Details
           Text(
-            'ABOUT',
+            s.t('aboutSection'),
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -1801,7 +1801,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen>
                       ),
                       const SizedBox(height: 2),
                       const Text(
-                        'Version 1.2.0 • Offline SQLite DB & Cloud Ready',
+                        'Version ${String.fromEnvironment('APP_VERSION', defaultValue: '1.2.0')} • Offline SQLite DB & Cloud Ready',
                         style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ],

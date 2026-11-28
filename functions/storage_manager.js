@@ -177,20 +177,73 @@ function selectCleanupWindow(eligibleRecords, now) {
 }
 
 /**
- * Queries actual Firestore database storage usage via GCP Cloud Monitoring API.
- * Falls back to server-side Firestore database document+index measurement if
- * Cloud Monitoring time-series has not populated yet. Never reads SQLite.
+ * Measures per-shop Firestore document + path/index overhead so multi-tenant
+ * quotas are attributed per shop rather than blamed on another tenant.
+ */
+async function measureShopFirestoreBytes({ admin, shopCode }) {
+  const db = admin.firestore();
+  const shopRef = db.collection('shops').doc(shopCode);
+  let totalBytes = 0;
+
+  const shopSnap = await shopRef.get();
+  if (shopSnap.exists) {
+    totalBytes += Buffer.byteLength(JSON.stringify(shopSnap.data() || {}), 'utf8') + 64;
+  }
+
+  const subCols = [
+    'orders',
+    'payments',
+    'products',
+    'customers',
+    'delivery_partners',
+    'delivery_transactions',
+    'delivery_locations',
+    'devices',
+    'storage_archives',
+    'storage_audit_logs',
+    'outbound_notifications',
+    'system',
+  ];
+
+  for (const name of subCols) {
+    const snap = await shopRef.collection(name).get();
+    for (const doc of snap.docs) {
+      const jsonSize = Buffer.byteLength(JSON.stringify(doc.data() || {}), 'utf8');
+      const pathOverhead = Buffer.byteLength(doc.ref.path, 'utf8') + 64;
+      totalBytes += jsonSize + pathOverhead;
+    }
+  }
+
+  return {
+    usedBytes: totalBytes,
+    metricSource: 'shop_scoped_usage',
+  };
+}
+
+/**
+ * Queries actual Firestore database storage usage via GCP Cloud Monitoring API,
+ * scoping to per-shop subcollections when near/above threshold so tenants do not
+ * inherit another shop's storage spike.
  */
 async function fetchActualFirestoreStorageBytes({
   admin,
+  shopCode,
   monitoringClient,
   projectId,
 }) {
-  // 1. Primary: GCP Cloud Monitoring metric for Firestore storage size
+  if (shopCode) {
+    try {
+      return await measureShopFirestoreBytes({ admin, shopCode });
+    } catch (err) {
+      console.warn('[StorageMonitor] Per-shop measurement fallback:', err.message || err);
+    }
+  }
+
+  // Fallback: GCP Cloud Monitoring metric for project-wide Firestore storage size
   if (monitoringClient && projectId) {
     try {
       const nowSec = Math.floor(Date.now() / 1000);
-      const startSec = nowSec - 24 * 60 * 60; // look back up to 24h for latest point
+      const startSec = nowSec - 24 * 60 * 60;
       const [timeSeries] = await monitoringClient.listTimeSeries({
         name: `projects/${projectId}`,
         filter:
@@ -224,63 +277,60 @@ async function fetchActualFirestoreStorageBytes({
       }
     } catch (err) {
       console.warn(
-        '[StorageMonitor] Cloud Monitoring query unavailable, using Firestore server stats:',
+        '[StorageMonitor] Cloud Monitoring query unavailable:',
         err.message || err
       );
     }
   }
 
-  // 2. Fallback: Server-side Firestore document + index overhead calculation (not SQLite)
-  const db = admin.firestore();
-  let totalBytes = 0;
-  const collections = await db.listCollections();
-
-  async function measureCollection(colRef) {
-    const snap = await colRef.get();
-    for (const doc of snap.docs) {
-      const jsonSize = Buffer.byteLength(JSON.stringify(doc.data() || {}), 'utf8');
-      const pathOverhead = Buffer.byteLength(doc.ref.path, 'utf8') + 64;
-      totalBytes += jsonSize + pathOverhead;
-      const subCols = await doc.ref.listCollections();
-      for (const sub of subCols) {
-        await measureCollection(sub);
-      }
-    }
-  }
-
-  for (const col of collections) {
-    await measureCollection(col);
-  }
-
   return {
-    usedBytes: totalBytes,
-    metricSource: 'firestore_server_usage',
+    usedBytes: 0,
+    metricSource: 'unavailable',
   };
 }
 
 /**
- * Recursively deletes a Firestore document and all of its subcollections.
+ * Recursively deletes a Firestore document and all of its subcollections,
+ * queueing deletes into `bulkWriter` when provided.
  */
-async function deleteDocAndSubcollections(db, docRef) {
-  const subCols = await docRef.listCollections();
-  for (const subCol of subCols) {
-    const subSnap = await subCol.get();
-    for (const subDoc of subSnap.docs) {
-      await deleteDocAndSubcollections(db, subDoc.ref);
+async function deleteDocAndSubcollections(db, docRef, bulkWriter = null) {
+  if (typeof docRef.listCollections === 'function') {
+    const subCols = await docRef.listCollections();
+    for (const subCol of subCols) {
+      const subSnap = await subCol.get();
+      for (const subDoc of subSnap.docs) {
+        await deleteDocAndSubcollections(db, subDoc.ref, bulkWriter);
+      }
     }
   }
-  await docRef.delete();
+  if (bulkWriter) {
+    bulkWriter.delete(docRef);
+  } else {
+    await docRef.delete();
+  }
+}
+
+function resolveGcsBucket(admin, storageBucketOverride) {
+  if (storageBucketOverride) return storageBucketOverride;
+  try {
+    if (admin && typeof admin.storage === 'function') {
+      const b = admin.storage().bucket();
+      if (b && b.name) return b;
+    }
+  } catch (_) {}
+  return null;
 }
 
 /**
  * Evaluates threshold, sends notifications only on crossing or significant growth,
- * runs idempotent locked cleanup (Rules A/B/C), archives & verifies before deletion,
- * and updates Firestore status + audit logs.
+ * runs idempotent locked cleanup (Rules A/B/C), archives (preferring GCS) &
+ * verifies before BulkWriter deletion, and updates Firestore status + audit logs.
  */
 async function evaluateAndManageShopStorage({
   admin,
   shopCode,
   monitoringClient = null,
+  storageBucket = null,
   projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT,
   quotaBytesOverride = null,
   storageUsageOverride = null,
@@ -329,6 +379,7 @@ async function evaluateAndManageShopStorage({
       }
       return await fetchActualFirestoreStorageBytes({
         admin,
+        shopCode,
         monitoringClient,
         projectId,
       });
@@ -441,51 +492,108 @@ async function evaluateAndManageShopStorage({
         .createHash('sha256')
         .update(payloadJson)
         .digest('hex');
-      const compressedBase64 = zlib
-        .gzipSync(Buffer.from(payloadJson, 'utf8'))
-        .toString('base64');
+      const gzBuffer = zlib.gzipSync(Buffer.from(payloadJson, 'utf8'));
 
+      const bucket = resolveGcsBucket(admin, storageBucket);
       const archiveRef = shopRef.collection('storage_archives').doc(archiveId);
-      await archiveRef.set({
-        archiveId,
-        ruleApplied: window.ruleApplied,
-        dateRangeStart: window.windowStart.toISOString(),
-        dateRangeEnd: window.windowEnd.toISOString(),
-        recordCount: window.selected.length,
-        archivedDocIds: window.selected.map((x) => `${x.collection}/${x.docId}`),
-        checksum,
-        compressedGzipBase64: compressedBase64,
-        verified: false,
-        createdAt: now.toISOString(),
-      });
+      let gcsPath = null;
 
-      // Verify archive readability & integrity before deleting source docs
-      const verifySnap = await archiveRef.get();
-      if (!verifySnap.exists) {
-        throw new Error(`Archive verification failed: ${archiveId} not readable`);
+      if (bucket) {
+        try {
+          gcsPath = `archives/${shopCode}/${archiveId}.json.gz`;
+          const gcsFile = bucket.file(gcsPath);
+          await gcsFile.save(gzBuffer, {
+            contentType: 'application/gzip',
+            resumable: false,
+            metadata: { cacheControl: 'private, max-age=0' },
+          });
+          const [downloaded] = await gcsFile.download();
+          const restoredBuf = zlib.gunzipSync(downloaded);
+          const restoredHash = crypto
+            .createHash('sha256')
+            .update(restoredBuf)
+            .digest('hex');
+          const parsedRestore = JSON.parse(restoredBuf.toString('utf8'));
+          if (
+            restoredHash !== checksum ||
+            !Array.isArray(parsedRestore.records) ||
+            parsedRestore.records.length !== window.selected.length
+          ) {
+            throw new Error(`GCS archive integrity check failed for ${archiveId}`);
+          }
+        } catch (gcsErr) {
+          console.warn(
+            `[StorageMonitor] GCS archive upload failed (${gcsErr.message}); falling back to inline Firestore doc if within 700 KB.`
+          );
+          gcsPath = null;
+        }
       }
-      const verifyData = verifySnap.data();
-      const restoredBuf = zlib.gunzipSync(
-        Buffer.from(verifyData.compressedGzipBase64, 'base64')
-      );
-      const restoredHash = crypto
-        .createHash('sha256')
-        .update(restoredBuf)
-        .digest('hex');
-      const parsedRestore = JSON.parse(restoredBuf.toString('utf8'));
-      if (
-        restoredHash !== checksum ||
-        !Array.isArray(parsedRestore.records) ||
-        parsedRestore.records.length !== window.selected.length
-      ) {
-        throw new Error(`Archive integrity check failed for ${archiveId}`);
+
+      if (gcsPath) {
+        await archiveRef.set({
+          archiveId,
+          ruleApplied: window.ruleApplied,
+          dateRangeStart: window.windowStart.toISOString(),
+          dateRangeEnd: window.windowEnd.toISOString(),
+          recordCount: window.selected.length,
+          archivedDocIds: window.selected.map((x) => `${x.collection}/${x.docId}`),
+          checksum,
+          gcsPath,
+          compressedGzipBase64: '',
+          verified: true,
+          createdAt: now.toISOString(),
+        });
+      } else {
+        if (gzBuffer.length > 700 * 1024) {
+          throw new Error(
+            `Archive ${archiveId} (${gzBuffer.length} bytes) exceeds safe inline Firestore limit and GCS bucket is unavailable`
+          );
+        }
+        const compressedBase64 = gzBuffer.toString('base64');
+        await archiveRef.set({
+          archiveId,
+          ruleApplied: window.ruleApplied,
+          dateRangeStart: window.windowStart.toISOString(),
+          dateRangeEnd: window.windowEnd.toISOString(),
+          recordCount: window.selected.length,
+          archivedDocIds: window.selected.map((x) => `${x.collection}/${x.docId}`),
+          checksum,
+          compressedGzipBase64: compressedBase64,
+          verified: false,
+          createdAt: now.toISOString(),
+        });
+
+        const verifySnap = await archiveRef.get();
+        if (!verifySnap.exists) {
+          throw new Error(`Archive verification failed: ${archiveId} not readable`);
+        }
+        const verifyData = verifySnap.data();
+        const restoredBuf = zlib.gunzipSync(
+          Buffer.from(verifyData.compressedGzipBase64, 'base64')
+        );
+        const restoredHash = crypto
+          .createHash('sha256')
+          .update(restoredBuf)
+          .digest('hex');
+        const parsedRestore = JSON.parse(restoredBuf.toString('utf8'));
+        if (
+          restoredHash !== checksum ||
+          !Array.isArray(parsedRestore.records) ||
+          parsedRestore.records.length !== window.selected.length
+        ) {
+          throw new Error(`Archive integrity check failed for ${archiveId}`);
+        }
+        await archiveRef.update({ verified: true });
       }
-      await archiveRef.update({ verified: true });
       lastArchiveId = now.toISOString();
 
-      // Safe to delete verified archived records & explicit subcollections
+      // Safe to delete verified archived records via BulkWriter when available
+      const bulkWriter = typeof db.bulkWriter === 'function' ? db.bulkWriter() : null;
       for (const item of window.selected) {
-        await deleteDocAndSubcollections(db, item.ref);
+        await deleteDocAndSubcollections(db, item.ref, bulkWriter);
+      }
+      if (bulkWriter && typeof bulkWriter.close === 'function') {
+        await bulkWriter.close();
       }
 
       totalArchivedCount += window.selected.length;
@@ -624,6 +732,7 @@ module.exports = {
   computePartnerBalances,
   isDeliveryTxEligible,
   selectCleanupWindow,
+  measureShopFirestoreBytes,
   fetchActualFirestoreStorageBytes,
   deleteDocAndSubcollections,
   evaluateAndManageShopStorage,

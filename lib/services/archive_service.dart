@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:archive/archive.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -20,6 +21,7 @@ class StorageArchiveRecord {
     required this.recordCount,
     required this.archivedDocIds,
     this.checksum,
+    this.gcsPath,
     required this.compressedGzipBase64,
     required this.verified,
     this.restoredAt,
@@ -33,6 +35,7 @@ class StorageArchiveRecord {
   final int recordCount;
   final List<String> archivedDocIds;
   final String? checksum;
+  final String? gcsPath;
   final String compressedGzipBase64;
   final bool verified;
   final DateTime? restoredAt;
@@ -46,6 +49,7 @@ class StorageArchiveRecord {
         'record_count': recordCount,
         'archived_doc_ids_json': jsonEncode(archivedDocIds),
         'checksum': checksum,
+        'gcs_path': gcsPath,
         'compressed_gzip_base64': compressedGzipBase64,
         'verified': verified ? 1 : 0,
         'restored_at': restoredAt?.toIso8601String(),
@@ -80,6 +84,7 @@ class StorageArchiveRecord {
           ((map['record_count'] ?? map['recordCount']) as num?)?.toInt() ?? 0,
       archivedDocIds: docIds,
       checksum: map['checksum'] as String?,
+      gcsPath: (map['gcs_path'] ?? map['gcsPath']) as String?,
       compressedGzipBase64:
           (map['compressed_gzip_base64'] ?? map['compressedGzipBase64'] ?? '')
               .toString(),
@@ -177,10 +182,39 @@ class StorageAuditLog {
 /// Manages dated gzip-compressed archives, verification before deletion,
 /// audit logs, and full restoration of archived orders & transactions.
 class ArchiveService {
-  ArchiveService({DatabaseHelper? dbHelper})
-      : _dbHelper = dbHelper ?? DatabaseHelper.instance;
+  ArchiveService({
+    DatabaseHelper? dbHelper,
+    Future<Uint8List?> Function(String gcsPath)? gcsBytesFetcher,
+  })  : _dbHelper = dbHelper ?? DatabaseHelper.instance,
+        _gcsBytesFetcher = gcsBytesFetcher;
 
   final DatabaseHelper _dbHelper;
+  final Future<Uint8List?> Function(String gcsPath)? _gcsBytesFetcher;
+
+  Future<String> _resolveCompressedBase64(StorageArchiveRecord archive) async {
+    if (archive.compressedGzipBase64.trim().isNotEmpty) {
+      return archive.compressedGzipBase64;
+    }
+    final gcsPath = archive.gcsPath?.trim() ?? '';
+    if (gcsPath.isEmpty) {
+      throw StateError('Empty archive payload and no GCS archive path for ${archive.archiveId}');
+    }
+    final Uint8List? downloaded = _gcsBytesFetcher != null
+        ? await _gcsBytesFetcher(gcsPath)
+        : await FirebaseStorage.instance.ref(gcsPath).getData(50 * 1024 * 1024);
+    if (downloaded == null || downloaded.isEmpty) {
+      throw StateError('Failed to download archive payload from GCS: $gcsPath');
+    }
+    final b64 = base64Encode(downloaded);
+    final db = await _dbHelper.database;
+    await db.update(
+      'storage_archives',
+      {'compressed_gzip_base64': b64},
+      where: 'archive_id = ?',
+      whereArgs: [archive.archiveId],
+    );
+    return b64;
+  }
 
   /// Compresses records using GZip, verifies round-trip readability & record count,
   /// and saves the verified archive record to SQLite.
@@ -244,6 +278,13 @@ class ArchiveService {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
     return record;
+  }
+
+  Future<List<Map<String, dynamic>>> decodeArchiveRecords(
+    StorageArchiveRecord archive,
+  ) async {
+    final b64 = await _resolveCompressedBase64(archive);
+    return decodeAndVerifyPayload(compressedGzipBase64: b64);
   }
 
   List<Map<String, dynamic>> decodeAndVerifyPayload({
@@ -354,8 +395,9 @@ class ArchiveService {
     }
 
     final archive = StorageArchiveRecord.fromMap(rows.first);
+    final resolvedB64 = await _resolveCompressedBase64(archive);
     final records = decodeAndVerifyPayload(
-      compressedGzipBase64: archive.compressedGzipBase64,
+      compressedGzipBase64: resolvedB64,
       expectedCount: archive.recordCount,
     );
 
@@ -607,7 +649,8 @@ class ArchiveService {
   Future<String> exportArchiveFile(StorageArchiveRecord archive) async {
     final dir = await getApplicationDocumentsDirectory();
     final path = p.join(dir.path, '${archive.archiveId}.json.gz');
-    final bytes = base64Decode(archive.compressedGzipBase64);
+    final resolvedB64 = await _resolveCompressedBase64(archive);
+    final bytes = base64Decode(resolvedB64);
     await File(path).writeAsBytes(bytes);
     await Share.shareXFiles(
       [XFile(path)],

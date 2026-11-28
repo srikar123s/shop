@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -225,6 +226,7 @@ class ShareService {
     const int itemsPerPage = 16;
     final int totalPages = (items.length / itemsPerPage).ceil().clamp(1, 99);
     final tempDir = await getTemporaryDirectory();
+    unawaited(_cleanupStaleTempImages(tempDir));
     final List<File> generatedFiles = [];
 
     final customShopName =
@@ -325,13 +327,19 @@ class ShareService {
 
       // Table Column Titles
       _drawText(canvas, '#  ITEM & DETAILS', 36, headerHeight - 22, 14,
-          FontWeight.bold, const Color(0xFF334155));
-      _drawText(canvas, 'QTY', 440, headerHeight - 22, 14, FontWeight.bold,
-          const Color(0xFF334155));
-      _drawText(canvas, 'RATE', 560, headerHeight - 22, 14, FontWeight.bold,
-          const Color(0xFF334155));
-      _drawText(canvas, 'AMOUNT', 680, headerHeight - 22, 14, FontWeight.bold,
-          const Color(0xFF334155));
+          FontWeight.bold, const Color(0xFF334155),
+          width: 340);
+      _drawText(canvas, 'QTY', 384, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155),
+          width: 110);
+      _drawText(canvas, 'RATE', 502, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155),
+          width: 116,
+          textAlign: TextAlign.right);
+      _drawText(canvas, 'AMOUNT', 626, headerHeight - 22, 14, FontWeight.bold,
+          const Color(0xFF334155),
+          width: 140,
+          textAlign: TextAlign.right);
 
       // Draw Items for this page
       double currentY = headerHeight + 20;
@@ -356,32 +364,39 @@ class ShareService {
           rowBg,
         );
 
-        // Item Name
+        // Item Name & details bounded inside left column
         _drawText(canvas, name, 36, currentY - 4, 15, FontWeight.bold,
-            const Color(0xFF1E293B));
+            const Color(0xFF1E293B),
+            width: 340);
         if (options.isNotEmpty) {
           _drawText(canvas, options, 40, currentY + 18, 12, FontWeight.normal,
-              const Color(0xFF64748B));
+              const Color(0xFF64748B),
+              width: 336);
         }
 
-        _drawText(canvas, qtyStr, 440, currentY + 6, 14, FontWeight.w600,
-            const Color(0xFF1E293B));
+        _drawText(canvas, qtyStr, 384, currentY + 6, 14, FontWeight.w600,
+            const Color(0xFF1E293B),
+            width: 110);
         _drawText(
             canvas,
             price > 0 ? '₹${price.toStringAsFixed(2)}' : '-',
-            560,
+            502,
             currentY + 6,
             14,
             FontWeight.normal,
-            const Color(0xFF475569));
+            const Color(0xFF475569),
+            width: 116,
+            textAlign: TextAlign.right);
         _drawText(
             canvas,
             amount > 0 ? '₹${amount.toStringAsFixed(2)}' : '-',
-            680,
+            626,
             currentY + 6,
             15,
             FontWeight.bold,
-            const Color(0xFF0F766E));
+            const Color(0xFF0F766E),
+            width: 140,
+            textAlign: TextAlign.right);
 
         currentY += itemHeight;
       }
@@ -398,9 +413,12 @@ class ShareService {
         if (hasBreakdown) {
           // Subtotal
           _drawText(canvas, 'Items Subtotal', 40, currentY, 15, FontWeight.w600,
-              const Color(0xFF475569));
+              const Color(0xFF475569),
+              width: 440);
           _drawText(canvas, '₹ ${billBreakdown.subtotal.toStringAsFixed(2)}',
-              680, currentY, 15, FontWeight.w700, const Color(0xFF1E293B));
+              500, currentY, 15, FontWeight.w700, const Color(0xFF1E293B),
+              width: 266,
+              textAlign: TextAlign.right);
           currentY += 28;
 
           if (billBreakdown.applyDiscount && billBreakdown.discountAmount > 0) {
@@ -408,15 +426,18 @@ class ShareService {
                 ? 'Discount (${billBreakdown.discountValue % 1 == 0 ? billBreakdown.discountValue.toInt() : billBreakdown.discountValue}%)'
                 : 'Discount (Flat)';
             _drawText(canvas, discLabel, 40, currentY, 15, FontWeight.w600,
-                const Color(0xFF166534));
+                const Color(0xFF166534),
+                width: 440);
             _drawText(
                 canvas,
                 '- ₹ ${billBreakdown.discountAmount.toStringAsFixed(2)}',
-                680,
+                500,
                 currentY,
                 15,
                 FontWeight.w700,
-                const Color(0xFF166534));
+                const Color(0xFF166534),
+                width: 266,
+                textAlign: TextAlign.right);
             currentY += 28;
           }
 
@@ -425,23 +446,29 @@ class ShareService {
                 ? billBreakdown.gstRate.toInt().toString()
                 : billBreakdown.gstRate.toString();
             _drawText(canvas, 'GST ($rateStr%)', 40, currentY, 15,
-                FontWeight.w600, const Color(0xFF475569));
+                FontWeight.w600, const Color(0xFF475569),
+                width: 440);
             _drawText(
                 canvas,
                 '+ ₹ ${billBreakdown.gstAmount.toStringAsFixed(2)}',
-                680,
+                500,
                 currentY,
                 15,
                 FontWeight.w700,
-                const Color(0xFF0F766E));
+                const Color(0xFF0F766E),
+                width: 266,
+                textAlign: TextAlign.right);
             currentY += 28;
           }
 
           for (final charge in billBreakdown.otherCharges) {
             _drawText(canvas, charge.name, 40, currentY, 15, FontWeight.w600,
-                const Color(0xFF475569));
-            _drawText(canvas, '+ ₹ ${charge.amount.toStringAsFixed(2)}', 680,
-                currentY, 15, FontWeight.w700, const Color(0xFF0F766E));
+                const Color(0xFF475569),
+                width: 440);
+            _drawText(canvas, '+ ₹ ${charge.amount.toStringAsFixed(2)}', 500,
+                currentY, 15, FontWeight.w700, const Color(0xFF0F766E),
+                width: 266,
+                textAlign: TextAlign.right);
             currentY += 28;
           }
 
@@ -460,19 +487,24 @@ class ShareService {
         );
 
         _drawText(canvas, 'TOTAL AMOUNT:', 40, currentY + 24, 18,
-            FontWeight.bold, Colors.white);
-        _drawText(canvas, '₹ ${grandTotal.toStringAsFixed(2)}', 560,
-            currentY + 20, 24, FontWeight.w900, const Color(0xFF5EEAD4));
+            FontWeight.bold, Colors.white,
+            width: 320);
+        _drawText(canvas, '₹ ${grandTotal.toStringAsFixed(2)}', 380,
+            currentY + 20, 24, FontWeight.w900, const Color(0xFF5EEAD4),
+            width: 380,
+            textAlign: TextAlign.right);
 
-        // Footer
+        // Footer (centered full width so long shop names never clip)
         _drawText(
             canvas,
             'Thank you for your business! • $customShopName',
-            220,
+            40,
             currentY + 105,
             14,
             FontWeight.normal,
-            const Color(0xFF94A3B8));
+            const Color(0xFF94A3B8),
+            width: width - 80,
+            textAlign: TextAlign.center);
       } else {
         // Intermediate page bottom banner
         final contBg = Paint()..color = const Color(0xFFE2E8F0);
@@ -485,11 +517,13 @@ class ShareService {
         _drawText(
             canvas,
             '--- Continued on Page ${page + 2} of $totalPages ---',
-            260,
+            40,
             currentY + 15,
             15,
             FontWeight.bold,
-            const Color(0xFF0F766E));
+            const Color(0xFF0F766E),
+            width: width - 80,
+            textAlign: TextAlign.center);
       }
 
       final picture = recorder.endRecording();
@@ -506,16 +540,38 @@ class ShareService {
 
     return generatedFiles;
   }
+  static Future<void> _cleanupStaleTempImages(Directory tempDir) async {
+    try {
+      final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+      await for (final entity in tempDir.list()) {
+        if (entity is File &&
+            entity.path.contains('estimate_') &&
+            entity.path.toLowerCase().endsWith('.png')) {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) {
+            await entity.delete();
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   static void _drawText(Canvas canvas, String text, double x, double y,
-      double fontSize, FontWeight weight, Color color) {
+      double fontSize, FontWeight weight, Color color,
+      {double? width, double maxWidth = 760, TextAlign textAlign = TextAlign.left}) {
+    final availableWidth =
+        width ?? (maxWidth - x).clamp(80.0, maxWidth).toDouble();
     final painter = TextPainter(
       text: TextSpan(
         text: text,
         style: TextStyle(color: color, fontSize: fontSize, fontWeight: weight),
       ),
+      textAlign: textAlign,
       textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
     );
-    painter.layout();
+    painter.layout(minWidth: width ?? 0, maxWidth: availableWidth);
     painter.paint(canvas, Offset(x, y));
   }
 

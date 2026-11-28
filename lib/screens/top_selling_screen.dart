@@ -58,8 +58,6 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
       decimalDigits: 2,
     );
 
-    final totalQuantity =
-        _stats.fold<double>(0.0, (sum, s) => sum + s.totalQuantity);
     final totalRevenue =
         _stats.fold<double>(0.0, (sum, s) => sum + s.totalRevenue);
 
@@ -150,12 +148,12 @@ class _TopSellingScreenState extends State<TopSellingScreen> {
                   Column(
                     children: [
                       const Text(
-                        'Total Units Sold',
+                        'Top Products Ranked',
                         style: TextStyle(fontSize: 11, color: Color(0xFF166534)),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${totalQuantity % 1 == 0 ? totalQuantity.toInt() : totalQuantity.toStringAsFixed(1)} items',
+                        '${_stats.length} product(s)',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w900,

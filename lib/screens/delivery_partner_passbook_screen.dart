@@ -201,34 +201,39 @@ class _DeliveryPartnerPassbookScreenState
 
   Future<String?> _promptNewLocation(BuildContext parentContext) async {
     final ctrl = TextEditingController();
-    final added = await showDialog<String>(
-      context: parentContext,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add New Location'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Location / Area Name',
-            hintText: 'e.g. Kukatpally',
+    final String? added;
+    try {
+      added = await showDialog<String>(
+        context: parentContext,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Add New Location'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Location / Area Name',
+              hintText: 'e.g. Kukatpally',
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final val = ctrl.text.trim();
+                if (val.isNotEmpty) Navigator.pop(ctx, val);
+              },
+              child: const Text('Add'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final val = ctrl.text.trim();
-              if (val.isNotEmpty) Navigator.pop(ctx, val);
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      ctrl.dispose();
+    }
     if (added != null && added.trim().isNotEmpty) {
       await _repo.addLocation(added);
       final updated = await _repo.getLocations();

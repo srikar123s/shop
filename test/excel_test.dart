@@ -1,9 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/services/excel_customer_service.dart';
 import 'package:shop/services/excel_product_service.dart';
+import 'package:shop/services/excel_workbook_parser.dart';
 
 class MockCustomerRepository implements CustomerRepository {
   final List<Customer> customers = [];
@@ -60,7 +63,12 @@ class MockCustomerRepository implements CustomerRepository {
   Future<Customer?> getCustomerById(int id) async => null;
 
   @override
-  Future<List<Customer>> searchCustomers(String query) async => customers;
+  Future<List<Customer>> searchCustomers(
+    String query, {
+    int? limit,
+    int? offset,
+  }) async =>
+      customers;
 
   @override
   Future<void> updateCustomer({
@@ -165,7 +173,7 @@ void main() {
   });
 
   test('excel file parsing unit normalization and combination prices', () async {
-    final file = File('simple_shop_product_catalog_with_unit_conversion.xlsx');
+    final file = File('test/fixtures/simple_shop_product_catalog_with_unit_conversion.xlsx');
     expect(file.existsSync(), isTrue, reason: 'Test fixture must exist in workspace');
     final products = await ExcelProductService.parseProductsFromFile(file);
 
@@ -175,5 +183,58 @@ void main() {
     expect(weldingRod.configuration.unitOptions, containsAll(['Box', 'Piece']));
     expect(weldingRod.configuration.unitOptions.contains('Pieces'), isFalse);
     expect(weldingRod.configuration.variantPrices.isNotEmpty, isTrue);
+  });
+
+  test('XML DOM parser handles single-quoted attrs, reordered attrs, entities, and inlineStr', () {
+    final archive = Archive();
+    const sharedStringsXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <si><r><t>Asian </t></r><r><t>Paints &amp; Co</t></r></si>
+  <si><t>Litre</t></si>
+</sst>''';
+    const sheetXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c t='s' r='A1'><v>0</v></c>
+      <c r='B1'/>
+      <c t='inlineStr' r='C1'><is><t>Red &amp; Blue</t></is></c>
+      <c r='D1' t='s'><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>''';
+    archive.addFile(ArchiveFile(
+      'xl/sharedStrings.xml',
+      utf8.encode(sharedStringsXml).length,
+      utf8.encode(sharedStringsXml),
+    ));
+    archive.addFile(ArchiveFile(
+      'xl/worksheets/sheet1.xml',
+      utf8.encode(sheetXml).length,
+      utf8.encode(sheetXml),
+    ));
+    final zipBytes = ZipEncoder().encode(archive)!;
+
+    final rows = ExcelProductService.parseXlsxArchive(zipBytes);
+    expect(rows.length, equals(1));
+    expect(rows.first, equals(['Asian Paints & Co', '', 'Red & Blue', 'Litre']));
+    expect(ExcelCustomerService.parseXlsxArchive(zipBytes), equals(rows));
+  });
+
+  test('legacy binary .xls files and .xls extension are rejected with clear FormatException', () {
+    expect(
+      () => ExcelWorkbookParser.parseFileBytes(
+        [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1],
+        'catalog.xlsx',
+      ),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => ExcelWorkbookParser.parseFileBytes(
+        utf8.encode('Name,Price\nHammer,100\n'),
+        'legacy_export.xls',
+      ),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

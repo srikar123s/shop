@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shop/l10n/app_localizations.dart';
@@ -94,9 +95,13 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  static const int _pageSize = 50;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
   List<OrderSummary> _orders = <OrderSummary>[];
   bool _loading = true;
+  bool _hasMoreOrders = false;
+  int _currentLimit = _pageSize;
   late HistoryFilter _filter;
   DateTime? _selectedDate;
   HistoryViewMode _viewMode = HistoryViewMode.byCustomer;
@@ -110,66 +115,84 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _load();
   }
 
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _load(resetLimit: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _assignDeliveryPartner(OrderSummary order) async {
     final s = AppLocalizations.of(context);
     final repo = DeliveryRepository();
     final partners = await repo.getPartnersWithSummary();
     if (!mounted) return;
     final ctrl = TextEditingController(text: order.deliveryPartnerName ?? '');
-    final chosen = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(s.t('assignDeliveryPartner')),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (partners.isNotEmpty) ...[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: partners.map((p) {
-                    return ActionChip(
-                      avatar: const Icon(Icons.local_shipping_outlined, size: 16),
-                      label: Text(p.name),
-                      onPressed: () => Navigator.pop(ctx, p.name),
-                    );
-                  }).toList(),
+    final String? chosen;
+    try {
+      chosen = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(s.t('assignDeliveryPartner')),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (partners.isNotEmpty) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: partners.map((p) {
+                      return ActionChip(
+                        avatar: const Icon(Icons.local_shipping_outlined, size: 16),
+                        label: Text(p.name),
+                        onPressed: () => Navigator.pop(ctx, p.name),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                TextField(
+                  controller: ctrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    labelText: s.t('deliveryPartnerLabel'),
+                    hintText: 'e.g. Raju Auto',
+                    border: const OutlineInputBorder(),
+                  ),
                 ),
-                const SizedBox(height: 12),
               ],
-              TextField(
-                controller: ctrl,
-                textCapitalization: TextCapitalization.words,
-                decoration: InputDecoration(
-                  labelText: s.t('deliveryPartnerLabel'),
-                  hintText: 'e.g. Raju Auto',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(s.t('cancel')),
-          ),
-          if (order.deliveryPartnerName != null &&
-              order.deliveryPartnerName!.isNotEmpty)
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, ''),
-              child: const Text('Clear'),
             ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: Text(s.t('save')),
           ),
-        ],
-      ),
-    );
-    ctrl.dispose();
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(s.t('cancel')),
+            ),
+            if (order.deliveryPartnerName != null &&
+                order.deliveryPartnerName!.isNotEmpty)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, ''),
+                child: const Text('Clear'),
+              ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: Text(s.t('save')),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      ctrl.dispose();
+    }
     if (chosen != null) {
       await repo.updateOrderDeliveryInfo(
         orderId: order.orderId,
@@ -179,15 +202,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool resetLimit = false}) async {
+    if (resetLimit) {
+      _currentLimit = _pageSize;
+    }
     setState(() => _loading = true);
-    final data = await widget.orderRepository
-        .searchOrderSummaries(_searchController.text);
+    final rows = await widget.orderRepository.searchOrderSummaries(
+      _searchController.text,
+      limit: _currentLimit + 1,
+    );
     if (!mounted) return;
+    final hasMore = rows.length > _currentLimit;
     setState(() {
-      _orders = data;
+      _orders = hasMore ? rows.take(_currentLimit).toList() : rows;
+      _hasMoreOrders = hasMore;
       _loading = false;
     });
+  }
+
+  Future<void> _loadMore() async {
+    _currentLimit += _pageSize;
+    await _load();
   }
 
   String _dateHeading(DateTime dt, AppLocalizations s) {
@@ -406,14 +441,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         );
                         if (text != null && text.trim().isNotEmpty) {
                           _searchController.text = text.trim();
-                          _load();
+                          await _load();
                         }
                       },
                     ),
                   ],
                 ),
               ),
-              onChanged: (_) => _load(),
+              onChanged: _onSearchChanged,
             ),
             const SizedBox(height: 8),
 
@@ -746,8 +781,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           ),
                         )
                       : ListView.builder(
-                          itemCount: sortedMonths.length,
+                          itemCount: sortedMonths.length + (_hasMoreOrders ? 1 : 0),
                           itemBuilder: (context, mIdx) {
+                            if (mIdx == sortedMonths.length) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _loadMore,
+                                    icon: const Icon(Icons.expand_more),
+                                    label: Text('Load More Orders (showing ${_orders.length})'),
+                                  ),
+                                ),
+                              );
+                            }
                             final monthDate = sortedMonths[mIdx];
                             final monthOrders = monthGroups[monthDate]!;
                             final monthTotal = monthOrders.fold<double>(
@@ -1409,7 +1456,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ),
                     ),
                   );
-                  _load();
+                  await _load();
                 },
                 title: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -276,25 +276,8 @@ object ShopAlarmScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val showIntent = PendingIntent.getActivity(
-            context,
-            requestCode,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
         val canExact = canScheduleExactAlarms(context)
         if (canExact) {
-            try {
-                // Primary: setAlarmClock wakes device from deepest Doze & OEM standby reliably
-                am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAtMillis, showIntent), pi)
-                return
-            } catch (se: SecurityException) {
-                Log.w(TAG, "setAlarmClock denied ($se); trying setExactAndAllowWhileIdle")
-            } catch (e: Exception) {
-                Log.w(TAG, "setAlarmClock failed ($e); trying setExactAndAllowWhileIdle")
-            }
-
             try {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
                 return

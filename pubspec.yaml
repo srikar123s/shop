@@ -1,7 +1,7 @@
 name: shop
 description: Wholesale hardware order notebook app.
 publish_to: "none"
-version: 1.0.0+1
+version: 1.2.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -20,6 +20,7 @@ dependencies:
   excel: ^4.0.6
   csv: ^6.0.0
   archive: ^3.6.1
+  xml: ^6.6.1
   shared_preferences: ^2.5.3
   flutter_contacts: ^2.3.1
   share_plus: ^10.1.4
@@ -36,6 +37,7 @@ dependencies:
   timezone: ^0.9.4
   flutter_timezone: ^5.1.1
   local_auth: ^2.3.0
+  firebase_storage: ^12.4.10
 
 dev_dependencies:
   flutter_test:

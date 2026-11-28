@@ -60,7 +60,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   }
 
   Future<void> _checkDraft() async {
-    final draft = await _draftService.getDraft();
+    final draft = await _draftService.getDraft(customerId: widget.customer.id);
     if (draft != null && draft.items.isNotEmpty && mounted) {
       setState(() {
         _savedDraft = draft;
@@ -79,7 +79,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   }
 
   Future<void> _clearDraft() async {
-    await _draftService.clearDraft();
+    await _draftService.clearDraft(customerId: widget.customer.id);
     if (!mounted) return;
     setState(() {
       _items.clear();
@@ -90,9 +90,10 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
   void _saveCurrentDraft() {
     if (widget.existingOrderId != null) return;
     if (_items.isEmpty) {
-      _draftService.clearDraft();
+      _draftService.clearDraft(customerId: widget.customer.id);
     } else {
-      _draftService.saveDraft(DraftOrder(
+      _draftService.saveDraft(
+        DraftOrder(
         customer: widget.customer,
         items: List<DraftOrderItem>.from(_items),
       ));
@@ -534,7 +535,8 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
         _searchController.clear();
       });
       _saveCurrentDraft();
-      _loadProducts();
+      await _loadProducts();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -813,7 +815,7 @@ class _ProductSelectionScreenState extends State<ProductSelectionScreen> {
                           );
                           if (text != null && text.trim().isNotEmpty) {
                             _searchController.text = text.trim();
-                            _loadProducts();
+                            await _loadProducts();
                           }
                         },
                       ),

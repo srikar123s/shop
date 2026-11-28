@@ -568,9 +568,8 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             topic: 'Daily Multi-Schedule Background Notifications',
             tag: 'DAILY ALERTS',
             details:
-                'The app runs an intelligent background notification engine sending alerts at key business hours (e.g. 7:00 AM morning briefing, 1:00 PM afternoon check, 9:00 PM shop closing):\n'
+                'The app runs an automated notification scheduler sending reminders during business hours (default counter checks at 10:00 AM, 2:00 PM & 7:00 PM, procurement reminders at 9:30 AM & 5:30 PM, and day-end report at 9:00 PM):\n'
                 '• Pending Orders Alert: "You have X unclosed bills waiting at the counter."\n'
-                '• Stale Orders Alert: "X orders taken >3 days ago need immediate closing."\n'
                 '• Procurement Alert: "X items need procurement. Tap to open Procurement List."',
           ),
           _DocItem(
@@ -578,10 +577,9 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
             tag: 'CUSTOM TIMING',
             details:
                 'In Shop Settings under NOTIFICATIONS & REMINDERS, customize:\n'
-                '• Preferred alert hours (e.g. Morning 7 AM, Afternoon 1 PM, Evening 9 PM).\n'
+                '• Preferred alert hours for pending orders, procurement reminders, and day-end reports.\n'
                 '• Enable / disable procurement alerts or pending order reminders.\n'
-                '• Stale Order Threshold (configure days before an order is marked overdue).\n'
-                '• Price Caution Days (configure days before unupdated prices trigger a caution).',
+                '• Price Caution Days (configure how many days before unverified product prices trigger a reminder).',
           ),
         ],
       ),
@@ -649,10 +647,10 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
         color: const Color(0xFF6366F1),
         items: [
           _DocItem(
-            topic: 'Excel & CSV Catalog Import / Export',
+            topic: 'Excel & CSV Catalog Import & Report Exports',
             tag: 'BULK CATALOG',
             details:
-                'Upload thousands of hardware items at once using standard Excel (.xlsx) files. The parser handles item names, categories, units, and combination pricing matrices. Export catalog anytime to Excel.',
+                'Upload hardware items in bulk using Excel (.xlsx) or CSV files, handling item names, categories, units, and variant pricing matrices. Export business & customer reports cleanly to Excel and PDF.',
           ),
           _DocItem(
             topic: 'Custom Quantity Step Shortcuts',
@@ -683,10 +681,10 @@ class _AppDocumentationScreenState extends State<AppDocumentationScreen> {
                 'Configure your round stamp or signature line (e.g. "Authorized Signatory / For YKR Traders"). Automatically embedded at the bottom right of all PDF invoices.',
           ),
           _DocItem(
-            topic: 'Multi-Language Interface',
+            topic: 'Bilingual Interface (English & Telugu)',
             tag: 'LOCALIZATION',
             details:
-                'Switch the entire application display language between English, Telugu, Hindi, and other regional languages anytime without restarting the app.',
+                'Switch the interface language between English and Telugu (తెలుగు) anytime from the menu without restarting the app.',
           ),
           _DocItem(
             topic: 'Data Safety & Reset Controls',

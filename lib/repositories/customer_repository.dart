@@ -10,18 +10,24 @@ class CustomerRepository {
 
   final DatabaseHelper _databaseHelper;
 
-  Future<List<Customer>> searchCustomers(String query) async {
+  Future<List<Customer>> searchCustomers(
+    String query, {
+    int? limit,
+    int? offset,
+  }) async {
     final db = await _databaseHelper.database;
     final normalized = query.trim();
     final result = await db.query(
       'customers',
       where: normalized.isEmpty
-          ? 'is_active = 1'
-          : 'is_active = 1 AND (name LIKE ? OR phone LIKE ? OR address LIKE ?)',
+          ? 'is_active = 1 AND deleted_at IS NULL'
+          : 'is_active = 1 AND deleted_at IS NULL AND (name LIKE ? OR phone LIKE ? OR address LIKE ?)',
       whereArgs: normalized.isEmpty
           ? null
           : ['%$normalized%', '%$normalized%', '%$normalized%'],
       orderBy: 'name COLLATE NOCASE ASC',
+      limit: limit,
+      offset: offset,
     );
     return result.map(Customer.fromMap).toList();
   }
@@ -132,12 +138,16 @@ class CustomerRepository {
     }
 
     final db = await _databaseHelper.database;
+    final now = DateTime.now();
     final customer = Customer(
+      cloudId: DatabaseHelper.generateUuidV4(),
       name: trimmedName,
       phone: cleanPhone,
       address: address?.trim().isEmpty == true ? null : address?.trim(),
       creditLimit: creditLimit,
-      createdAt: DateTime.now(),
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
     );
 
     final id = await db.insert('customers', customer.toMap());
@@ -156,11 +166,17 @@ class CustomerRepository {
     double? creditLimit,
   }) async {
     final db = await _databaseHelper.database;
+    final existing = await getCustomerById(id);
+    final nowIso = DateTime.now().toIso8601String();
     final updates = <String, Object?>{
       'name': name.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
       'address': address?.trim().isEmpty == true ? null : address?.trim(),
+      'updated_at': nowIso,
     };
+    if (existing != null && (existing.cloudId == null || existing.cloudId!.isEmpty)) {
+      updates['cloud_id'] = DatabaseHelper.generateUuidV4();
+    }
     if (creditLimit != null) {
       updates['credit_limit'] = creditLimit;
     }
@@ -174,7 +190,7 @@ class CustomerRepository {
     // Also update order customer_name_snapshot for consistency
     await db.update(
       'orders',
-      {'customer_name_snapshot': name.trim()},
+      {'customer_name_snapshot': name.trim(), 'updated_at': nowIso},
       where: 'customer_id = ?',
       whereArgs: [id],
     );
@@ -196,7 +212,18 @@ class CustomerRepository {
       throw Exception('Cannot delete customer with active Khata balance of ₹${balance.toStringAsFixed(2)}');
     }
     final db = await _databaseHelper.database;
+    String? cloudId;
+    bool softArchived = false;
     await db.transaction((txn) async {
+      final custRows = await txn.query(
+        'customers',
+        columns: ['cloud_id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      cloudId = custRows.isNotEmpty ? custRows.first['cloud_id'] as String? : null;
+
       final orderCheck = await txn.query(
         'orders',
         columns: ['id'],
@@ -211,6 +238,7 @@ class CustomerRepository {
         whereArgs: [id],
         limit: 1,
       );
+      final nowIso = DateTime.now().toIso8601String();
       if (orderCheck.isEmpty && payCheck.isEmpty) {
         await txn.delete(
           'customers',
@@ -218,15 +246,33 @@ class CustomerRepository {
           whereArgs: [id],
         );
       } else {
+        softArchived = true;
         // Archive/hide settled customer record so historical orders keep valid FK links
         await txn.update(
           'customers',
-          {'is_active': 0},
+          {
+            'is_active': 0,
+            'deleted_at': nowIso,
+            'updated_at': nowIso,
+          },
           where: 'id = ?',
           whereArgs: [id],
         );
       }
     });
+
+    if (softArchived) {
+      final archived = await getCustomerById(id);
+      if (archived != null) {
+        unawaited(ShopSyncService.instance.syncCustomer(archived).catchError((e) {
+          debugPrint('Error syncing archived customer: $e');
+        }));
+      }
+    } else if (cloudId != null && cloudId!.isNotEmpty) {
+      unawaited(ShopSyncService.instance.deleteCustomerFromCloud(cloudId!).catchError((e) {
+        debugPrint('Error propagating customer delete tombstone: $e');
+      }));
+    }
   }
 
   Future<Customer?> getCustomerById(int id) async {

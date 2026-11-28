@@ -45,6 +45,40 @@ service cloud.firestore {
       return data.get('status', '') in ['COMPLETED', 'CLOSED'];
     }
 
+    function isNonEmptyText(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    function isNonNegativeNumber(val) {
+      return (val is int || val is float) && val >= 0;
+    }
+
+    function validShopCreate(data, shopCode) {
+      return data.ownerUid == request.auth.uid
+        && data.shopCode == shopCode
+        && isNonEmptyText(data.get('shopName', ''), 120);
+    }
+
+    function validProductData(data) {
+      return isNonEmptyText(data.get('name', ''), 200)
+        && (!('price' in data.keys()) || isNonNegativeNumber(data.price));
+    }
+
+    function validCustomerData(data) {
+      return isNonEmptyText(data.get('name', ''), 200);
+    }
+
+    function validOrderData(data) {
+      return (!('estimate_total' in data.keys()) || isNonNegativeNumber(data.estimate_total))
+        && (!('total_amount' in data.keys()) || isNonNegativeNumber(data.total_amount))
+        && (!('customer_name' in data.keys()) || data.customer_name is string);
+    }
+
+    function validPaymentData(data) {
+      return isNonNegativeNumber(data.get('amount', -1))
+        && (!('payment_type' in data.keys()) || data.payment_type is string);
+    }
+
     // Minimal public join metadata (shopCode, shopName, ownerName only; no phone/UPI/GSTIN/UID)
     match /shop_invites/{shopCode} {
       allow get: if isAuthenticated();
@@ -53,10 +87,16 @@ service cloud.firestore {
         && (!exists(/databases/$(database)/documents/shops/$(shopCode))
           || shopDoc(shopCode).data.ownerUid == request.auth.uid)
         && request.resource.data.keys().hasOnly(['shopCode', 'shopName', 'ownerName', 'updatedAt'])
-        && request.resource.data.shopCode == shopCode;
+        && request.resource.data.shopCode == shopCode
+        && isNonEmptyText(request.resource.data.shopName, 120)
+        && request.resource.data.get('ownerName', '') is string
+        && request.resource.data.get('ownerName', '').size() <= 120;
       allow update: if isShopOwner(shopCode)
         && request.resource.data.keys().hasOnly(['shopCode', 'shopName', 'ownerName', 'updatedAt'])
-        && request.resource.data.shopCode == shopCode;
+        && request.resource.data.shopCode == shopCode
+        && isNonEmptyText(request.resource.data.shopName, 120)
+        && request.resource.data.get('ownerName', '') is string
+        && request.resource.data.get('ownerName', '').size() <= 120;
       allow delete: if isShopOwner(shopCode);
     }
 
@@ -68,8 +108,7 @@ service cloud.firestore {
 
       // Creator must bind their own auth UID and matching shopCode
       allow create: if isAuthenticated()
-        && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.shopCode == shopCode;
+        && validShopCreate(request.resource.data, shopCode);
 
       // Owner retains administrative edits; approved staff may only advance last_order_number
       allow update: if isAuthenticated() && (
@@ -125,7 +164,8 @@ service cloud.firestore {
                 'canChangeShortcuts', 'canViewBillTotals',
                 'approvedAt', 'rejectedAt', 'revokedAt'
               ]))
-            || (resource.data.status != 'approved'
+            // Explicitly rejected/revoked devices may never self-reset to pending.
+            || (resource.data.status == 'pending'
               && request.resource.data.deviceId == request.auth.uid
               && request.resource.data.role == 'staff'
               && request.resource.data.status == 'pending'
@@ -141,31 +181,39 @@ service cloud.firestore {
       // Products subcollection
       match /products/{productId} {
         allow read: if isApprovedShopMember(shopCode);
-        allow create, update: if staffHasPermission(shopCode, 'canManageProducts');
+        allow create, update: if staffHasPermission(shopCode, 'canManageProducts')
+          && validProductData(request.resource.data);
         allow delete: if isShopOwner(shopCode);
       }
 
       // Customers subcollection
       match /customers/{customerId} {
-        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow create, update: if isApprovedShopMember(shopCode)
+          && validCustomerData(request.resource.data);
         allow delete: if isShopOwner(shopCode);
       }
 
       // Orders subcollection
       match /orders/{orderId} {
         allow read: if isApprovedShopMember(shopCode);
-        allow create: if isApprovedShopMember(shopCode);
-        allow update: if isShopOwner(shopCode) || (
-          isApprovedShopDevice(shopCode)
-          && (!isClosedStatus(resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
-          && (!isClosedStatus(request.resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
+        allow create: if isApprovedShopMember(shopCode)
+          && validOrderData(request.resource.data);
+        allow update: if validOrderData(request.resource.data) && (
+          isShopOwner(shopCode) || (
+            isApprovedShopDevice(shopCode)
+            && (!isClosedStatus(resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
+            && (!isClosedStatus(request.resource.data) || staffHasPermission(shopCode, 'canCloseOrders'))
+          )
         );
         allow delete: if isShopOwner(shopCode);
       }
 
       // Khata & Order Payments subcollection
       match /payments/{paymentId} {
-        allow read, create, update: if isApprovedShopMember(shopCode);
+        allow read: if isApprovedShopMember(shopCode);
+        allow create, update: if isApprovedShopMember(shopCode)
+          && validPaymentData(request.resource.data);
         allow delete: if isShopOwner(shopCode);
       }
 
@@ -207,6 +255,16 @@ service cloud.firestore {
       match /storage_audit_logs/{logId} {
         allow read: if isApprovedShopMember(shopCode);
         allow write: if false;
+      }
+
+      // App telemetry error diagnostics (bounded client create, owner read-only)
+      match /error_logs/{logId} {
+        allow read: if isShopOwner(shopCode);
+        allow create: if isApprovedShopMember(shopCode)
+          && request.resource.data.keys().hasAll(['message', 'timestamp'])
+          && request.resource.data.message is string
+          && request.resource.data.message.size() <= 500;
+        allow update, delete: if false;
       }
     }
   }

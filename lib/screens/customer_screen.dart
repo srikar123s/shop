@@ -32,11 +32,14 @@ class CustomerScreen extends StatefulWidget {
 }
 
 class _CustomerScreenState extends State<CustomerScreen> {
+  static const int _pageSize = 60;
   final TextEditingController _searchController = TextEditingController();
   List<Customer> _customers = <Customer>[];
   List<Contact> _deviceContacts = <Contact>[];
   Customer? _selected;
   bool _loading = true;
+  bool _hasMoreCustomers = false;
+  int _currentLimit = _pageSize;
   bool _contactsLoading = false;
   bool _contactsEnabled = false;
   Timer? _searchDebounce;
@@ -50,7 +53,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
   void _onSearchChanged(String _) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) _loadCustomers();
+      if (mounted) _loadCustomers(resetLimit: true);
     });
   }
 
@@ -63,11 +66,18 @@ class _CustomerScreenState extends State<CustomerScreen> {
 
   Map<int, double> _customerBalances = {};
 
-  Future<void> _loadCustomers() async {
+  Future<void> _loadCustomers({bool resetLimit = false}) async {
+    if (resetLimit) {
+      _currentLimit = _pageSize;
+    }
     setState(() => _loading = true);
     try {
-      final data =
-          await widget.customerRepository.searchCustomers(_searchController.text);
+      final rawData = await widget.customerRepository.searchCustomers(
+        _searchController.text,
+        limit: _currentLimit + 1,
+      );
+      final hasMore = rawData.length > _currentLimit;
+      final data = hasMore ? rawData.take(_currentLimit).toList() : rawData;
       final khataList = await DatabaseHelper.instance.getCustomerKhataList();
       final balances = <int, double>{};
       for (final item in khataList) {
@@ -80,6 +90,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
       if (!mounted) return;
       setState(() {
         _customers = data;
+        _hasMoreCustomers = hasMore;
         _customerBalances = balances;
         _loading = false;
       });
@@ -90,6 +101,11 @@ class _CustomerScreenState extends State<CustomerScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _loadMoreCustomers() async {
+    _currentLimit += _pageSize;
+    await _loadCustomers();
   }
 
   Future<void> _importCustomersFile() async {
@@ -776,9 +792,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
                     if (_searchController.text.isNotEmpty)
                       IconButton(
                         icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
+                        onPressed: () async {
                           _searchController.clear();
-                          _loadCustomers();
+                          await _loadCustomers();
                         },
                       ),
                     IconButton(
@@ -793,7 +809,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                         );
                         if (text != null && text.trim().isNotEmpty) {
                           _searchController.text = text.trim();
-                          _loadCustomers();
+                          await _loadCustomers();
                         }
                       },
                     ),
@@ -917,10 +933,24 @@ class _CustomerScreenState extends State<CustomerScreen> {
                           ),
                         )
                       : ListView.separated(
-                          itemCount: totalRows,
+                          itemCount: totalRows + (_hasMoreCustomers ? 1 : 0),
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 8),
                           itemBuilder: (context, index) {
+                            if (_hasMoreCustomers && index == totalRows) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Center(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _loadMoreCustomers,
+                                    icon: const Icon(Icons.expand_more),
+                                    label: Text(
+                                      'Load More Customers (showing ${_customers.length})',
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
                             if (index >= _customers.length) {
                               final contact =
                                   visibleContacts[index - _customers.length];

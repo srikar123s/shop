@@ -1,8 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/shop_profile.dart';
 import 'package:shop/services/shop_sync_service.dart';
 
@@ -209,10 +211,11 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     final shop = _syncService.currentShop;
     final hasShop = _syncService.hasShop;
 
+    final s = AppLocalizations.of(context);
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Shop Sync & Partner Access'),
+        title: Text(s.t('shopSyncTitle')),
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
@@ -225,7 +228,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.sync_rounded),
-              tooltip: 'Sync Now',
+              tooltip: s.t('syncNow'),
               onPressed: _isLoading ? null : _handleManualSync,
             ),
         ],
@@ -259,6 +262,12 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                       _buildDeviceRoleCard(shop),
                       const SizedBox(height: 18),
 
+                      // Owner Recovery Phone Linking Card
+                      if (shop.isOwner) ...[
+                        _buildOwnerRecoveryCard(shop),
+                        const SizedBox(height: 18),
+                      ],
+
                       // Connected Partner Devices & Permissions (Owner manages devices; Partner sees permissions overview)
                       if (shop.isOwner) ...[
                         _buildConnectedDevicesCard(shop),
@@ -272,7 +281,9 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                       FilledButton.icon(
                         onPressed: _isLoading ? null : _handleManualSync,
                         icon: const Icon(Icons.sync_rounded),
-                        label: Text(_isLoading ? 'Syncing...' : 'FORCE SYNC WITH CLOUD NOW'),
+                        label: Text(_isLoading
+                            ? s.t('syncingLabel')
+                            : s.t('forceSyncCloudNow')),
                         style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFF0F766E),
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -283,7 +294,8 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
                       OutlinedButton.icon(
                         onPressed: _handleDisconnect,
                         icon: const Icon(Icons.logout_rounded, color: Colors.red),
-                        label: const Text('DISCONNECT FROM THIS SHOP', style: TextStyle(color: Colors.red)),
+                        label: Text(s.t('disconnectFromShop'),
+                            style: const TextStyle(color: Colors.red)),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: Colors.red.shade300),
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -378,7 +390,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildActiveShopCard(dynamic shop) {
+  Widget _buildActiveShopCard(ShopProfile shop) {
     final dateFormat = DateFormat('dd MMM yyyy, hh:mm a');
     final lastSync = _syncService.lastSyncTime != null
         ? dateFormat.format(_syncService.lastSyncTime!)
@@ -484,7 +496,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildQrAndShareCard(dynamic shop) {
+  Widget _buildQrAndShareCard(ShopProfile shop) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -579,7 +591,284 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildDeviceRoleCard(dynamic shop) {
+  Widget _buildOwnerRecoveryCard(ShopProfile shop) {
+    final linked = _syncService.hasRecoveryAccountLinked;
+    final label = _syncService.recoveryAccountLabel;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: linked ? const Color(0xFFBBF7D0) : const Color(0xFFFDE68A),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor:
+                    linked ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                child: Icon(
+                  linked ? Icons.verified_user_outlined : Icons.security_rounded,
+                  color: linked ? const Color(0xFF166534) : const Color(0xFFB45309),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Master Owner Recovery Backup',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    Text(
+                      linked
+                          ? 'Linked to ${label ?? "Recovery Phone"}'
+                          : 'Anonymous session only — link a phone to avoid shop lockout if you lose this phone.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _showLinkRecoveryPhoneDialog,
+              icon: Icon(
+                linked ? Icons.phonelink_setup_rounded : Icons.add_call,
+                size: 18,
+              ),
+              label: Text(
+                linked ? 'Update Recovery Phone (OTP)' : 'Link Recovery Phone (OTP)',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF0F766E),
+                side: const BorderSide(color: Color(0xFF0F766E)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showLinkRecoveryPhoneDialog() async {
+    final initialPhone = _syncService.currentShop?.ownerPhone ?? '';
+    final phoneCtrl = TextEditingController(text: initialPhone);
+    final otpCtrl = TextEditingController();
+    String? verificationId;
+    bool sendingOtp = false;
+    bool verifyingOtp = false;
+    String? dialogError;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDState) => AlertDialog(
+            title: const Text('Link Owner Recovery Phone'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Links a phone number to your master session while preserving your Shop Code & permissions.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneCtrl,
+                    enabled: verificationId == null && !sendingOtp,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Owner Mobile Number',
+                      hintText: '+919876543210 or 9876543210',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (verificationId != null) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: otpCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      decoration: const InputDecoration(
+                        labelText: '6-digit OTP',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                  if (dialogError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      dialogError!,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: (sendingOtp || verifyingOtp)
+                    ? null
+                    : () => Navigator.pop(ctx),
+                child: const Text('CANCEL'),
+              ),
+              if (verificationId == null)
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                  ),
+                  onPressed: sendingOtp
+                      ? null
+                      : () async {
+                          final raw = phoneCtrl.text.trim();
+                          final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+                          if (digits.length < 10) {
+                            setDState(() {
+                              dialogError = 'Enter a valid 10-digit mobile number.';
+                            });
+                            return;
+                          }
+                          final formatted = raw.startsWith('+')
+                              ? raw
+                              : (digits.length == 10 ? '+91$digits' : '+$digits');
+                          setDState(() {
+                            sendingOtp = true;
+                            dialogError = null;
+                          });
+                          try {
+                            await FirebaseAuth.instance.verifyPhoneNumber(
+                              phoneNumber: formatted,
+                              verificationCompleted: (credential) async {
+                                try {
+                                  await _syncService
+                                      .linkOwnerRecoveryCredential(credential);
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Recovery phone linked!'),
+                                        backgroundColor: Color(0xFF0F766E),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (ctx.mounted) {
+                                    setDState(() {
+                                      sendingOtp = false;
+                                      dialogError = e.toString();
+                                    });
+                                  }
+                                }
+                              },
+                              verificationFailed: (e) {
+                                if (ctx.mounted) {
+                                  setDState(() {
+                                    sendingOtp = false;
+                                    dialogError = e.message ?? e.code;
+                                  });
+                                }
+                              },
+                              codeSent: (vId, _) {
+                                if (ctx.mounted) {
+                                  setDState(() {
+                                    sendingOtp = false;
+                                    verificationId = vId;
+                                  });
+                                }
+                              },
+                              codeAutoRetrievalTimeout: (vId) {
+                                verificationId ??= vId;
+                              },
+                            );
+                          } catch (e) {
+                            if (ctx.mounted) {
+                              setDState(() {
+                                sendingOtp = false;
+                                dialogError = e.toString();
+                              });
+                            }
+                          }
+                        },
+                  child: Text(sendingOtp ? 'SENDING...' : 'SEND OTP'),
+                )
+              else
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                  ),
+                  onPressed: verifyingOtp
+                      ? null
+                      : () async {
+                          final smsCode = otpCtrl.text.trim();
+                          if (smsCode.length < 4) {
+                            setDState(() {
+                              dialogError = 'Enter the OTP received by SMS.';
+                            });
+                            return;
+                          }
+                          setDState(() {
+                            verifyingOtp = true;
+                            dialogError = null;
+                          });
+                          try {
+                            final cred = PhoneAuthProvider.credential(
+                              verificationId: verificationId!,
+                              smsCode: smsCode,
+                            );
+                            await _syncService.linkOwnerRecoveryCredential(cred);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Recovery phone linked!'),
+                                  backgroundColor: Color(0xFF0F766E),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (ctx.mounted) {
+                              setDState(() {
+                                verifyingOtp = false;
+                                dialogError = e.toString();
+                              });
+                            }
+                          }
+                        },
+                  child: Text(verifyingOtp ? 'LINKING...' : 'VERIFY & LINK'),
+                ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      phoneCtrl.dispose();
+      otpCtrl.dispose();
+    }
+  }
+
+  Widget _buildDeviceRoleCard(ShopProfile shop) {
     final isOwner = shop.isOwner;
     final displayName = isOwner
         ? (shop.ownerName.isNotEmpty ? shop.ownerName : 'Master Device')
@@ -645,7 +934,8 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     final controller = TextEditingController(text: currentName);
     final formKey = GlobalKey<FormState>();
 
-    await showDialog<void>(
+    try {
+      await showDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -743,6 +1033,9 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
         );
       },
     );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Widget _buildPendingApprovalView(ShopProfile shop) {
@@ -879,7 +1172,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildConnectedDevicesCard(dynamic shop) {
+  Widget _buildConnectedDevicesCard(ShopProfile shop) {
     return StreamBuilder<List<StaffDevice>>(
       stream: _syncService.streamConnectedDevices(),
       builder: (context, snapshot) {
@@ -1140,7 +1433,7 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
     );
   }
 
-  Widget _buildApprovedDeviceItem(StaffDevice device, dynamic shop) {
+  Widget _buildApprovedDeviceItem(StaffDevice device, ShopProfile shop) {
     final isCurrentDevice = device.deviceId == _syncService.deviceId;
     final isOwnerDevice = device.role == 'owner';
 
@@ -1813,10 +2106,10 @@ class _ShopSyncScreenState extends State<ShopSyncScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '1. Firebase Cloud Firestore powers instant syncing between multiple devices with zero server cost on the free tier.\n'
-                '2. To activate live cloud sync across all phones, download `google-services.json` from your Firebase project and place it inside the `android/app/` folder.\n'
-                '3. Once configured, every order taken by any partner device instantly pops up in Order History across all phones in the shop!\n'
-                '4. Offline Safe: When internet is not available, all orders and products stay safely stored on this phone and sync automatically when internet is back.',
+                '1. Cloud sync keeps orders, customers, payments, and catalog synced across your shop devices automatically.\n'
+                '2. Share the 6-character Shop Code (or QR code) only with trusted counter staff and approve their join request here.\n'
+                '3. Once approved, every order taken by any partner device instantly appears in Order History across all devices in the shop.\n'
+                '4. Offline Safe: When internet is unavailable, orders stay safely stored on this phone and sync automatically once reconnected.',
                 style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF334155)),
               ),
             ],

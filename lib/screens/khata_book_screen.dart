@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shop/database/database_helper.dart';
+import 'package:shop/l10n/app_localizations.dart';
 import 'package:shop/models/customer.dart';
 import 'package:shop/repositories/customer_repository.dart';
 import 'package:shop/repositories/order_repository.dart';
@@ -34,11 +35,13 @@ class KhataBookScreen extends StatefulWidget {
 }
 
 class _KhataBookScreenState extends State<KhataBookScreen> {
+  static const int _pageSize = 60;
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _khataList = [];
   List<Map<String, dynamic>> _filteredList = [];
   Map<String, dynamic> _metrics = {};
   bool _loading = true;
+  int _visibleCount = _pageSize;
   String _filter = 'due'; // 'due', 'overdue30', 'all', 'settled'
   String _sortBy = 'due_desc'; // 'due_desc', 'ageing_desc', 'name_asc', 'recent'
   String? _selectedLocation;
@@ -94,7 +97,8 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
       setState(() {
         _khataList = list;
         _metrics = metrics;
-        _applyFilterAndSort();
+        _visibleCount = _pageSize;
+        _computeFilteredAndSortedList();
         _loading = false;
       });
     } catch (e, stack) {
@@ -106,7 +110,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
     }
   }
 
-  void _applyFilterAndSort() {
+  void _computeFilteredAndSortedList() {
     final query = _searchController.text.trim().toLowerCase();
     var list = _khataList.where((item) {
       final due = (item['balance_due'] as num?)?.toDouble() ?? 0.0;
@@ -154,8 +158,13 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
       });
     }
 
+    _filteredList = list;
+  }
+
+  void _applyFilterAndSort() {
     setState(() {
-      _filteredList = list;
+      _visibleCount = _pageSize;
+      _computeFilteredAndSortedList();
     });
   }
 
@@ -766,7 +775,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
         ),
       ),
     );
-    _loadKhata();
+    await _loadKhata();
   }
 
   Future<void> _shareCustomerStatement(Map<String, dynamic> item) async {
@@ -816,8 +825,10 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Khata Book (Udhaar Ledger)',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          AppLocalizations.of(context).t('khataBookTitle'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
             tooltip: 'Import Customers & Opening Balances from Excel / CSV',
@@ -825,12 +836,12 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
             onPressed: _importCustomersFile,
           ),
           IconButton(
-            tooltip: 'Export Market Report (PDF)',
+            tooltip: AppLocalizations.of(context).t('exportMarketReportPdf'),
             icon: const Icon(Icons.picture_as_pdf_outlined),
             onPressed: _exportMarketSummary,
           ),
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: AppLocalizations.of(context).t('refresh'),
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _loadKhata,
           ),
@@ -857,9 +868,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'TOTAL MARKET UDHAAR (OUTSTANDING)',
-                          style: TextStyle(
+                        Text(
+                          AppLocalizations.of(context).t('totalMarketUdhaar'),
+                          style: const TextStyle(
                             color: Color(0xFFCBD5E1),
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
@@ -887,10 +898,10 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text(
-                            'Active Borrowers',
-                            style:
-                                TextStyle(color: Colors.white70, fontSize: 10),
+                          Text(
+                            AppLocalizations.of(context).t('activeBorrowers'),
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 10),
                           ),
                           Text(
                             '$dueCount Customers',
@@ -956,7 +967,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '🛑 Over Limit',
+                              AppLocalizations.of(context).t('overLimitBadge'),
                               style: TextStyle(
                                   color: overLimitCount > 0
                                       ? Colors.amberAccent
@@ -987,9 +998,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              '🟢 Recovery',
-                              style: TextStyle(
+                            Text(
+                              AppLocalizations.of(context).t('recoveryBadge'),
+                              style: const TextStyle(
                                   color: Color(0xFF86EFAC), fontSize: 9),
                             ),
                             Text(
@@ -1143,7 +1154,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: 'Search customer name or phone...',
+                      hintText: AppLocalizations.of(context).t('searchCustomerKhataHint'),
                       prefixIcon: const Icon(Icons.search, size: 20),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
@@ -1200,18 +1211,18 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                     setState(() => _sortBy = val);
                     _applyFilterAndSort();
                   },
-                  itemBuilder: (ctx) => const [
+                  itemBuilder: (ctx) => [
                     PopupMenuItem(
                       value: 'due_desc',
-                      child: Text('Highest Due First'),
+                      child: Text(AppLocalizations.of(ctx).t('sortHighestDue')),
                     ),
                     PopupMenuItem(
                       value: 'ageing_desc',
-                      child: Text('Oldest Pending (Ageing)'),
+                      child: Text(AppLocalizations.of(ctx).t('sortOldestPending')),
                     ),
                     PopupMenuItem(
                       value: 'name_asc',
-                      child: Text('Customer Name (A - Z)'),
+                      child: Text(AppLocalizations.of(ctx).t('sortNameAsc')),
                     ),
                   ],
                 ),
@@ -1227,7 +1238,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
               child: Row(
                 children: [
                   ChoiceChip(
-                    label: Text('With Balance ($dueCount)'),
+                    label: Text('${AppLocalizations.of(context).t('filterWithBalance')} ($dueCount)'),
                     selected: _filter == 'due',
                     selectedColor: Colors.red.shade100,
                     onSelected: (val) {
@@ -1241,7 +1252,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   if (advanceCount > 0) ...[
                     const SizedBox(width: 6),
                     ChoiceChip(
-                      label: Text('Advance ($advanceCount)'),
+                      label: Text('${AppLocalizations.of(context).t('filterAdvance')} ($advanceCount)'),
                       selected: _filter == 'advance',
                       selectedColor: Colors.teal.shade100,
                       onSelected: (val) {
@@ -1256,7 +1267,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   if (overLimitCount > 0) ...[
                     const SizedBox(width: 6),
                     ChoiceChip(
-                      label: Text('🛑 Over Limit ($overLimitCount)'),
+                      label: Text('🛑 ${AppLocalizations.of(context).t('filterOverLimit')} ($overLimitCount)'),
                       selected: _filter == 'over_limit',
                       selectedColor: Colors.red.shade200,
                       onSelected: (val) {
@@ -1270,7 +1281,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   ],
                   const SizedBox(width: 6),
                   ChoiceChip(
-                    label: const Text('⚠️ Overdue >30d'),
+                    label: Text('⚠️ ${AppLocalizations.of(context).t('filterOverdue30')}'),
                     selected: _filter == 'overdue30',
                     selectedColor: Colors.amber.shade100,
                     onSelected: (val) {
@@ -1283,7 +1294,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   ),
                   const SizedBox(width: 6),
                   ChoiceChip(
-                    label: Text('All Customers (${_khataList.length})'),
+                    label: Text('${AppLocalizations.of(context).t('filterAllCustomers')} (${_khataList.length})'),
                     selected: _filter == 'all',
                     onSelected: (val) {
                       if (val) {
@@ -1295,7 +1306,7 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                   ),
                   const SizedBox(width: 6),
                   ChoiceChip(
-                    label: Text('Settled ($settledCount)'),
+                    label: Text('${AppLocalizations.of(context).t('filterSettled')} ($settledCount)'),
                     selected: _filter == 'settled',
                     selectedColor: Colors.green.shade100,
                     onSelected: (val) {
@@ -1326,8 +1337,8 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                             const SizedBox(height: 12),
                             Text(
                               _filter == 'due'
-                                  ? 'No pending balance! All Khata is settled.'
-                                  : 'No customers found in Khata.',
+                                  ? AppLocalizations.of(context).t('noPendingBalanceMsg')
+                                  : AppLocalizations.of(context).t('noKhataCustomersMsg'),
                               style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
@@ -1339,9 +1350,28 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                        itemCount: _filteredList.length,
+                        itemCount: (_filteredList.length > _visibleCount
+                            ? _visibleCount + 1
+                            : _filteredList.length),
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
+                          if (_filteredList.length > _visibleCount &&
+                              index == _visibleCount) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Center(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => setState(() {
+                                    _visibleCount += _pageSize;
+                                  }),
+                                  icon: const Icon(Icons.expand_more),
+                                  label: Text(
+                                    'Show More Customers ($_visibleCount / ${_filteredList.length})',
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
                           final item = _filteredList[index];
                           final name = item['customer_name'] as String;
                           final phone = item['customer_phone'] as String?;
@@ -1628,9 +1658,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                               ),
                                             ),
                                             if (isAdvance)
-                                              const Text(
-                                                'Advance with shop',
-                                                style: TextStyle(
+                                              Text(
+                                                AppLocalizations.of(context).t('advanceWithShop'),
+                                                style: const TextStyle(
                                                   fontSize: 9,
                                                   fontWeight: FontWeight.w600,
                                                   color: Color(0xFF0F766E),
@@ -1659,8 +1689,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                           icon: const Icon(
                                               Icons.menu_book_outlined,
                                               size: 15),
-                                          label: const Text('Passbook',
-                                              style: TextStyle(fontSize: 12)),
+                                          label: Text(
+                                              AppLocalizations.of(context).t('passbookBtn'),
+                                              style: const TextStyle(fontSize: 12)),
                                           onPressed: () =>
                                               _openCustomerPassbook(item),
                                         ),
@@ -1719,8 +1750,9 @@ class _KhataBookScreenState extends State<KhataBookScreen> {
                                                 icon: const Icon(
                                                     Icons.payments_outlined,
                                                     size: 14),
-                                                label: const Text('Receive ₹',
-                                                    style: TextStyle(
+                                                label: Text(
+                                                    AppLocalizations.of(context).t('receiveRupeeBtn'),
+                                                    style: const TextStyle(
                                                         fontSize: 12)),
                                                 onPressed: () =>
                                                     _showQuickReceivePaymentDialog(

@@ -1371,8 +1371,10 @@ class _CustomerKhataPassbookScreenState
                               borderRadius: BorderRadius.circular(12),
                               onTap: () async {
                                 if (isDebit) {
-                                  if (orderId != null &&
-                                      !subtitle.contains('Manual Udhaar')) {
+                                  final isManualDebit =
+                                      item['is_manual_debit'] == true ||
+                                          subtitle.contains('Manual Udhaar');
+                                  if (orderId != null && !isManualDebit) {
                                     await Navigator.push(
                                       context,
                                       MaterialPageRoute<void>(
@@ -1389,9 +1391,9 @@ class _CustomerKhataPassbookScreenState
                                         ),
                                       ),
                                     );
-                                    _loadLedger();
+                                    await _loadLedger();
                                   } else {
-                                    showDialog<void>(
+                                    await showDialog<void>(
                                       context: context,
                                       builder: (ctx) => AlertDialog(
                                         shape: RoundedRectangleBorder(
@@ -1452,7 +1454,7 @@ class _CustomerKhataPassbookScreenState
                                 } else {
                                   final pMode = (item['payment_mode'] as String?)?.toUpperCase() ?? 'PAYMENT';
                                   final pNotes = item['notes'] as String? ?? '';
-                                  showDialog<void>(
+                                  await showDialog<void>(
                                     context: context,
                                     builder: (ctx) => AlertDialog(
                                       shape: RoundedRectangleBorder(

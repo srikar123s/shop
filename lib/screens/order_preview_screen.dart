@@ -585,7 +585,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
           estimateTotal: estimate,
           billBreakdown: breakdown,
         );
-        await DraftOrderService().clearDraft();
+        await DraftOrderService().clearDraft(
+          customerId: widget.draftOrder.customer.id,
+        );
       } else {
         newOrderId = widget.existingOrderId!;
         await widget.orderRepository.addItemsToOrder(
@@ -996,7 +998,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 ],
                               ),
                               Text(
-                                '₹ ${subtotal.toStringAsFixed(2)}',
+                                ShopSyncService.instance.canViewBillTotals
+                                    ? '₹ ${subtotal.toStringAsFixed(2)}'
+                                    : '₹ ••••',
                                 style: const TextStyle(
                                     fontWeight: FontWeight.bold, fontSize: 16),
                               ),
@@ -1018,20 +1022,24 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 children: [
                                   Checkbox(
                                     value: _applyGst,
-                                    onChanged: (val) {
-                                      setState(() {
-                                        _applyGst = val ?? false;
-                                        _recalculateEstimate();
-                                      });
-                                    },
+                                    onChanged: ShopSyncService.instance.canChangePrice
+                                        ? (val) {
+                                            setState(() {
+                                              _applyGst = val ?? false;
+                                              _recalculateEstimate();
+                                            });
+                                          }
+                                        : null,
                                   ),
                                   GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _applyGst = !_applyGst;
-                                        _recalculateEstimate();
-                                      });
-                                    },
+                                    onTap: ShopSyncService.instance.canChangePrice
+                                        ? () {
+                                            setState(() {
+                                              _applyGst = !_applyGst;
+                                              _recalculateEstimate();
+                                            });
+                                          }
+                                        : null,
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -1055,7 +1063,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                               ),
                               if (_applyGst)
                                 Text(
-                                  '+ ₹ ${gstAmount.toStringAsFixed(2)}',
+                                  ShopSyncService.instance.canViewBillTotals
+                                      ? '+ ₹ ${gstAmount.toStringAsFixed(2)}'
+                                      : '+ ₹ ••••',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 15,
@@ -1085,7 +1095,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                         fontWeight: FontWeight.w500),
                                   ),
                                   InkWell(
-                                    onTap: _showEditGstRateDialog,
+                                    onTap: ShopSyncService.instance.canChangePrice
+                                        ? _showEditGstRateDialog
+                                        : null,
                                     borderRadius: BorderRadius.circular(8),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
@@ -1145,20 +1157,24 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 children: [
                                   Checkbox(
                                     value: _applyDiscount,
-                                    onChanged: (val) {
-                                      setState(() {
-                                        _applyDiscount = val ?? false;
-                                        _recalculateEstimate();
-                                      });
-                                    },
+                                    onChanged: ShopSyncService.instance.canChangePrice
+                                        ? (val) {
+                                            setState(() {
+                                              _applyDiscount = val ?? false;
+                                              _recalculateEstimate();
+                                            });
+                                          }
+                                        : null,
                                   ),
                                   GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _applyDiscount = !_applyDiscount;
-                                        _recalculateEstimate();
-                                      });
-                                    },
+                                    onTap: ShopSyncService.instance.canChangePrice
+                                        ? () {
+                                            setState(() {
+                                              _applyDiscount = !_applyDiscount;
+                                              _recalculateEstimate();
+                                            });
+                                          }
+                                        : null,
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
@@ -1182,7 +1198,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                               ),
                               if (_applyDiscount)
                                 Text(
-                                  '- ₹ ${_calculateDiscountAmount(subtotal).toStringAsFixed(2)}',
+                                  ShopSyncService.instance.canViewBillTotals
+                                      ? '- ₹ ${_calculateDiscountAmount(subtotal).toStringAsFixed(2)}'
+                                      : '- ₹ ••••',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 15,
@@ -1223,18 +1241,21 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                       ),
                                     ],
                                     selected: {_discountType},
-                                    onSelectionChanged: (set) {
-                                      setState(() {
-                                        _discountType = set.first;
-                                        _discountValue = 0.0;
-                                        _discountController.clear();
-                                        _recalculateEstimate();
-                                      });
-                                    },
+                                    onSelectionChanged: ShopSyncService.instance.canChangePrice
+                                        ? (set) {
+                                            setState(() {
+                                              _discountType = set.first;
+                                              _discountValue = 0.0;
+                                              _discountController.clear();
+                                              _recalculateEstimate();
+                                            });
+                                          }
+                                        : null,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: TextField(
+                                      enabled: ShopSyncService.instance.canChangePrice,
                                       controller: _discountController,
                                       keyboardType: const TextInputType
                                           .numberWithOptions(decimal: true),
@@ -1307,7 +1328,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                 icon: const Icon(Icons.add, size: 16),
                                 label: Text(s.t('addOtherCharge'),
                                     style: const TextStyle(fontSize: 11)),
-                                onPressed: _showAddOtherChargeDialog,
+                                onPressed: ShopSyncService.instance.canChangePrice
+                                    ? _showAddOtherChargeDialog
+                                    : null,
                               ),
                             ],
                           ),
@@ -1404,7 +1427,9 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                                     fontWeight: FontWeight.w800, fontSize: 16),
                               ),
                               Text(
-                                '₹ ${calculatedGrandTotal.toStringAsFixed(2)}',
+                                ShopSyncService.instance.canViewBillTotals
+                                    ? '₹ ${calculatedGrandTotal.toStringAsFixed(2)}'
+                                    : '₹ ••••',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w900,
                                   fontSize: 22,
@@ -1413,19 +1438,22 @@ class _OrderPreviewScreenState extends State<OrderPreviewScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            controller: _estimateController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: const InputDecoration(
-                              labelText: 'Total Bill Amount (editable / round-off)',
-                              prefixText: '₹ ',
-                              isDense: true,
-                              border: OutlineInputBorder(),
+                          if (ShopSyncService.instance.canViewBillTotals) ...[
+                            const SizedBox(height: 12),
+                            TextField(
+                              enabled: ShopSyncService.instance.canChangePrice,
+                              controller: _estimateController,
+                              keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true),
+                              decoration: const InputDecoration(
+                                labelText: 'Total Bill Amount (editable / round-off)',
+                                prefixText: '₹ ',
+                                isDense: true,
+                                border: OutlineInputBorder(),
+                              ),
+                              onChanged: (_) => setState(() {}),
                             ),
-                            onChanged: (_) => setState(() {}),
-                          ),
+                          ],
                         ],
                       ),
                     ),

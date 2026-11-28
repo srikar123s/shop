@@ -141,8 +141,6 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
 
     try {
       await widget.speech.listen(
-        // ignore: deprecated_member_use
-        localeId: _selectedLocale,
         onResult: (result) {
           if (!mounted) return;
           setState(() {
@@ -163,6 +161,7 @@ class _VoiceSearchDialogState extends State<_VoiceSearchDialog>
           }
         },
         listenOptions: stt.SpeechListenOptions(
+          localeId: _selectedLocale,
           listenMode: stt.ListenMode.confirmation,
           pauseFor: const Duration(seconds: 3),
         ),

@@ -26,6 +26,8 @@ android/captures/
 *.jks
 key.properties
 android/key.properties
+env/*.json
+!env/*.json.example
 
 # Firebase & Cloud Credentials
 android/app/google-services.json

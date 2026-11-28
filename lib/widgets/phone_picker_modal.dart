@@ -11,7 +11,7 @@ Future<String?> showPhonePickerModal({
   if (phoneNumbers.isEmpty) return null;
   if (phoneNumbers.length == 1) return phoneNumbers.first;
 
-  return await showModalBottomSheet<String>(
+  return showModalBottomSheet<String>(
     context: context,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),

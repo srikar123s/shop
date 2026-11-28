@@ -3,6 +3,7 @@ import 'dart:convert';
 class Product {
   const Product({
     this.id,
+    this.cloudId,
     required this.name,
     required this.category,
     required this.isActive,
@@ -10,9 +11,12 @@ class Product {
     this.needsReview = false,
     this.priceUpdatedAt,
     this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
   });
 
   final int? id;
+  final String? cloudId;
   final String name;
   final String category;
   final bool isActive;
@@ -20,9 +24,12 @@ class Product {
   final bool needsReview;
   final DateTime? priceUpdatedAt;
   final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
 
   Product copyWith({
     int? id,
+    String? cloudId,
     String? name,
     String? category,
     bool? isActive,
@@ -30,9 +37,12 @@ class Product {
     bool? needsReview,
     DateTime? priceUpdatedAt,
     DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? deletedAt,
   }) {
     return Product(
       id: id ?? this.id,
+      cloudId: cloudId ?? this.cloudId,
       name: name ?? this.name,
       category: category ?? this.category,
       isActive: isActive ?? this.isActive,
@@ -40,12 +50,15 @@ class Product {
       needsReview: needsReview ?? this.needsReview,
       priceUpdatedAt: priceUpdatedAt ?? this.priceUpdatedAt,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
     );
   }
 
   Map<String, Object?> toMap() {
     return {
       'id': id,
+      if (cloudId != null) 'cloud_id': cloudId,
       'name': name,
       'category': category,
       'is_active': isActive ? 1 : 0,
@@ -53,6 +66,8 @@ class Product {
       'needs_review': needsReview ? 1 : 0,
       'price_updated_at': priceUpdatedAt?.toIso8601String(),
       'created_at': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
+      if (updatedAt != null) 'updated_at': updatedAt!.toIso8601String(),
+      if (deletedAt != null) 'deleted_at': deletedAt!.toIso8601String(),
     };
   }
 
@@ -74,6 +89,7 @@ class Product {
     }
     return Product(
       id: map['id'] as int?,
+      cloudId: map['cloud_id'] as String?,
       name: (map['name'] as String?)?.trim() ?? '',
       category: (map['category'] as String?)?.trim() ?? '',
       isActive: active,
@@ -84,6 +100,12 @@ class Product {
           : null,
       createdAt: map['created_at'] != null
           ? DateTime.tryParse(map['created_at'].toString())
+          : null,
+      updatedAt: map['updated_at'] != null
+          ? DateTime.tryParse(map['updated_at'].toString())
+          : null,
+      deletedAt: map['deleted_at'] != null
+          ? DateTime.tryParse(map['deleted_at'].toString())
           : null,
     );
   }
@@ -105,6 +127,21 @@ class ProductConfiguration {
   final double basePrice;
   final Map<String, double> unitConversions;
   final Map<String, double> variantPrices;
+
+  /// Case-insensitive lookup for [key] across `variantPrices`.
+  double? lookupVariantPrice(String key) {
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) return null;
+    final direct = variantPrices[trimmed];
+    if (direct != null && direct > 0) return direct;
+    final lower = trimmed.toLowerCase();
+    for (final entry in variantPrices.entries) {
+      if (entry.key.trim().toLowerCase() == lower && entry.value > 0) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
 
   ProductConfiguration copyWith({
     List<ProductStep>? steps,

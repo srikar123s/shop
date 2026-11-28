@@ -123,7 +123,9 @@ class DeliveryRepository {
     final customerLocs = await db.rawQuery('''
       SELECT DISTINCT TRIM(address) AS loc
       FROM customers
-      WHERE address IS NOT NULL AND TRIM(address) != ''
+      WHERE COALESCE(is_active, 1) = 1
+        AND deleted_at IS NULL
+        AND address IS NOT NULL AND TRIM(address) != ''
     ''');
     final savedLocs = await db.rawQuery('''
       SELECT DISTINCT TRIM(name) AS loc
@@ -307,6 +309,7 @@ class DeliveryRepository {
       updates['box_count'] = boxCount < 0 ? 0 : boxCount;
     }
     if (updates.isEmpty) return;
+    updates['updated_at'] = DateTime.now().toIso8601String();
     await db.update('orders', updates, where: 'id = ?', whereArgs: [orderId]);
     unawaited(ShopSyncService.instance.syncOrder(orderId).catchError((_) {}));
   }

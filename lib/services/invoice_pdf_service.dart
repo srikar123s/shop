@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -7,7 +9,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shop/models/order.dart';
-import 'package:shop/services/share_service.dart';
 import 'package:shop/services/shop_customization_service.dart';
 
 class InvoicePdfService {
@@ -40,11 +41,16 @@ class InvoicePdfService {
         ? 'DELIVERY CHALLAN'
         : (isRetailMode ? 'RETAIL CASH ESTIMATE / RECEIPT' : 'TAX INVOICE');
 
-    // Page format
+    final thermalHeightMm = math.max(
+      120.0,
+      78.0 +
+          (items.length * 14.0) +
+          (breakdown != null ? (24.0 + breakdown.otherCharges.length * 8.0) : 0.0),
+    );
     final pageFormat = isThermal58mm
-        ? const PdfPageFormat(
+        ? PdfPageFormat(
             58 * PdfPageFormat.mm,
-            double.infinity,
+            thermalHeightMm * PdfPageFormat.mm,
             marginAll: 3 * PdfPageFormat.mm,
           )
         : PdfPageFormat.a4;
@@ -1230,88 +1236,59 @@ class InvoicePdfService {
     );
   }
 
-  /// Generates PDF document bytes embedding the exact high-res WhatsApp receipt image
+  /// Generates crisp vector PDF bytes for receipts/bills (kept under the legacy
+  /// method name for caller compatibility without bitmap rasterization).
   Future<Uint8List> generateReceiptImagePdfBytes(
     OrderDetails details, {
     int? customerBillNumber,
-  }) async {
-    final imageFiles = await ShareService.generateReceiptImages(
+  }) {
+    return generatePdfBytes(
       details,
       customerBillNumber: customerBillNumber,
     );
-    final doc = pw.Document();
-    for (final file in imageFiles) {
-      final imageBytes = await file.readAsBytes();
-      final pdfImg = pw.MemoryImage(imageBytes);
-      doc.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat(
-            pdfImg.width!.toDouble(),
-            pdfImg.height!.toDouble(),
-            marginAll: 0,
-          ),
-          build: (pw.Context ctx) {
-            return pw.FullPage(
-              ignoreMargins: true,
-              child: pw.Image(pdfImg, fit: pw.BoxFit.fill),
-            );
-          },
-        ),
-      );
-    }
-    return doc.save();
+  }
+
+  static Future<void> cleanupStaleTempPdfs() async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+      await for (final entity in tempDir.list()) {
+        if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) {
+            await entity.delete();
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   /// Prints to Bluetooth printer, thermal printer, or system printer
-  /// Matching the exact visual layout and colors of the WhatsApp receipt
+  /// using compact vector PDF output.
   Future<void> printReceipt(
     OrderDetails details, {
     bool isDeliveryChallan = false,
     bool isThermal58mm = false,
     int? customerBillNumber,
   }) async {
-    final Uint8List bytes;
-    final PdfPageFormat pageFormat;
-
-    if (isThermal58mm) {
-      pageFormat = const PdfPageFormat(
-        58 * PdfPageFormat.mm,
-        double.infinity,
-        marginAll: 2 * PdfPageFormat.mm,
-      );
-      bytes = await generatePdfBytes(
-        details,
-        isDeliveryChallan: isDeliveryChallan,
-        isThermal58mm: true,
-        customerBillNumber: customerBillNumber,
-      );
-    } else if (!isDeliveryChallan) {
-      pageFormat = PdfPageFormat.a4;
-      Uint8List? generatedBytes;
-      try {
-        generatedBytes = await generateReceiptImagePdfBytes(
-          details,
-          customerBillNumber: customerBillNumber,
-        );
-      } catch (e) {
-        debugPrint('Warning: generateReceiptImagePdfBytes failed, falling back to standard PDF: $e');
-      }
-      bytes = generatedBytes ??
-          await generatePdfBytes(
-            details,
-            isDeliveryChallan: false,
-            isThermal58mm: false,
-            customerBillNumber: customerBillNumber,
-          );
-    } else {
-      pageFormat = PdfPageFormat.a4;
-      bytes = await generatePdfBytes(
-        details,
-        isDeliveryChallan: isDeliveryChallan,
-        isThermal58mm: false,
-        customerBillNumber: customerBillNumber,
-      );
-    }
+    unawaited(cleanupStaleTempPdfs());
+    final thermalHeightMm = math.max(
+      120.0,
+      78.0 + (details.items.length * 14.0) + 32.0,
+    );
+    final pageFormat = isThermal58mm
+        ? PdfPageFormat(
+            58 * PdfPageFormat.mm,
+            thermalHeightMm * PdfPageFormat.mm,
+            marginAll: 2 * PdfPageFormat.mm,
+          )
+        : PdfPageFormat.a4;
+    final bytes = await generatePdfBytes(
+      details,
+      isDeliveryChallan: isDeliveryChallan,
+      isThermal58mm: isThermal58mm,
+      customerBillNumber: customerBillNumber,
+    );
 
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
